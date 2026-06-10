@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import {
@@ -21,12 +21,19 @@ type ProcessTreeNode = {
   id: string;
   name: string;
   type: 'folder' | 'process';
+  parentId?: string | null;
   children?: ProcessTreeNode[];
   owner?: string;
   status?: string;
   revision?: string;
   purpose?: string;
   risks?: string;
+  descriptionText?: string;
+  relatedProcessIds?: string[];
+  positionIds?: string[];
+  positions?: Array<{ id: string; name: string }>;
+  isoSuggestions?: unknown;
+  translations?: unknown;
   bpmnXml?: string;
   diagramSvg?: string;
   iso?: Array<{ standard: string; clause: string; evidence: string }>;
@@ -105,11 +112,18 @@ function mapNode(node: any): ProcessTreeNode {
     id: node.id,
     name: node.name,
     type: node.type === ProcessNodeType.GROUP ? 'folder' : 'process',
+    parentId: node.parentId ?? null,
     owner: node.owner?.name ?? '',
     status: mapStatusFromDb(node.status),
     revision: node.revisions?.[0]?.createdAt?.toISOString().slice(0, 10) ?? node.updatedAt?.toISOString().slice(0, 10),
     purpose: node.description ?? '',
     risks: '',
+    descriptionText: node.descriptionText ?? '',
+    relatedProcessIds: node.relatedProcessIds ?? [],
+    positionIds: (node.positions ?? []).map((item: any) => item.positionId),
+    positions: (node.positions ?? []).map((item: any) => ({ id: item.position?.id ?? item.positionId, name: item.position?.name ?? '' })),
+    isoSuggestions: node.isoSuggestions ?? [],
+    translations: node.translations ?? null,
     bpmnXml: node.bpmnXml ?? undefined,
     iso: (node.isoLinks ?? []).map((link: string) => {
       const [standard, clause = ''] = link.split(':');
@@ -181,7 +195,8 @@ app.get('/api/organizations/:organizationId/processes', async (request, response
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
       include: {
         owner: true,
-        revisions: { orderBy: { createdAt: 'desc' } }
+        revisions: { orderBy: { createdAt: 'desc' } },
+        positions: { include: { position: true } }
       }
     });
     response.json(buildProcessTree(nodes));
@@ -216,28 +231,147 @@ app.post('/api/organizations/:organizationId/processes', async (request, respons
   }
 });
 
+async function resolveUserId(headerValue: unknown): Promise<string | null> {
+  if (typeof headerValue !== 'string' || !headerValue) return null;
+  const user = await prisma.user.findUnique({ where: { id: headerValue } });
+  return user?.id ?? null;
+}
+
+const PROCESS_INCLUDE = {
+  owner: true,
+  revisions: { orderBy: { createdAt: 'desc' as const } },
+  children: true,
+  positions: { include: { position: true } }
+};
+
 app.patch('/api/processes/:processId', async (request, response, next) => {
   try {
     const { processId } = request.params;
-    const current = await prisma.processNode.findUnique({ where: { id: processId } });
+    const current = await prisma.processNode.findUnique({
+      where: { id: processId },
+      include: { positions: true }
+    });
     if (!current) {
       response.status(404).json({ message: 'Process not found' });
       return;
     }
-    const updated = await prisma.processNode.update({
-      where: { id: processId },
-      data: {
-        name: request.body.name ?? undefined,
-        description: request.body.purpose ?? undefined,
-        status: request.body.status ? mapStatusToDb(request.body.status) : undefined,
-        bpmnXml: request.body.bpmnXml ?? undefined,
-        isoLinks: request.body.iso ? isoLinksFromBody(request.body.iso) : undefined,
-        parentId: request.body.parentId === undefined ? undefined : request.body.parentId,
-        sortOrder: request.body.sortOrder === undefined ? undefined : Number(request.body.sortOrder)
-      },
-      include: { owner: true, revisions: { orderBy: { createdAt: 'desc' } }, children: true }
+
+    const body = request.body ?? {};
+    const data = {
+      name: body.name ?? undefined,
+      description: body.purpose ?? undefined,
+      descriptionText: body.descriptionText ?? undefined,
+      status: body.status ? mapStatusToDb(body.status) : undefined,
+      bpmnXml: body.bpmnXml ?? undefined,
+      isoLinks: body.iso ? isoLinksFromBody(body.iso) : undefined,
+      parentId: body.parentId === undefined ? undefined : body.parentId,
+      sortOrder: body.sortOrder === undefined ? undefined : Number(body.sortOrder),
+      relatedProcessIds: Array.isArray(body.relatedProcessIds) ? (body.relatedProcessIds as string[]) : undefined
+    };
+
+    // R7: diff zmenenych poli pre audit log
+    const changedFields: Record<string, { from: unknown; to: unknown }> = {};
+    const track = (field: string, from: unknown, to: unknown) => {
+      if (to !== undefined && JSON.stringify(from) !== JSON.stringify(to)) {
+        changedFields[field] = { from, to };
+      }
+    };
+    track('name', current.name, data.name);
+    track('purpose', current.description, data.description);
+    track('descriptionText', current.descriptionText, data.descriptionText);
+    track('status', current.status, data.status);
+    track('parentId', current.parentId, data.parentId);
+    track('relatedProcessIds', current.relatedProcessIds, data.relatedProcessIds);
+    track('isoLinks', current.isoLinks, data.isoLinks);
+    if (data.bpmnXml !== undefined && data.bpmnXml !== current.bpmnXml) {
+      changedFields['bpmnXml'] = { from: '(diagram)', to: '(diagram zmeneny)' };
+    }
+
+    await prisma.processNode.update({ where: { id: processId }, data });
+
+    // R1/R3: nastavenie priradenych pozicii
+    if (Array.isArray(body.positionIds)) {
+      const currentIds = current.positions.map((item) => item.positionId).sort();
+      const nextIds = [...new Set(body.positionIds as string[])].sort();
+      if (JSON.stringify(currentIds) !== JSON.stringify(nextIds)) {
+        changedFields['positions'] = { from: currentIds, to: nextIds };
+        await prisma.processPosition.deleteMany({ where: { processNodeId: processId } });
+        if (nextIds.length > 0) {
+          await prisma.processPosition.createMany({
+            data: nextIds.map((positionId) => ({ processNodeId: processId, positionId }))
+          });
+        }
+      }
+    }
+
+    if (Object.keys(changedFields).length > 0 || body.changeDescription) {
+      await prisma.processChangeLog.create({
+        data: {
+          processNodeId: processId,
+          userId: await resolveUserId(request.headers['x-user-id']),
+          changedFields,
+          description: body.changeDescription || null
+        }
+      });
+    }
+
+    // R5: prepocitaj ISO sugescie pri zmene textov
+    if (changedFields['name'] || changedFields['purpose'] || changedFields['descriptionText']) {
+      await computeIsoSuggestions(processId).catch(() => undefined);
+      // R8: automaticky preklad (fire-and-forget)
+      void autoTranslateProcess(current.organizationId, processId);
+    }
+
+    const fresh = await prisma.processNode.findUnique({ where: { id: processId }, include: PROCESS_INCLUDE });
+    response.json(mapNode(fresh));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// R3: detail procesu s rozsirenymi vazbami
+app.get('/api/processes/:processId', async (request, response, next) => {
+  try {
+    const node = await prisma.processNode.findUnique({
+      where: { id: request.params.processId },
+      include: { ...PROCESS_INCLUDE, parent: true }
     });
-    response.json(mapNode(updated));
+    if (!node) {
+      response.status(404).json({ message: 'Process not found' });
+      return;
+    }
+    const related = node.relatedProcessIds.length
+      ? await prisma.processNode.findMany({
+          where: { id: { in: node.relatedProcessIds } },
+          select: { id: true, name: true }
+        })
+      : [];
+    response.json({
+      ...mapNode(node),
+      parentName: (node as any).parent?.name ?? null,
+      childProcesses: (node.children ?? []).map((child: any) => ({ id: child.id, name: child.name })),
+      relatedProcesses: related
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// R7: historia zmien procesu
+app.get('/api/processes/:processId/history', async (request, response, next) => {
+  try {
+    const logs = await prisma.processChangeLog.findMany({
+      where: { processNodeId: request.params.processId },
+      orderBy: { createdAt: 'desc' },
+      include: { user: true }
+    });
+    response.json(logs.map((log) => ({
+      id: log.id,
+      date: log.createdAt.toISOString(),
+      userName: log.user?.name ?? 'Neznamy',
+      changedFields: log.changedFields,
+      description: log.description
+    })));
   } catch (error) {
     next(error);
   }
@@ -491,7 +625,11 @@ function mapMember(membership: any) {
     email: membership.user.email,
     roleId: ROLE_FROM_DB[membership.role as OrganizationRole] ?? 'approver',
     active: true,
-    status: 'active'
+    status: 'active',
+    positions: (membership.user.positions ?? []).map((item: any) => ({
+      id: item.position.id,
+      name: item.position.name
+    }))
   };
 }
 
@@ -634,7 +772,7 @@ app.get('/api/organizations/:organizationId/users', async (request, response, ne
     const memberships = await prisma.organizationUser.findMany({
       where: { organizationId: request.params.organizationId },
       orderBy: { createdAt: 'asc' },
-      include: { user: true }
+      include: { user: { include: { positions: { include: { position: true } } } } }
     });
     response.json(memberships.map(mapMember));
   } catch (error) {
@@ -663,6 +801,16 @@ app.post('/api/organizations/:organizationId/invitations', async (request, respo
     const organization = await prisma.organization.findUnique({ where: { id: request.params.organizationId } });
     if (!organization) {
       throw new HttpError(404, 'Organizacia neexistuje');
+    }
+    // R11: email uz je clenom organizacie
+    const existingMember = await prisma.organizationUser.findFirst({
+      where: {
+        organizationId: organization.id,
+        user: { email: String(email).toLowerCase() }
+      }
+    });
+    if (existingMember) {
+      throw new HttpError(409, 'Pouzivatel s tymto emailom uz je clenom organizacie.');
     }
     const invitation = await prisma.invitation.create({
       data: {
@@ -760,6 +908,343 @@ app.post('/api/invitations/:token/accept', async (request, response, next) => {
   }
 });
 
+// --- R11: realtime validacia registracie ---
+
+app.get('/api/check/email', async (request, response, next) => {
+  try {
+    const value = String(request.query['value'] ?? '').toLowerCase().trim();
+    if (!value) {
+      response.json({ available: false });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { email: value } });
+    response.json({ available: !user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/check/org-name', async (request, response, next) => {
+  try {
+    const value = String(request.query['value'] ?? '').trim();
+    if (!value) {
+      response.json({ available: false });
+      return;
+    }
+    const organization = await prisma.organization.findFirst({
+      where: { name: { equals: value, mode: 'insensitive' } }
+    });
+    response.json({ available: !organization });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- R1: pracovne pozicie ---
+
+function mapOrgPosition(position: any) {
+  return {
+    id: position.id,
+    organizationId: position.organizationId,
+    name: position.name,
+    description: position.description ?? '',
+    createdAt: position.createdAt.toISOString().slice(0, 10),
+    assignedUsers: (position.users ?? []).map((item: any) => ({ id: item.user.id, name: item.user.name }))
+  };
+}
+
+const POSITION_INCLUDE = { users: { include: { user: true } } };
+
+app.get('/api/organizations/:organizationId/positions', async (request, response, next) => {
+  try {
+    const positions = await prisma.orgPosition.findMany({
+      where: { organizationId: request.params.organizationId },
+      orderBy: { name: 'asc' },
+      include: POSITION_INCLUDE
+    });
+    response.json(positions.map(mapOrgPosition));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/organizations/:organizationId/positions', async (request, response, next) => {
+  try {
+    const { name, description } = request.body ?? {};
+    if (!name) throw new HttpError(400, 'name je povinny');
+    const existing = await prisma.orgPosition.findFirst({
+      where: { organizationId: request.params.organizationId, name: { equals: name, mode: 'insensitive' } }
+    });
+    if (existing) throw new HttpError(409, 'Pozicia s tymto nazvom uz existuje.');
+    const position = await prisma.orgPosition.create({
+      data: {
+        organizationId: request.params.organizationId,
+        name,
+        description: description || null
+      },
+      include: POSITION_INCLUDE
+    });
+    response.status(201).json(mapOrgPosition(position));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/positions/:positionId', async (request, response, next) => {
+  try {
+    const position = await prisma.orgPosition.update({
+      where: { id: request.params.positionId },
+      data: {
+        name: request.body.name ?? undefined,
+        description: request.body.description === undefined ? undefined : (request.body.description || null)
+      },
+      include: POSITION_INCLUDE
+    });
+    response.json(mapOrgPosition(position));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/positions/:positionId', async (request, response, next) => {
+  try {
+    await prisma.orgPosition.delete({ where: { id: request.params.positionId } });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/users/:userId/positions', async (request, response, next) => {
+  try {
+    const { positionId } = request.body ?? {};
+    if (!positionId) throw new HttpError(400, 'positionId je povinny');
+    await prisma.userPosition.upsert({
+      where: { userId_positionId: { userId: request.params.userId, positionId } },
+      update: {},
+      create: { userId: request.params.userId, positionId }
+    });
+    response.status(201).json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/users/:userId/positions/:positionId', async (request, response, next) => {
+  try {
+    await prisma.userPosition.deleteMany({
+      where: { userId: request.params.userId, positionId: request.params.positionId }
+    });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- R8: nastavenia automatickeho prekladu (sifrovany API kluc) ---
+
+const ENCRYPTION_SECRET = process.env['SETTINGS_ENCRYPTION_KEY'] ?? 'dev-settings-encryption-key';
+const encryptionKey = scryptSync(ENCRYPTION_SECRET, 'processbase-settings', 32);
+
+function encryptSecret(plain: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', encryptionKey, iv);
+  const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  return `${iv.toString('hex')}.${cipher.getAuthTag().toString('hex')}.${encrypted.toString('hex')}`;
+}
+
+function decryptSecret(stored: string): string | null {
+  try {
+    const [ivHex, tagHex, dataHex] = stored.split('.');
+    const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+app.get('/api/organizations/:organizationId/settings/translation', async (request, response, next) => {
+  try {
+    const organization = await prisma.organization.findUnique({ where: { id: request.params.organizationId } });
+    if (!organization) throw new HttpError(404, 'Organizacia neexistuje');
+    response.json({
+      autoTranslate: organization.autoTranslate,
+      provider: organization.translationProvider ?? 'deepl',
+      targetLocale: organization.translationTargetLocale ?? 'en',
+      hasApiKey: Boolean(organization.translationApiKeyEnc)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/organizations/:organizationId/settings/translation', async (request, response, next) => {
+  try {
+    const { autoTranslate, provider, targetLocale, apiKey } = request.body ?? {};
+    const organization = await prisma.organization.update({
+      where: { id: request.params.organizationId },
+      data: {
+        autoTranslate: Boolean(autoTranslate),
+        translationProvider: provider || null,
+        translationTargetLocale: targetLocale || null,
+        translationApiKeyEnc: apiKey ? encryptSecret(String(apiKey)) : undefined
+      }
+    });
+    response.json({
+      autoTranslate: organization.autoTranslate,
+      provider: organization.translationProvider ?? 'deepl',
+      targetLocale: organization.translationTargetLocale ?? 'en',
+      hasApiKey: Boolean(organization.translationApiKeyEnc)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+async function translateTexts(
+  provider: string,
+  apiKey: string,
+  targetLocale: string,
+  texts: string[]
+): Promise<string[] | null> {
+  try {
+    if (provider === 'google') {
+      const response = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: texts, target: targetLocale, format: 'text' })
+      });
+      if (!response.ok) return null;
+      const body: any = await response.json();
+      return (body?.data?.translations ?? []).map((item: any) => item.translatedText ?? '');
+    }
+    // DeepL (default) — free kluce konca na :fx a pouzivaju api-free subdomain
+    const host = apiKey.endsWith(':fx') ? 'api-free.deepl.com' : 'api.deepl.com';
+    const response = await fetch(`https://${host}/v2/translate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `DeepL-Auth-Key ${apiKey}`
+      },
+      body: JSON.stringify({ text: texts, target_lang: targetLocale.toUpperCase() })
+    });
+    if (!response.ok) return null;
+    const body: any = await response.json();
+    return (body?.translations ?? []).map((item: any) => item.text ?? '');
+  } catch {
+    return null;
+  }
+}
+
+async function autoTranslateProcess(organizationId: string, processId: string): Promise<void> {
+  try {
+    const organization = await prisma.organization.findUnique({ where: { id: organizationId } });
+    if (!organization?.autoTranslate || !organization.translationApiKeyEnc || !organization.translationTargetLocale) return;
+    const apiKey = decryptSecret(organization.translationApiKeyEnc);
+    if (!apiKey) return;
+    const node = await prisma.processNode.findUnique({ where: { id: processId } });
+    if (!node) return;
+    const texts = [node.name, node.descriptionText ?? ''];
+    const translated = await translateTexts(organization.translationProvider ?? 'deepl', apiKey, organization.translationTargetLocale, texts);
+    if (!translated) return;
+    const existing = (node.translations as Record<string, unknown> | null) ?? {};
+    await prisma.processNode.update({
+      where: { id: processId },
+      data: {
+        translations: {
+          ...existing,
+          [organization.translationTargetLocale]: {
+            name: translated[0] ?? node.name,
+            descriptionText: translated[1] ?? ''
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Auto-translate zlyhal:', error);
+  }
+}
+
+// --- R4/R5/R6: ISO normy a detekcia ---
+
+type IsoClause = { clause: string; title: string; children?: IsoClause[] };
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ');
+}
+
+function tokenize(value: string): string[] {
+  return normalizeText(value).split(/\s+/).filter((token) => token.length > 2);
+}
+
+function flattenClauses(structure: unknown, normId: string, normName: string): Array<{ isoTemplateId: string; normName: string; clause: string; title: string }> {
+  const result: Array<{ isoTemplateId: string; normName: string; clause: string; title: string }> = [];
+  const walk = (items: IsoClause[] | undefined) => {
+    for (const item of items ?? []) {
+      result.push({ isoTemplateId: normId, normName, clause: item.clause, title: item.title });
+      walk(item.children);
+    }
+  };
+  walk(structure as IsoClause[] | undefined);
+  return result;
+}
+
+async function computeIsoSuggestions(processId: string) {
+  const node = await prisma.processNode.findUnique({ where: { id: processId } });
+  if (!node) return [];
+  const norms = await prisma.isoTemplate.findMany({ where: { structure: { not: undefined } } });
+  const processTokens = new Set(tokenize(`${node.name} ${node.description ?? ''} ${node.descriptionText ?? ''}`));
+  if (processTokens.size === 0) return [];
+
+  const suggestions: Array<{ isoTemplateId: string; normName: string; clause: string; title: string; confidence: number }> = [];
+  for (const norm of norms) {
+    if (!norm.structure) continue;
+    for (const clause of flattenClauses(norm.structure, norm.id, norm.name ?? norm.standard)) {
+      const clauseTokens = tokenize(clause.title);
+      if (clauseTokens.length === 0) continue;
+      const matched = clauseTokens.filter((token) => processTokens.has(token)).length;
+      if (matched === 0) continue;
+      suggestions.push({ ...clause, confidence: Math.round((matched / clauseTokens.length) * 100) / 100 });
+    }
+  }
+  suggestions.sort((a, b) => b.confidence - a.confidence);
+  const top = suggestions.slice(0, 5);
+  await prisma.processNode.update({ where: { id: processId }, data: { isoSuggestions: top } });
+  return top;
+}
+
+app.post('/api/processes/:processId/iso-detect', async (request, response, next) => {
+  try {
+    response.json(await computeIsoSuggestions(request.params.processId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// R6: verejny zoznam ISO noriem pre platformu
+app.get('/api/iso-norms', async (_request, response, next) => {
+  try {
+    const norms = await prisma.isoTemplate.findMany({
+      where: { name: { not: null } },
+      orderBy: { createdAt: 'desc' }
+    });
+    response.json(norms.map((norm) => ({
+      id: norm.id,
+      name: norm.name ?? norm.standard,
+      version: norm.version ?? '',
+      language: norm.language ?? 'sk',
+      structure: norm.structure ?? []
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Verejne preklady pre platformu — globalny slovnik { sk: {...}, en: {...} }
 app.get('/api/translations', async (_request, response, next) => {
   try {
@@ -770,6 +1255,242 @@ app.get('/api/translations', async (_request, response, next) => {
       dictionary[translation.locale][translation.key] = translation.value;
     }
     response.json(dictionary);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- R9: Backoffice autentifikacia (HMAC token) ---
+
+const BACKOFFICE_SECRET = process.env['BACKOFFICE_JWT_SECRET'] ?? 'dev-backoffice-secret-change-me';
+const BACKOFFICE_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
+
+function signBackofficeToken(adminId: string, username: string): string {
+  const payload = Buffer.from(JSON.stringify({
+    sub: adminId,
+    username,
+    exp: Date.now() + BACKOFFICE_TOKEN_TTL_MS
+  })).toString('base64url');
+  const signature = createHmac('sha256', BACKOFFICE_SECRET).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function verifyBackofficeToken(token: string): { sub: string; username: string } | null {
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature) return null;
+  const expected = createHmac('sha256', BACKOFFICE_SECRET).update(payload).digest('base64url');
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (signatureBuffer.length !== expectedBuffer.length || !timingSafeEqual(signatureBuffer, expectedBuffer)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (typeof data.exp !== 'number' || data.exp < Date.now()) return null;
+    return { sub: data.sub, username: data.username };
+  } catch {
+    return null;
+  }
+}
+
+app.post('/api/backoffice/auth/login', async (request, response, next) => {
+  try {
+    const { username, password } = request.body ?? {};
+    if (!username || !password) throw new HttpError(400, 'username a password su povinne');
+    const admin = await prisma.backofficeAdmin.findUnique({ where: { username: String(username) } });
+    if (!admin || !verifyPassword(String(password), admin.passwordHash)) {
+      throw new HttpError(401, 'Nespravne prihlasovacie udaje.');
+    }
+    response.json({ token: signBackofficeToken(admin.id, admin.username), username: admin.username });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/backoffice/auth/logout', (_request, response) => {
+  // Token je stateless — logout je zahodenie tokenu na klientovi.
+  response.json({ ok: true });
+});
+
+// Guard pre vsetky dalsie /api/backoffice/* routy (login/logout su registrovane vyssie)
+app.use('/api/backoffice', (request, response, next) => {
+  const header = request.headers.authorization ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const session = verifyBackofficeToken(token);
+  if (!session) {
+    response.status(401).json({ message: 'Neautorizovany pristup do backoffice.' });
+    return;
+  }
+  (request as any).backofficeAdmin = session;
+  next();
+});
+
+// Sprava backoffice adminov
+app.get('/api/backoffice/admins', async (_request, response, next) => {
+  try {
+    const admins = await prisma.backofficeAdmin.findMany({ orderBy: { createdAt: 'asc' } });
+    response.json(admins.map((admin) => ({
+      id: admin.id,
+      username: admin.username,
+      createdAt: admin.createdAt.toISOString().slice(0, 10)
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/backoffice/admins', async (request, response, next) => {
+  try {
+    const { username, password } = request.body ?? {};
+    if (!username || !password) throw new HttpError(400, 'username a password su povinne');
+    const existing = await prisma.backofficeAdmin.findUnique({ where: { username: String(username) } });
+    if (existing) throw new HttpError(409, 'Admin s tymto menom uz existuje.');
+    const admin = await prisma.backofficeAdmin.create({
+      data: { username: String(username), passwordHash: hashPassword(String(password)) }
+    });
+    response.status(201).json({ id: admin.id, username: admin.username, createdAt: admin.createdAt.toISOString().slice(0, 10) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/backoffice/admins/:adminId', async (request, response, next) => {
+  try {
+    const count = await prisma.backofficeAdmin.count();
+    if (count <= 1) throw new HttpError(400, 'Nemozno vymazat posledneho admina.');
+    await prisma.backofficeAdmin.delete({ where: { id: request.params.adminId } });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- R4: ISO normy — upload PDF a generovanie struktury ---
+
+async function extractIsoStructureFromPdf(pdfBase64: string): Promise<IsoClause[]> {
+  // @ts-ignore — pdf-parse nema typy; import cez lib/ obchadza debug kod v indexe balika
+  const { default: pdfParse } = await import('pdf-parse/lib/pdf-parse.js');
+  const buffer = Buffer.from(pdfBase64, 'base64');
+  const parsed = await pdfParse(buffer);
+  const lines: string[] = String(parsed.text ?? '').split(/\r?\n/);
+
+  const clausePattern = /^(\d{1,2}(?:\.\d{1,2}){0,2})[\s.):–—-]+(\S.{2,90})$/;
+  const seen = new Set<string>();
+  const flat: Array<{ clause: string; title: string; level: number }> = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const match = line.match(clausePattern);
+    if (!match) continue;
+    const clause = match[1];
+    const title = match[2].replace(/[.…]{2,}\s*\d*$/, '').trim(); // odstran bodkovane vyplne z obsahu
+    const level = clause.split('.').length;
+    if (level > 3) continue;
+    const top = Number(clause.split('.')[0]);
+    if (!Number.isFinite(top) || top < 1 || top > 30) continue;
+    if (title.length < 3 || /^\d+$/.test(title)) continue;
+    if (seen.has(clause)) continue;
+    seen.add(clause);
+    flat.push({ clause, title, level });
+  }
+
+  // zostav hierarchiu z plocheho zoznamu
+  const roots: IsoClause[] = [];
+  const byClause = new Map<string, IsoClause>();
+  for (const item of flat.sort((a, b) => a.clause.localeCompare(b.clause, undefined, { numeric: true }))) {
+    const node: IsoClause = { clause: item.clause, title: item.title, children: [] };
+    byClause.set(item.clause, node);
+    const parentClause = item.clause.split('.').slice(0, -1).join('.');
+    const parent = byClause.get(parentClause);
+    if (parent) {
+      parent.children = parent.children ?? [];
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}
+
+function mapIsoNorm(norm: any) {
+  return {
+    id: norm.id,
+    name: norm.name ?? norm.standard,
+    version: norm.version ?? '',
+    language: norm.language ?? 'sk',
+    structure: norm.structure ?? [],
+    createdAt: norm.createdAt?.toISOString().slice(0, 10) ?? ''
+  };
+}
+
+app.post('/api/backoffice/iso', async (request, response, next) => {
+  try {
+    const { name, version, language, pdfBase64, structure } = request.body ?? {};
+    if (!name) throw new HttpError(400, 'name je povinny');
+    let resolvedStructure: IsoClause[] = Array.isArray(structure) ? structure : [];
+    if (pdfBase64) {
+      resolvedStructure = await extractIsoStructureFromPdf(String(pdfBase64));
+      if (resolvedStructure.length === 0) {
+        throw new HttpError(422, 'Z PDF sa nepodarilo extrahovat strukturu kapitol. Skus manualny vstup.');
+      }
+    }
+    const norm = await prisma.isoTemplate.create({
+      data: {
+        standard: String(name),
+        name: String(name),
+        version: version ? String(version) : null,
+        language: language ? String(language) : 'sk',
+        structure: resolvedStructure as any
+      }
+    });
+    response.status(201).json(mapIsoNorm(norm));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/backoffice/iso', async (_request, response, next) => {
+  try {
+    const norms = await prisma.isoTemplate.findMany({
+      where: { name: { not: null } },
+      orderBy: { createdAt: 'desc' }
+    });
+    response.json(norms.map(mapIsoNorm));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/backoffice/iso/:normId', async (request, response, next) => {
+  try {
+    const norm = await prisma.isoTemplate.findUnique({ where: { id: request.params.normId } });
+    if (!norm) throw new HttpError(404, 'Norma neexistuje');
+    response.json(mapIsoNorm(norm));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/backoffice/iso/:normId', async (request, response, next) => {
+  try {
+    const norm = await prisma.isoTemplate.update({
+      where: { id: request.params.normId },
+      data: {
+        name: request.body.name ?? undefined,
+        standard: request.body.name ?? undefined,
+        version: request.body.version === undefined ? undefined : (request.body.version || null),
+        language: request.body.language ?? undefined,
+        structure: request.body.structure === undefined ? undefined : request.body.structure
+      }
+    });
+    response.json(mapIsoNorm(norm));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/backoffice/iso/:normId', async (request, response, next) => {
+  try {
+    await prisma.isoTemplate.delete({ where: { id: request.params.normId } });
+    response.status(204).end();
   } catch (error) {
     next(error);
   }

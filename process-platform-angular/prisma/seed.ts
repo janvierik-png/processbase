@@ -1,6 +1,14 @@
 import 'dotenv/config';
+import { randomBytes, scryptSync } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient, OrganizationRole, ProcessNodeType, ProcessStatus } from '../generated/prisma/client';
+
+// Rovnaky format ako server/index.ts: scrypt$<salt>$<hash>
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString('hex');
+  const hash = scryptSync(password, salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
 
 const connectionString = process.env['DATABASE_URL'];
 if (!connectionString) {
@@ -131,6 +139,16 @@ async function main() {
     ['en', 'nav.settings', 'Company settings'],
     ['en', 'nav.backoffice', 'Backoffice']
   ] as const;
+
+  // R9: prvy backoffice admin (jano / Test123)
+  await prisma.backofficeAdmin.upsert({
+    where: { username: 'jano' },
+    update: {},
+    create: {
+      username: 'jano',
+      passwordHash: hashPassword('Test123')
+    }
+  });
 
   for (const [locale, key, value] of translations) {
     await prisma.translation.upsert({
