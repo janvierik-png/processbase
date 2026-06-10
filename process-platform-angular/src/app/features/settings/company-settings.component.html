@@ -1,0 +1,63 @@
+<section class="settings-grid">
+  @if (error()) {
+    <p class="error">{{ error() }}</p>
+  }
+
+  <form class="panel" (ngSubmit)="saveCompanyName()">
+    <h2>Nastavenia firmy</h2>
+    <label>Nazov spolocnosti <input name="companyName" [(ngModel)]="companyName"></label>
+    <button class="primary" type="submit">Ulozit organizaciu</button>
+  </form>
+
+  <form class="panel" (ngSubmit)="sendInvite()">
+    <h2>Pozvat spolupracovnika</h2>
+    <label>Email <input name="inviteEmail" type="email" [(ngModel)]="invite.email" required></label>
+    <label>Rola
+      <select name="inviteRole" [(ngModel)]="invite.roleId">
+        @for (role of roles; track role.id) {
+          <option [value]="role.id">{{ role.name }}</option>
+        }
+      </select>
+    </label>
+    <button class="primary" type="submit">Vytvorit pozvanku</button>
+  </form>
+
+  <section class="panel">
+    <h2>Pouzivatelia organizacie</h2>
+    @for (user of users(); track user.id) {
+      <article class="row">
+        <strong>{{ user.name }}</strong>
+        <span>{{ user.email }} - {{ user.roleId }}</span>
+      </article>
+    } @empty {
+      <p>Ziadni pouzivatelia.</p>
+    }
+  </section>
+
+  <section class="panel">
+    <h2>Pozvanky</h2>
+    @for (invitation of invitations(); track invitation.id) {
+      <article class="row invitation">
+        <div>
+          <strong>{{ invitation.email }}</strong>
+          <span>{{ invitation.roleId }} - {{ invitation.status }} - plati do {{ invitation.expiresAt }}</span>
+        </div>
+        @if (invitation.status === 'pending') {
+          <button type="button" (click)="copyInviteLink(invitation)">Kopirovat link</button>
+        }
+      </article>
+    } @empty {
+      <p>Zatial ziadne pozvanky.</p>
+    }
+  </section>
+
+  <section class="panel">
+    <h2>Pouzivatelske roly</h2>
+    @for (role of roles; track role.id) {
+      <article class="row">
+        <strong>{{ role.name }}</strong>
+        <span>{{ role.permissions.join(', ') }}</span>
+      </article>
+    }
+  </section>
+</section>

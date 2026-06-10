@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="sk">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Procesna kniznica</title>
+  </head>
+  <body>
+    <section class="landing-shell" id="landingShell">
+      <header class="landing-header">
+        <div>
+          <p class="eyebrow">ISO / BPMN / Camunda 7</p>
+          <h1>Processbase</h1>
+        </div>
+        <div class="landing-actions">
+          <button class="landing-switch active" data-auth-view="register" type="button">Registracia</button>
+          <button class="landing-switch" data-auth-view="login" type="button">Login</button>
+        </div>
+      </header>
+
+      <main class="landing-main">
+        <section class="landing-copy">
+          <h2>Procesna kniznica pre male firmy</h2>
+          <p>Modelujte BPMN procesy, spravujte revizie, prilohy, ISO vazby a pripravte procesy na Camunda 7 deployment.</p>
+          <div class="price-grid">
+            <article>
+              <strong>Starter</strong>
+              <span>0 EUR / testovanie</span>
+              <p>Procesy, BPMN editor, revizie a zakladne exporty.</p>
+            </article>
+            <article>
+              <strong>Business</strong>
+              <span>49 EUR / mesiac</span>
+              <p>Viac pouzivatelov, pozvanky, roly, prilohy a ISO sablony.</p>
+            </article>
+            <article>
+              <strong>Enterprise</strong>
+              <span>Individualne</span>
+              <p>Camunda 7 konektor, audit, vlastne preklady a backoffice.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="auth-panel">
+          <form class="auth-form active" id="landingRegisterForm">
+            <h3>Registracia firmy</h3>
+            <label>
+              Nazov spolocnosti
+              <input id="landingRegisterOrganization" required>
+            </label>
+            <label>
+              Meno ownera
+              <input id="landingRegisterName" required>
+            </label>
+            <label>
+              Email
+              <input id="landingRegisterEmail" type="email" required>
+            </label>
+            <label>
+              Heslo
+              <input id="landingRegisterPassword" type="password" required>
+            </label>
+            <button type="submit">Vytvorit firmu</button>
+          </form>
+
+          <form class="auth-form" id="landingLoginForm">
+            <h3>Prihlasenie</h3>
+            <label>
+              Email
+              <input id="landingLoginEmail" type="email" required>
+            </label>
+            <label>
+              Heslo
+              <input id="landingLoginPassword" type="password" required>
+            </label>
+            <button type="submit">Prihlasit</button>
+            <p id="loginMessage"></p>
+          </form>
+        </section>
+      </main>
+    </section>
+
+    <div class="app-shell" id="appShell">
+      <aside class="sidebar" aria-label="Procesna struktura">
+        <div class="brand">
+          <div>
+            <p class="eyebrow">ISO / BPMN / Camunda</p>
+            <h1 data-i18n="app.title">Procesna kniznica</h1>
+            <span class="organization-chip" id="activeOrgName">Organizacia</span>
+          </div>
+        </div>
+
+        <div class="tree-actions">
+          <button id="addProcessBtn" type="button" data-i18n="actions.newProcess">Novy proces</button>
+          <button id="addFolderBtn" type="button" data-i18n="actions.newFolder">Nova skupina</button>
+          <button id="deleteTreeBtn" type="button" data-i18n="actions.delete">Vymazat</button>
+        </div>
+
+        <label class="search">
+          <span>Hladat proces</span>
+          <input id="processSearch" type="search" placeholder="Nazov, vlastnik, norma">
+        </label>
+
+        <nav class="process-tree" id="processTree" aria-label="Strom procesov"></nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="processPath">Riadiace procesy / Kvalita</p>
+            <h2 id="processTitle">Riadenie reklamacie</h2>
+          </div>
+          <div class="actions">
+            <select id="languageSelect" aria-label="Jazyk">
+              <option value="sk">SK</option>
+              <option value="en">EN</option>
+            </select>
+            <button id="toggleSidebarBtn" type="button" data-i18n="actions.processes">Procesy</button>
+            <button id="openSettingsBtn" type="button" data-i18n="actions.settings">Nastavenia firmy</button>
+            <button id="saveBtn" data-i18n="actions.save">Ulozit</button>
+            <button id="exportBtn" data-i18n="actions.bpmnXml">BPMN XML</button>
+            <button id="camundaBtn" data-i18n="actions.camunda">Camunda</button>
+            <button id="logoutBtn" type="button">Logout</button>
+          </div>
+        </header>
+
+        <section class="summary-band" aria-label="Prehlad procesu">
+          <div>
+            <span class="metric-label">Vlastnik</span>
+            <strong id="ownerValue">Manazer kvality</strong>
+          </div>
+          <div>
+            <span class="metric-label">Stav</span>
+            <strong id="statusValue">Schvalene</strong>
+          </div>
+          <div>
+            <span class="metric-label">Revizia</span>
+            <strong id="revisionValue">2026-04-18</strong>
+          </div>
+          <div>
+            <span class="metric-label">ISO vazby</span>
+            <strong id="isoValue">9001: 8.7, 10.2</strong>
+          </div>
+        </section>
+
+        <div class="tabs" role="tablist" aria-label="Procesne pohlady">
+          <button class="tab active" data-tab="diagram" role="tab" aria-selected="true" data-i18n="tabs.diagram">Diagram</button>
+          <button class="tab" data-tab="detail" role="tab" aria-selected="false" data-i18n="tabs.detail">Popis</button>
+          <button class="tab" data-tab="iso" role="tab" aria-selected="false" data-i18n="tabs.iso">ISO</button>
+          <button class="tab" data-tab="history" role="tab" aria-selected="false" data-i18n="tabs.revisions">Revizie</button>
+          <button class="tab" data-tab="workflow" role="tab" aria-selected="false" data-i18n="tabs.approval">Schvalovanie</button>
+          <button class="tab" data-tab="exports" role="tab" aria-selected="false" data-i18n="tabs.export">Export</button>
+          <button class="tab" data-tab="admin" role="tab" aria-selected="false" data-i18n="tabs.admin">Backoffice</button>
+        </div>
+
+        <section class="tab-panel active" id="diagramPanel">
+          <div class="tool-strip" aria-label="BPMN nastroje">
+            <span id="modelerStatus">BPMN modeler sa nacitava</span>
+            <button id="togglePropertiesBtn" type="button">Vlastnosti</button>
+          </div>
+          <div class="canvas-layout">
+            <div class="bpmn-canvas" id="bpmnCanvas" aria-label="BPMN diagram">
+              <div id="bpmnModeler"></div>
+              <div id="svgFallback"></div>
+            </div>
+            <aside class="properties" id="bpmnPropertiesPanel" aria-label="BPMN vlastnosti"></aside>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="detailPanel">
+          <form class="detail-grid" id="processForm">
+            <label>
+              Nazov procesu
+              <input id="processName" name="processName">
+            </label>
+            <label>
+              Vlastnik procesu
+              <input id="processOwner" name="processOwner">
+            </label>
+            <label>
+              Stav
+              <select id="processStatus" name="processStatus">
+                <option>Navrh</option>
+                <option>Na schvalenie</option>
+                <option>Schvalene</option>
+                <option>Archivovane</option>
+              </select>
+            </label>
+            <label>
+              Datum revizie
+              <input id="processRevision" name="processRevision" type="date">
+            </label>
+            <label class="span-two">
+              Ucel procesu
+              <textarea id="processPurpose" name="processPurpose" rows="4"></textarea>
+            </label>
+            <label class="span-two">
+              Rizika a kontrolne body
+              <textarea id="processRisks" name="processRisks" rows="5"></textarea>
+            </label>
+          </form>
+        </section>
+
+        <section class="tab-panel" id="isoPanel">
+          <div class="iso-layout">
+            <div class="iso-map" id="isoMap"></div>
+            <form class="iso-form" id="isoForm">
+              <h3>Pridat ISO vazbu</h3>
+              <label>
+                Norma
+                <select id="isoStandard">
+                  <option>ISO 9001</option>
+                  <option>ISO 14001</option>
+                  <option>ISO 45001</option>
+                  <option>ISO 27001</option>
+                </select>
+              </label>
+              <label>
+                Kapitola
+                <input id="isoClause" placeholder="napr. 8.5.1">
+              </label>
+              <label>
+                Dokaz
+                <textarea id="isoEvidence" rows="4" placeholder="zaznam, formular, report"></textarea>
+              </label>
+              <button type="submit">Pridat vazbu</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="historyPanel">
+          <div class="revision-layout">
+            <form class="revision-form" id="revisionForm">
+              <h3 data-i18n="revisions.saveTitle">Ulozit verziu procesu</h3>
+              <label>
+                <span data-i18n="revisions.name">Nazov verzie</span>
+                <input id="revisionName" required placeholder="napr. Schvalena verzia 1.0">
+              </label>
+              <button type="submit" data-i18n="revisions.save">Ulozit verziu</button>
+            </form>
+            <div class="history-list" id="historyList"></div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="workflowPanel">
+          <div class="workflow-layout">
+            <div class="workflow-list" id="workflowList"></div>
+            <form class="workflow-form" id="workflowForm">
+              <h3>Novy schvalovaci krok</h3>
+              <label>
+                Schvalovatel
+                <select id="approvalUser"></select>
+              </label>
+              <label>
+                Stav
+                <select id="approvalState">
+                  <option>caká</option>
+                  <option>schválené</option>
+                  <option>vrátené</option>
+                </select>
+              </label>
+              <label>
+                Poznamka
+                <textarea id="approvalNote" rows="4"></textarea>
+              </label>
+              <button type="submit">Pridat krok</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="usersPanel">
+          <div class="users-layout">
+            <form class="organization-form" id="organizationForm">
+              <h3>Nastavenia firmy</h3>
+              <label>
+                Nazov spolocnosti
+                <input id="organizationName" name="organizationName">
+              </label>
+              <label>
+                Identifikator spolocnosti
+                <input id="organizationCompanyId" name="organizationCompanyId">
+              </label>
+              <button type="submit">Ulozit organizaciu</button>
+            </form>
+
+            <form class="invite-form" id="inviteForm">
+              <h3>Pozvat spolupracovnika</h3>
+              <label>
+                Email
+                <input id="inviteEmail" name="inviteEmail" type="email" required>
+              </label>
+              <label>
+                Rola
+                <select id="inviteRole" name="inviteRole"></select>
+              </label>
+              <button type="submit">Odoslat pozvanku</button>
+            </form>
+
+            <section>
+              <h3>Pouzivatelia organizacie</h3>
+              <div class="users-list" id="usersList"></div>
+            </section>
+
+            <section>
+              <h3>Pouzivatelske roly</h3>
+              <div class="roles-list" id="rolesList"></div>
+            </section>
+
+            <section class="span-two">
+              <h3>Pozvanky</h3>
+              <div class="invitations-list" id="invitationsList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="exportsPanel">
+          <div class="export-grid">
+            <article>
+              <h3>Procesna dokumentacia</h3>
+              <p>Export zahrna popis procesu, role, rizika, ISO vazby, revizie a schvalovanie.</p>
+              <button id="exportPdfBtn" type="button">PDF</button>
+              <button id="exportDocxBtn" type="button">DOCX</button>
+              <button id="exportHtmlBtn" type="button" data-i18n="exports.html">HTML s obrazkom</button>
+            </article>
+            <article>
+              <h3>Prilohy</h3>
+              <form class="attachment-form" id="attachmentForm">
+                <label>
+                  <span data-i18n="attachments.upload">Upload suboru</span>
+                  <input id="attachmentInput" type="file" multiple>
+                </label>
+                <button type="submit" data-i18n="attachments.add">Pridat subory</button>
+              </form>
+              <div id="attachmentsList"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="adminPanel">
+          <div class="admin-layout">
+            <form class="translation-form" id="translationForm">
+              <h3 data-i18n="admin.translations">Sprava prekladov</h3>
+              <label>
+                <span data-i18n="admin.language">Jazyk</span>
+                <select id="translationLanguage">
+                  <option value="sk">Slovencina</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <label>
+                <span data-i18n="admin.key">Kluc</span>
+                <input id="translationKey" required placeholder="napr. actions.save">
+              </label>
+              <label>
+                <span data-i18n="admin.value">Preklad</span>
+                <input id="translationValue" required>
+              </label>
+              <button type="submit" data-i18n="admin.add">Pridat / ulozit preklad</button>
+            </form>
+            <div class="translation-list" id="translationList"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="camundaDialog">
+      <form method="dialog" class="dialog-body">
+        <header>
+          <h3>Camunda napojenie</h3>
+          <button value="close" aria-label="Zavriet">x</button>
+        </header>
+        <label>
+          Camunda 7 REST endpoint
+          <input id="camundaEndpoint" value="Konfiguruje server cez CAMUNDA7_BASE_URL" disabled>
+        </label>
+        <label>
+          Deployment name
+          <input id="camundaDeployment">
+        </label>
+        <label>
+          Tenant ID
+          <input id="camundaTenant" placeholder="volitelne">
+        </label>
+        <p id="camundaPreview"></p>
+        <menu>
+          <button value="close">Zavriet</button>
+          <button id="mockDeployBtn" value="close">Deploy do Camunda 7</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="registrationDialog">
+      <form method="dialog" class="dialog-body" id="registrationForm">
+        <header>
+          <h3>Registracia ownera a firmy</h3>
+        </header>
+        <label>
+          Nazov spolocnosti
+          <input id="registerOrganizationName" required placeholder="napr. Alfa s.r.o.">
+        </label>
+        <label>
+          Meno ownera
+          <input id="registerUserName" required placeholder="Meno a priezvisko">
+        </label>
+        <label>
+          Email
+          <input id="registerUserEmail" type="email" required placeholder="meno@firma.sk">
+        </label>
+        <label>
+          Heslo
+          <input id="registerPassword" type="password" required>
+        </label>
+        <menu>
+          <button id="createOrganizationBtn" value="default">Vytvorit organizaciu</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>

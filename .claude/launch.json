@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backoffice",
+      "runtimeExecutable": "npm.cmd",
+      "runtimeArgs": ["run", "dev", "--prefix", "process-platform-backoffice"],
+      "port": 4300
+    },
+    {
+      "name": "platform-frontend",
+      "runtimeExecutable": "npm.cmd",
+      "runtimeArgs": ["run", "frontend", "--prefix", "process-platform-angular"],
+      "port": 4200
+    },
+    {
+      "name": "platform-api",
+      "runtimeExecutable": "npm.cmd",
+      "runtimeArgs": ["run", "api", "--prefix", "process-platform-angular"],
+      "port": 3000
+    }
+  ]
+}

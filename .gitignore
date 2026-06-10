@@ -1,0 +1,22 @@
+# Zavislosti a build vystupy
+node_modules/
+dist/
+out-tsc/
+.angular/
+
+# Generovany Prisma klient
+process-platform-angular/generated/
+
+# Lokalne prostredie a tajomstva
+.env
+*.local
+
+# IDE a OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logy
+npm-debug.log*
+*.log

@@ -1,0 +1,284 @@
+a{
+	outline:none !important;
+}
+input::-ms-clear {
+    display: none;
+}
+.fade{
+	z-index:10000 !important;
+}
+.table{
+	overflow:hidden;
+	border-radius:4px;
+}
+.table a{
+	/*color:#cc9900;*/
+	/*color:#33334d;*/
+	color:#000000;
+}
+.table td .glyphicon-edit,
+.table td .glyphicon-picture,
+.table td .glyphicon-trash,
+.table td .glyphicon-open,
+.table td .glyphicon glyphicon-fire,
+.table td .glyphicon-eye-open{
+	font-size:18px;
+	cursor:pointer;
+	color:#cc9900;
+}
+.table > thead > tr > th{
+	vertical-align:middle !important;
+}
+/*
+.table-striped > tbody > tr:nth-of-type(odd) {
+	color:#fff;
+  background-color: #cc9900;
+}
+.table-striped > tbody > tr:nth-of-type(even) {
+	color:#fff;
+  background-color: #33334d;
+}
+*/
+/* Table border radius fix for IE */
+table tr th:first-child{
+    border-top-left-radius:4px;
+}
+
+table tr th:last-child{
+    border-top-right-radius:4px;
+}
+table tr:last-child td:first-child {
+    border-bottom-left-radius:4px;
+}
+
+table tr:last-child td:last-child {
+    border-bottom-right-radius:4px;
+}
+
+.btn-att{
+	vertical-align:baseline !important;
+}
+
+/* Tlačidlo príloha (dropdown) */
+.open > .att-edit{
+	right:0;
+}
+
+.pointer{
+	cursor:pointer;
+}
+
+/* Stránkovanie
+*********************************************************************************************
+*/
+.pagination > .active > a,
+.pagination > .active > span,
+.pagination > .active > a:hover,
+.pagination > .active > span:hover,
+.pagination > .active > a:focus,
+.pagination > .active > span:focus {
+	 color:#fff !important;
+   background-color: #cc9900 !important;
+   border-color: #cc9900 !important;
+}
+.pagination > li > a,
+.pagination > li > span{
+	color:#33334d !important;
+}
+
+/* For password strength */
+.color4{
+  color:green;
+}
+.color3{
+  color:#bfd641;
+}
+.color2{
+  color:orange;
+}
+.color1{
+  color:red;
+}
+
+/* SWITCHER - SLIDER
+*********************************************************************************************
+*/
+label{
+	cursor:default;
+}
+/* The switch - the box around the slider */
+.switch {
+	position: relative;
+	display: inline-block;
+	width: 30px;
+	height: 17px;
+}
+
+.switch-text-top{
+	display:block;
+	margin-top:10px;
+	color:#000;
+}
+
+.switch-text-right{
+	display:block;
+	margin-left:40px;
+	margin-top:-2px;
+	cursor:pointer;
+	color:#000;
+}
+
+.switch-disabled{
+	cursor:not-allowed !important;
+}
+
+/* Hide default HTML checkbox */
+.switch input {display:none;}
+
+/* The slider */
+.slider {
+	position: absolute;
+	cursor: pointer;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background-color: #ccc;
+	-webkit-transition: .4s;
+	transition: .4s;
+}
+
+.slider:before {
+	position: absolute;
+	content: "";
+	height: 13px;
+	width: 13px;
+	left: 2px;
+	bottom: 2px;
+	background-color: white;
+	-webkit-transition: .4s;
+	transition: .4s;
+}
+
+input:checked + .slider {
+	background-color: #034F84;
+}
+
+input:focus + .slider {
+	box-shadow: 0 0 1px #034F84;
+}
+
+input:checked + .slider:before {
+	-webkit-transform: translateX(13px);
+	-ms-transform: translateX(13px);
+	transform: translateX(13px);
+}
+
+/* Rounded sliders */
+.slider.round {
+	border-radius: 34px;
+}
+
+.slider.round:before {
+	border-radius: 50%;
+}
+
+/* TEXT CLASSES
+*********************************************************************************************
+*/
+.text-red {
+	color: #a94442 !important;
+}
+.text-blue {
+	color: #33334d !important;
+}
+.text-gold{
+	color: #cc9900 !important;
+}
+.text-green {
+	color: #3c763d !important;
+}
+.text-white {
+	color: #fff !important;
+}
+.text-orange{
+	color: #D2691E !important;
+}
+.text-bold{
+	font-weight:bold;
+}
+.text-shadow{
+	text-shadow: 2px 2px 5px #000;
+}
+.text-strike{
+	text-decoration: line-through;
+}
+.text-black{
+	color: #000000 !important;
+}
+.text-cut{
+	max-width:200px;
+	white-space:nowrap;
+	overflow:hidden;
+	text-overflow:ellipsis;
+}
+
+/* BACKGROUNDS
+*********************************************************************************************
+*/
+.bg-blue {
+	background-color:#33334d !important;
+}
+.bg-gold{
+	background-color:#cc9900 !important;
+}
+.bg-danger{
+	background-color:#d9534f !important;
+	color:#fff;
+}
+
+.bg-shadow{
+	background-color:#d4cdcd !important;
+	color:#fff;
+}
+
+.bg-black{
+	background-color:#000000 !important;
+	color:#fff;
+}
+
+
+/* Overlay
+*********************************************************************************************
+*/
+#overlay{
+	position: fixed;
+	display: none;
+	width: 100%;
+	height: 100%;
+	top: 0;
+	left: 0;
+	z-index: 10002;
+}
+#spinner{
+	position: absolute;
+	top: 50%;
+	left: 50%;
+}
+#spinner-text{
+	position: relative;
+	top: 45%;
+	margin-left: 60px;
+	text-align: center;
+	color: #fff;
+}
+#wall{
+	position: fixed;
+	display: none;
+	background: transparent;
+	width: 100%;
+	height: 100%;
+	top: 0;
+	left: 0;
+	z-index: 199;
+}

@@ -1,0 +1,32 @@
+<div class="workspace-shell">
+  <header class="app-header">
+    <div class="brand">
+      <p class="eyebrow">ISO / BPMN / Camunda</p>
+      <h1>{{ i18n.t('app.title') }}</h1>
+      <span>{{ auth.currentOrganization()?.name || 'Organizacia' }}</span>
+    </div>
+
+    <nav>
+      <a routerLink="/app/processes" routerLinkActive="active">{{ i18n.t('nav.processes') }}</a>
+      <a routerLink="/app/documents" routerLinkActive="active">Dokumenty</a>
+      <a routerLink="/app/settings" routerLinkActive="active">{{ i18n.t('nav.settings') }}</a>
+      <a routerLink="/app/backoffice" routerLinkActive="active">Setup / Backoffice</a>
+    </nav>
+
+    <div class="actions">
+      <select [value]="i18n.language()" (change)="setLanguage($any($event.target).value)">
+        <option value="sk">SK</option>
+        <option value="en">EN</option>
+      </select>
+      <button type="button" (click)="auth.logout()">{{ i18n.t('actions.logout') }}</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <div class="page-title">
+      <p class="eyebrow">{{ auth.currentUser()?.name }}</p>
+      <h2>{{ auth.currentOrganization()?.name }}</h2>
+    </div>
+    <router-outlet />
+  </main>
+</div>

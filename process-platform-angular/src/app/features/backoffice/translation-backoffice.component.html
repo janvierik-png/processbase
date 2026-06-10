@@ -1,0 +1,67 @@
+<header class="backoffice-header">
+  <div>
+    <p class="eyebrow">Setup / Backoffice</p>
+    <h2>Ekosystem platformy</h2>
+  </div>
+  <nav>
+    <button type="button" [class.active]="section === 'translations'" (click)="section = 'translations'">Preklady</button>
+    <button type="button" [class.active]="section === 'integrations'" (click)="section = 'integrations'">Integracie</button>
+    <button type="button" [class.active]="section === 'setup'" (click)="section = 'setup'">System setup</button>
+  </nav>
+</header>
+
+@if (section === 'translations') {
+<section class="backoffice-grid">
+  <form class="panel" (ngSubmit)="save()">
+    <h2>Sprava prekladov</h2>
+    <label>Jazyk
+      <select name="language" [(ngModel)]="model.language">
+        <option value="sk">Slovencina</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+    <label>Kluc <input name="key" [(ngModel)]="model.key" required></label>
+    <label>Preklad <input name="value" [(ngModel)]="model.value" required></label>
+    <button class="primary" type="submit">Pridat / ulozit preklad</button>
+  </form>
+
+  <section class="panel">
+    <h2>Preklady</h2>
+    @for (row of rows(); track row[0]) {
+      <button type="button" class="translation-row" (click)="edit(row[0], row[1])">
+        <strong>{{ row[0] }}</strong>
+        <span>{{ row[1] }}</span>
+      </button>
+    }
+  </section>
+</section>
+}
+
+@if (section === 'integrations') {
+  <section class="setup-grid">
+    <article class="panel">
+      <h2>Camunda 7</h2>
+      <label>Engine REST URL <input value="http://localhost:8080/engine-rest"></label>
+      <label>Deployment source <input value="process-platform-angular"></label>
+      <button class="primary" type="button">Ulozit konfiguraciu</button>
+    </article>
+    <article class="panel">
+      <h2>Dokumentove ulozisko</h2>
+      <label>Provider <input value="Database / lokalne"></label>
+      <label>Max velkost suboru <input value="15 MB"></label>
+    </article>
+  </section>
+}
+
+@if (section === 'setup') {
+  <section class="setup-grid">
+    <article class="panel">
+      <h2>Platforma</h2>
+      <p>Globalne nastavenia pre viac organizacii, integracie, preklady a auditne pravidla.</p>
+    </article>
+    <article class="panel">
+      <h2>Audit</h2>
+      <p>Priestor pre buduce nastavenie audit trailu, retencie dat a systemovych roli.</p>
+    </article>
+  </section>
+}

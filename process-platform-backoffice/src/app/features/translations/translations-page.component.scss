@@ -1,0 +1,48 @@
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.page-header h2 {
+  margin: 0;
+}
+
+.translations-grid {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.translation-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--gold);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.translation-row div {
+  display: grid;
+  gap: 5px;
+}
+
+.translation-row span {
+  color: var(--muted);
+}
+
+.translation-row .delete {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--warn);
+}
+
+.error {
+  color: var(--warn);
+}

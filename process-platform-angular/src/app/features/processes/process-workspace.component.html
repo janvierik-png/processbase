@@ -1,0 +1,90 @@
+<section class="process-layout">
+  <aside class="process-tree">
+    <div class="tree-actions">
+      <button type="button" (click)="store.createProcess()">Novy proces</button>
+      <button type="button" (click)="store.createFolder()">Nova skupina</button>
+    </div>
+    @if (store.loading()) {
+      <p class="empty">Nacitavam procesy z databazy...</p>
+    }
+    @if (store.error()) {
+      <p class="error">{{ store.error() }}</p>
+    }
+    @for (node of visibleNodes(); track node.id) {
+      <div class="tree-row" [class.active]="node.id === store.activeProcessId()" [style.--level]="node.level">
+        <button type="button" class="tree-select" (click)="select(node)">
+          <span>{{ node.type === 'folder' ? (collapsedIds().has(node.id) ? '+' : '-') : 'P' }}</span>
+          {{ node.name }}
+        </button>
+        <button type="button" title="Premenovat" (click)="rename(node, $event)">Aa</button>
+        <button type="button" title="Vymazat" (click)="delete(node, $event)">X</button>
+      </div>
+    } @empty {
+      <p class="empty">Firma este nema procesy.</p>
+    }
+  </aside>
+
+  <main class="process-main">
+    @if (active(); as process) {
+      <header class="process-header">
+        <div>
+          <p class="eyebrow">Proces</p>
+          <h2>{{ process.name }}</h2>
+        </div>
+        <div class="header-actions">
+          <button type="button" (click)="detailsOpen.set(!detailsOpen())">Podrobnosti</button>
+          <button type="button" (click)="camundaDetailsOpen.set(!camundaDetailsOpen())">Camunda panel</button>
+          <button type="button" (click)="saveRevision(process)">Ulozit verziu</button>
+          <button type="button" (click)="deployToCamunda(process)">Camunda 7 deploy</button>
+          <button class="primary" type="button" (click)="saveDetails(process)">Ulozit</button>
+        </div>
+      </header>
+
+      @if (deployState()) {
+        <p class="notice">{{ deployState() }}</p>
+      }
+
+      <section class="summary">
+        <div><span>Vlastnik</span><strong>{{ process.owner || '-' }}</strong></div>
+        <div><span>Stav</span><strong>{{ process.status }}</strong></div>
+        <div><span>Revizia</span><strong>{{ process.revision }}</strong></div>
+      </section>
+
+      @if (detailsOpen()) {
+        <section class="detail-grid">
+          <label>Nazov procesu <input [(ngModel)]="process.name"></label>
+          <label>Vlastnik <input [(ngModel)]="process.owner"></label>
+          <label>Stav <input [(ngModel)]="process.status"></label>
+          <label>Revizia <input [(ngModel)]="process.revision" type="date"></label>
+          <label class="span-two">Ucel <textarea [(ngModel)]="process.purpose" rows="3"></textarea></label>
+          <label class="span-two">Rizika <textarea [(ngModel)]="process.risks" rows="3"></textarea></label>
+        </section>
+      }
+
+      <section class="documents-panel">
+        <div>
+          <h3>Dokumenty procesu</h3>
+          <p>{{ documents().length }} dokumentov</p>
+        </div>
+        <label class="upload-button">
+          Upload
+          <input type="file" (change)="uploadDocument(process, $event)">
+        </label>
+        @for (document of documents(); track document.id) {
+          <div class="document-row">
+            <span>{{ document.name }}</span>
+            <small>{{ document.type }} · {{ document.size || 0 }} B</small>
+            <button type="button" (click)="deleteDocument(document)">Vymazat</button>
+          </div>
+        }
+      </section>
+
+      <pp-bpmn-editor [xml]="process.bpmnXml || ''" [propertiesVisible]="camundaDetailsOpen()" (xmlChange)="saveBpmn($event)" />
+    } @else {
+      <section class="empty-workspace">
+        <h2>Zatial nie je vytvoreny proces</h2>
+        <p>Vytvorte prvy proces alebo skupinu v stromovej strukture.</p>
+      </section>
+    }
+  </main>
+</section>

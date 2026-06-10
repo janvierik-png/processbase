@@ -1,0 +1,63 @@
+<section class="landing-shell">
+  <header class="landing-header">
+    <div>
+      <p class="eyebrow">ISO / BPMN / Camunda 7</p>
+      <h1>Processbase</h1>
+    </div>
+    <div class="landing-actions">
+      <button type="button" [class.active]="mode() === 'register'" (click)="mode.set('register')">Registracia</button>
+      <button type="button" [class.active]="mode() === 'login'" (click)="mode.set('login')">Login</button>
+    </div>
+  </header>
+
+  <main class="landing-main">
+    <section class="landing-copy">
+      <h2>Procesna kniznica pre male firmy</h2>
+      <p>Modelujte BPMN procesy, spravujte revizie, prilohy, ISO vazby a pripravte procesy na Camunda 7 deployment.</p>
+      <div class="price-grid">
+        <article><strong>Starter</strong><span>0 EUR / testovanie</span><p>Procesy, BPMN editor, revizie a zakladne exporty.</p></article>
+        <article><strong>Business</strong><span>49 EUR / mesiac</span><p>Viac pouzivatelov, pozvanky, roly, prilohy a ISO sablony.</p></article>
+        <article><strong>Enterprise</strong><span>Individualne</span><p>Camunda 7 konektor, audit, vlastne preklady a backoffice.</p></article>
+      </div>
+    </section>
+
+    <section class="auth-panel">
+      @if (mode() === 'invite') {
+        <form (ngSubmit)="acceptInvite()">
+          <h3>Pozvanka do organizacie</h3>
+          @if (invitationError()) {
+            <p class="error">{{ invitationError() }}</p>
+          } @else {
+            @if (invitation(); as inv) {
+              <p>Organizacia <strong>{{ inv.organizationName }}</strong> ta pozyva ako <strong>{{ inv.roleId }}</strong> ({{ inv.email }}).</p>
+              <label>Tvoje meno <input name="inviteName" [(ngModel)]="inviteModel.name" required></label>
+              <label>Heslo <input name="invitePassword" type="password" [(ngModel)]="inviteModel.password" required></label>
+              <button class="primary" type="submit" [disabled]="auth.loading()">Prijat pozvanku</button>
+              <p class="error">{{ auth.error() }}</p>
+            } @else {
+              <p>Nacitavam pozvanku...</p>
+            }
+          }
+        </form>
+      } @else if (mode() === 'register') {
+        <form (ngSubmit)="register()">
+          <h3>Registracia firmy</h3>
+          <label>Nazov spolocnosti <input name="organizationName" [(ngModel)]="registerModel.organizationName" required></label>
+          <label>Meno ownera <input name="ownerName" [(ngModel)]="registerModel.ownerName" required></label>
+          <label>Email <input name="email" type="email" [(ngModel)]="registerModel.email" required></label>
+          <label>Heslo <input name="password" type="password" [(ngModel)]="registerModel.password" required></label>
+          <button class="primary" type="submit" [disabled]="auth.loading()">Vytvorit firmu</button>
+          <p class="error">{{ auth.error() }}</p>
+        </form>
+      } @else {
+        <form (ngSubmit)="login()">
+          <h3>Prihlasenie</h3>
+          <label>Email <input name="loginEmail" type="email" [(ngModel)]="loginModel.email" required></label>
+          <label>Heslo <input name="loginPassword" type="password" [(ngModel)]="loginModel.password" required></label>
+          <button class="primary" type="submit" [disabled]="auth.loading()">Prihlasit</button>
+          <p class="error">{{ auth.error() }}</p>
+        </form>
+      }
+    </section>
+  </main>
+</section>

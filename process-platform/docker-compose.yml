@@ -1,0 +1,36 @@
+services:
+  frontend:
+    build:
+      context: .
+      target: dev
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - frontend_node_modules:/app/node_modules
+    environment:
+      VITE_API_BASE_URL: http://backend:3000
+    command: npm run dev -- --host 0.0.0.0
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: .
+      target: server
+    ports:
+      - "3000:3000"
+    volumes:
+      - process_data:/app/data
+    environment:
+      PORT: 3000
+      CAMUNDA7_BASE_URL: ${CAMUNDA7_BASE_URL:-http://host.docker.internal:8080/engine-rest}
+      CAMUNDA7_ENGINE_NAME: ${CAMUNDA7_ENGINE_NAME:-}
+      CAMUNDA7_USERNAME: ${CAMUNDA7_USERNAME:-}
+      CAMUNDA7_PASSWORD: ${CAMUNDA7_PASSWORD:-}
+      CAMUNDA7_DEPLOYMENT_SOURCE: ${CAMUNDA7_DEPLOYMENT_SOURCE:-process-platform}
+
+volumes:
+  frontend_node_modules:
+  process_data:

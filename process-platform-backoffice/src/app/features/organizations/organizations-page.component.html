@@ -1,0 +1,43 @@
+<header class="page-header">
+  <p class="eyebrow">Organizacie</p>
+  <h2>Registrovane firmy</h2>
+</header>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+@if (loading()) {
+  <p class="muted">Nacitavam...</p>
+} @else if (organizations().length === 0) {
+  <p class="muted">Zatial nie su registrovane ziadne organizacie.</p>
+} @else {
+  <section class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th>Nazov</th>
+          <th>Slug</th>
+          <th>Jazyk</th>
+          <th>Pouzivatelia</th>
+          <th>Procesy</th>
+          <th>Camunda</th>
+          <th>Vytvorena</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (org of organizations(); track org.id) {
+          <tr>
+            <td><strong>{{ org.name }}</strong></td>
+            <td>{{ org.slug }}</td>
+            <td>{{ org.defaultLocale }}</td>
+            <td>{{ org.userCount }}</td>
+            <td>{{ org.processCount }}</td>
+            <td>{{ org.camundaBaseUrl ?? '—' }}</td>
+            <td>{{ org.createdAt }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </section>
+}

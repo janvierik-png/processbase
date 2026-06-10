@@ -1,0 +1,45 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+.shell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  padding: 18px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.shell-header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.shell-header nav {
+  display: flex;
+  gap: 8px;
+}
+
+.shell-header nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.shell-header nav a.active {
+  background: #e2f1f4;
+  border-color: #b8dbe2;
+  color: var(--accent-strong);
+}
+
+.shell-content {
+  padding: 24px;
+}

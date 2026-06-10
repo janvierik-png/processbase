@@ -1,0 +1,42 @@
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Preklady</p>
+    <h2>Globalne preklady platformy</h2>
+  </div>
+  <button type="button" (click)="importDefaults()" [disabled]="saving()">Importovat predvolene preklady</button>
+</header>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+<section class="translations-grid">
+  <form class="panel" (ngSubmit)="save()">
+    <h2>Sprava prekladov</h2>
+    <label>Jazyk
+      <select name="locale" [(ngModel)]="model.locale">
+        <option value="sk">Slovencina</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+    <label>Kluc <input name="key" [(ngModel)]="model.key" required></label>
+    <label>Preklad <input name="value" [(ngModel)]="model.value" required></label>
+    <button class="primary" type="submit" [disabled]="saving()">Pridat / ulozit preklad</button>
+  </form>
+
+  <section class="panel">
+    <h2>Preklady ({{ model.locale }})</h2>
+    @if (visibleEntries().length === 0) {
+      <p>Ziadne preklady v databaze. Pouzi import predvolenych prekladov.</p>
+    }
+    @for (entry of visibleEntries(); track entry.id) {
+      <div class="translation-row" (click)="edit(entry)">
+        <div>
+          <strong>{{ entry.key }}</strong>
+          <span>{{ entry.value }}</span>
+        </div>
+        <button type="button" class="delete" (click)="remove(entry, $event)">Vymazat</button>
+      </div>
+    }
+  </section>
+</section>

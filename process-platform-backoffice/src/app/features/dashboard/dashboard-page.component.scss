@@ -1,0 +1,21 @@
+.page-header {
+  margin-bottom: 16px;
+}
+
+.page-header h2 {
+  margin: 0;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.stat strong {
+  font-size: 34px;
+}
+
+.error {
+  color: var(--warn);
+}

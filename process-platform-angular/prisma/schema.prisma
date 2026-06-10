@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  MANAGER
+  MODELER
+  AUDITOR
+  VIEWER
+}
+
+enum ProcessNodeType {
+  GROUP
+  PROCESS
+}
+
+enum ProcessStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  ARCHIVED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AttachmentKind {
+  DOCUMENT
+  IMAGE
+  EXPORT
+  OTHER
+}
+
+model Organization {
+  id                 String               @id @default(uuid())
+  name               String
+  slug               String               @unique
+  defaultLocale      String               @default("sk")
+  camundaBaseUrl     String?
+  camundaDeploymentKey String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  users              OrganizationUser[]
+  roles              Role[]
+  invitations        Invitation[]
+  processNodes       ProcessNode[]
+  attachments        Attachment[]
+  translations       Translation[]
+  isoTemplates       IsoTemplate[]
+  approvalRequests   ApprovalRequest[]
+  camundaDeployments CamundaDeployment[]
+}
+
+model User {
+  id             String             @id @default(uuid())
+  email          String             @unique
+  name           String
+  passwordHash   String
+  locale         String             @default("sk")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organizations  OrganizationUser[]
+  ownedProcesses ProcessNode[]      @relation("ProcessOwner")
+  revisions      ProcessRevision[]
+  approvals      ApprovalRequest[]  @relation("ApprovalRequestedBy")
+  approvalSteps  ApprovalStep[]     @relation("ApprovalStepAssignee")
+  attachments    Attachment[]       @relation("AttachmentUploader")
+}
+
+model OrganizationUser {
+  id             String           @id @default(uuid())
+  organizationId String
+  userId         String
+  role           OrganizationRole @default(VIEWER)
+  roleId         String?
+  isOwner        Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customRole     Role?            @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model Role {
+  id             String             @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  permissions    String[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users          OrganizationUser[]
+  invitations    Invitation[]
+
+  @@unique([organizationId, name])
+}
+
+model Invitation {
+  id             String           @id @default(uuid())
+  organizationId String
+  email          String
+  token          String           @unique
+  role           OrganizationRole @default(VIEWER)
+  roleId         String?
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  createdAt      DateTime         @default(now())
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customRole     Role?            @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, email])
+}
+
+model ProcessNode {
+  id                 String              @id @default(uuid())
+  organizationId     String
+  parentId           String?
+  ownerId            String?
+  type               ProcessNodeType
+  name               String
+  description        String?
+  status             ProcessStatus       @default(DRAFT)
+  sortOrder          Int                 @default(0)
+  bpmnXml            String?
+  isoLinks           String[]
+  camundaProcessKey  String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent             ProcessNode?        @relation("ProcessTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children           ProcessNode[]       @relation("ProcessTree")
+  owner              User?               @relation("ProcessOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  revisions          ProcessRevision[]
+  attachments        Attachment[]
+  approvalRequests   ApprovalRequest[]
+  camundaDeployments CamundaDeployment[]
+
+  @@index([organizationId, parentId, sortOrder])
+}
+
+model ProcessRevision {
+  id              String      @id @default(uuid())
+  processNodeId   String
+  authorId        String?
+  name            String
+  note            String?
+  bpmnXml         String
+  diagramSvg      String?
+  documentation   Json?
+  createdAt       DateTime    @default(now())
+
+  processNode     ProcessNode @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  author          User?       @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([processNodeId, createdAt])
+}
+
+model Attachment {
+  id             String         @id @default(uuid())
+  organizationId String
+  processNodeId  String?
+  uploadedById   String?
+  kind           AttachmentKind @default(DOCUMENT)
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  storagePath    String
+  createdAt      DateTime       @default(now())
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  processNode    ProcessNode?   @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  uploadedBy     User?          @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, processNodeId])
+}
+
+model ApprovalRequest {
+  id             String         @id @default(uuid())
+  organizationId String
+  processNodeId  String
+  requestedById  String?
+  title          String
+  status         ApprovalStatus @default(PENDING)
+  createdAt      DateTime       @default(now())
+  decidedAt      DateTime?
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  processNode    ProcessNode    @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  requestedBy    User?          @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  steps          ApprovalStep[]
+}
+
+model ApprovalStep {
+  id                String          @id @default(uuid())
+  approvalRequestId String
+  assigneeId        String?
+  order             Int             @default(0)
+  status            ApprovalStatus  @default(PENDING)
+  comment           String?
+  decidedAt         DateTime?
+
+  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+  assignee          User?           @relation("ApprovalStepAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+}
+
+model IsoTemplate {
+  id             String       @id @default(uuid())
+  organizationId String?
+  standard       String
+  clause         String
+  title          String
+  description    String?
+  controls       Json?
+
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, standard, clause])
+}
+
+model Translation {
+  id             String        @id @default(uuid())
+  organizationId String?
+  locale         String
+  key            String
+  value          String
+  updatedAt      DateTime      @updatedAt
+
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, locale, key])
+  @@index([locale, key])
+}
+
+model CamundaDeployment {
+  id             String       @id @default(uuid())
+  organizationId String
+  processNodeId  String
+  deploymentId   String
+  processKey     String
+  deployedAt     DateTime     @default(now())
+  response        Json?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  processNode    ProcessNode  @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+}

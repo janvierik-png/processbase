@@ -1,0 +1,96 @@
+.landing-shell {
+  min-height: 100vh;
+  padding: 32px;
+  background: #f7f9fc;
+}
+
+.landing-header,
+.landing-main {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.landing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+h1 { font-size: 34px; }
+
+.landing-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) 420px;
+  gap: 28px;
+  margin-top: 56px;
+}
+
+.landing-copy h2 {
+  max-width: 760px;
+  font-size: 44px;
+  line-height: 1.08;
+}
+
+.landing-copy p {
+  max-width: 720px;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.landing-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.landing-actions .active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.price-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.price-grid article,
+.auth-panel {
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+
+.price-grid article {
+  display: grid;
+  gap: 8px;
+}
+
+.price-grid span {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+form {
+  display: grid;
+  gap: 13px;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.error {
+  min-height: 20px;
+  color: var(--warn);
+}

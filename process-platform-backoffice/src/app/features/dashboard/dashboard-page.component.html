@@ -1,0 +1,29 @@
+<header class="page-header">
+  <p class="eyebrow">Dashboard</p>
+  <h2>Prehlad platformy</h2>
+</header>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+@if (stats(); as s) {
+  <section class="stats-grid">
+    <article class="panel stat">
+      <p>Organizacie</p>
+      <strong>{{ s.organizations }}</strong>
+    </article>
+    <article class="panel stat">
+      <p>Pouzivatelia</p>
+      <strong>{{ s.users }}</strong>
+    </article>
+    <article class="panel stat">
+      <p>Procesy</p>
+      <strong>{{ s.processes }}</strong>
+    </article>
+    <article class="panel stat">
+      <p>Globalne preklady</p>
+      <strong>{{ s.translations }}</strong>
+    </article>
+  </section>
+}
