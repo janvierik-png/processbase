@@ -55,6 +55,10 @@ model Organization {
   defaultLocale      String               @default("sk")
   camundaBaseUrl     String?
   camundaDeploymentKey String?
+  autoTranslate           Boolean  @default(false)
+  translationProvider     String?
+  translationApiKeyEnc    String?
+  translationTargetLocale String?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
@@ -67,6 +71,7 @@ model Organization {
   isoTemplates       IsoTemplate[]
   approvalRequests   ApprovalRequest[]
   camundaDeployments CamundaDeployment[]
+  positions          OrgPosition[]
 }
 
 model User {
@@ -84,6 +89,8 @@ model User {
   approvals      ApprovalRequest[]  @relation("ApprovalRequestedBy")
   approvalSteps  ApprovalStep[]     @relation("ApprovalStepAssignee")
   attachments    Attachment[]       @relation("AttachmentUploader")
+  positions      UserPosition[]
+  processChanges ProcessChangeLog[]
 }
 
 model OrganizationUser {
@@ -144,10 +151,14 @@ model ProcessNode {
   type               ProcessNodeType
   name               String
   description        String?
+  descriptionText    String?
   status             ProcessStatus       @default(DRAFT)
   sortOrder          Int                 @default(0)
   bpmnXml            String?
   isoLinks           String[]
+  relatedProcessIds  String[]
+  isoSuggestions     Json?
+  translations       Json?
   camundaProcessKey  String?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -160,6 +171,8 @@ model ProcessNode {
   attachments        Attachment[]
   approvalRequests   ApprovalRequest[]
   camundaDeployments CamundaDeployment[]
+  positions          ProcessPosition[]
+  changeLogs         ProcessChangeLog[]
 
   @@index([organizationId, parentId, sortOrder])
 }
@@ -233,10 +246,16 @@ model IsoTemplate {
   id             String       @id @default(uuid())
   organizationId String?
   standard       String
-  clause         String
-  title          String
+  clause         String       @default("")
+  title          String       @default("")
   description    String?
   controls       Json?
+  name           String?
+  version        String?
+  language       String?
+  sourcePdfUrl   String?
+  structure      Json?
+  createdAt      DateTime     @default(now())
 
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -255,6 +274,64 @@ model Translation {
 
   @@unique([organizationId, locale, key])
   @@index([locale, key])
+}
+
+model OrgPosition {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime     @default(now())
+
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users          UserPosition[]
+  processes      ProcessPosition[]
+
+  @@unique([organizationId, name])
+}
+
+model UserPosition {
+  id         String      @id @default(uuid())
+  userId     String
+  positionId String
+  assignedAt DateTime    @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position   OrgPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, positionId])
+}
+
+model ProcessPosition {
+  id            String      @id @default(uuid())
+  processNodeId String
+  positionId    String
+
+  processNode   ProcessNode @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  position      OrgPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  @@unique([processNodeId, positionId])
+}
+
+model ProcessChangeLog {
+  id            String      @id @default(uuid())
+  processNodeId String
+  userId        String?
+  changedFields Json
+  description   String?
+  createdAt     DateTime    @default(now())
+
+  processNode   ProcessNode @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  user          User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([processNodeId, createdAt])
+}
+
+model BackofficeAdmin {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
 }
 
 model CamundaDeployment {
