@@ -1,0 +1,112 @@
+.page-header {
+  margin-bottom: 16px;
+}
+
+.page-header h2 {
+  margin: 0;
+}
+
+.page-header a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.positions-grid {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.span-two {
+  grid-column: 1 / -1;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.panel h3 {
+  margin: 0;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.position-row,
+.user-row {
+  display: grid;
+  gap: 8px;
+  border-left: 4px solid var(--gold);
+  background: #fbfcfe;
+  padding: 12px;
+}
+
+.position-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.position-row div:first-child,
+.user-row div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.position-row span,
+.user-row span {
+  color: var(--muted);
+}
+
+.row-actions,
+.assign {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.assign select {
+  width: 220px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #e2f1f4;
+  border: 1px solid #b8dbe2;
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: var(--accent-strong) !important;
+  font-size: 13px;
+}
+
+.chip button {
+  min-height: auto;
+  border: 0;
+  padding: 0 2px;
+  background: transparent;
+  color: var(--accent-strong);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--warn);
+}

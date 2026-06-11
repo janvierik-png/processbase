@@ -3,7 +3,7 @@ import { Injectable, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { Observable } from 'rxjs';
 import { Organization } from '../models/organization.model';
-import { Invitation, RoleId, User } from '../models/user.model';
+import { Invitation, RoleId, TranslationSettings, User } from '../models/user.model';
 import { StorageService } from './storage.service';
 import { API_BASE_URL } from './api-url';
 
@@ -133,6 +133,24 @@ export class AuthService {
         this.loading.set(false);
       }
     });
+  }
+
+  // R11: realtime kontrola dostupnosti
+  checkEmail(value: string): Observable<{ available: boolean }> {
+    return this.http.get<{ available: boolean }>(`${API_BASE_URL}/check/email?value=${encodeURIComponent(value)}`);
+  }
+
+  checkOrgName(value: string): Observable<{ available: boolean }> {
+    return this.http.get<{ available: boolean }>(`${API_BASE_URL}/check/org-name?value=${encodeURIComponent(value)}`);
+  }
+
+  // R8: nastavenia automatickeho prekladu
+  translationSettings(): Observable<TranslationSettings> {
+    return this.http.get<TranslationSettings>(`${API_BASE_URL}/organizations/${this.currentOrganizationId()}/settings/translation`);
+  }
+
+  saveTranslationSettings(payload: { autoTranslate: boolean; provider: string; targetLocale: string; apiKey?: string }): Observable<TranslationSettings> {
+    return this.http.post<TranslationSettings>(`${API_BASE_URL}/organizations/${this.currentOrganizationId()}/settings/translation`, payload);
   }
 
   private setSession(response: AuthResponse): void {

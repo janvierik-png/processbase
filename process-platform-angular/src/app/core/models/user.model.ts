@@ -9,6 +9,23 @@ export interface User {
   roleId: RoleId;
   active: boolean;
   status: 'active' | 'pending' | 'disabled';
+  positions?: Array<{ id: string; name: string }>;
+}
+
+export interface OrgPosition {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  assignedUsers: Array<{ id: string; name: string }>;
+}
+
+export interface TranslationSettings {
+  autoTranslate: boolean;
+  provider: string;
+  targetLocale: string;
+  hasApiKey: boolean;
 }
 
 export interface Role {

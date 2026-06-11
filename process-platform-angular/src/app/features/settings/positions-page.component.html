@@ -1,0 +1,70 @@
+<header class="page-header">
+  <div>
+    <p class="eyebrow"><a routerLink="/app/settings">Nastavenia</a> / Organizacna struktura</p>
+    <h2>Pracovne pozicie</h2>
+  </div>
+</header>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+<section class="positions-grid">
+  <form class="panel" (ngSubmit)="save()">
+    <h3>{{ editingId ? 'Upravit poziciu' : 'Nova pozicia' }}</h3>
+    <label>Nazov pozicie <input name="name" [(ngModel)]="model.name" required></label>
+    <label>Popis <textarea name="description" [(ngModel)]="model.description" rows="3"></textarea></label>
+    <button class="primary" type="submit">{{ editingId ? 'Ulozit zmeny' : 'Vytvorit poziciu' }}</button>
+  </form>
+
+  <section class="panel">
+    <h3>Pozicie organizacie</h3>
+    @for (position of positions(); track position.id) {
+      <article class="position-row">
+        <div>
+          <strong>{{ position.name }}</strong>
+          <span>{{ position.description || '—' }}</span>
+          @if (position.assignedUsers.length > 0) {
+            <small>Priradeni: {{ position.assignedUsers.length }}</small>
+          }
+        </div>
+        <div class="row-actions">
+          <button type="button" (click)="edit(position)">Upravit</button>
+          <button type="button" (click)="remove(position)">Vymazat</button>
+        </div>
+      </article>
+    } @empty {
+      <p class="muted">Zatial ziadne pozicie.</p>
+    }
+  </section>
+
+  <section class="panel span-two">
+    <h3>Priradenie pozicii pouzivatelom</h3>
+    @for (user of users(); track user.id) {
+      <article class="user-row">
+        <div>
+          <strong>{{ user.name }}</strong>
+          <span>{{ user.email }}</span>
+        </div>
+        <div class="chips">
+          @for (position of user.positions ?? []; track position.id) {
+            <span class="chip">{{ position.name }}
+              <button type="button" (click)="unassign(user, position.id)">×</button>
+            </span>
+          } @empty {
+            <span class="muted">Bez pozicie</span>
+          }
+        </div>
+        <div class="assign">
+          <select [(ngModel)]="assignModel[user.id]" [name]="'assign-' + user.id">
+            <option value="">Vyber poziciu...</option>
+            @for (position of availablePositions(user); track position.id) {
+              <option [value]="position.id">{{ position.name }}</option>
+            }
+          </select>
+          <button type="button" (click)="assign(user)">Priradit</button>
+        </div>
+      </article>
+    }
+  </section>
+</section>

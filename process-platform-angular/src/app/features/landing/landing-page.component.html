@@ -42,11 +42,19 @@
       } @else if (mode() === 'register') {
         <form (ngSubmit)="register()">
           <h3>Registracia firmy</h3>
-          <label>Nazov spolocnosti <input name="organizationName" [(ngModel)]="registerModel.organizationName" required></label>
+          <label>Nazov spolocnosti
+            <input name="organizationName" [(ngModel)]="registerModel.organizationName" (ngModelChange)="orgNameChanged($event)" required>
+            @if (orgNameState() === 'taken') { <span class="field-error">Firma s tymto nazvom uz existuje.</span> }
+            @if (orgNameState() === 'available') { <span class="field-ok">Nazov je volny.</span> }
+          </label>
           <label>Meno ownera <input name="ownerName" [(ngModel)]="registerModel.ownerName" required></label>
-          <label>Email <input name="email" type="email" [(ngModel)]="registerModel.email" required></label>
+          <label>Email
+            <input name="email" type="email" [(ngModel)]="registerModel.email" (ngModelChange)="emailChanged($event)" required>
+            @if (emailState() === 'taken') { <span class="field-error">Email uz existuje. Prihlas sa.</span> }
+            @if (emailState() === 'available') { <span class="field-ok">Email je volny.</span> }
+          </label>
           <label>Heslo <input name="password" type="password" [(ngModel)]="registerModel.password" required></label>
-          <button class="primary" type="submit" [disabled]="auth.loading()">Vytvorit firmu</button>
+          <button class="primary" type="submit" [disabled]="registerBlocked()">Vytvorit firmu</button>
           <p class="error">{{ auth.error() }}</p>
         </form>
       } @else {

@@ -9,6 +9,12 @@
     <button class="primary" type="submit">Ulozit organizaciu</button>
   </form>
 
+  <section class="panel">
+    <h2>Organizacna struktura a integracie</h2>
+    <a class="settings-link" routerLink="/app/settings/positions">Pracovne pozicie →</a>
+    <a class="settings-link" routerLink="/app/settings/integrations">Automaticky preklad (DeepL / Google) →</a>
+  </section>
+
   <form class="panel" (ngSubmit)="sendInvite()">
     <h2>Pozvat spolupracovnika</h2>
     <label>Email <input name="inviteEmail" type="email" [(ngModel)]="invite.email" required></label>
@@ -28,6 +34,13 @@
       <article class="row">
         <strong>{{ user.name }}</strong>
         <span>{{ user.email }} - {{ user.roleId }}</span>
+        @if ((user.positions ?? []).length > 0) {
+          <span class="positions">Pozicie:
+            @for (position of user.positions; track position.id) {
+              <em>{{ position.name }}</em>
+            }
+          </span>
+        }
       </article>
     } @empty {
       <p>Ziadni pouzivatelia.</p>

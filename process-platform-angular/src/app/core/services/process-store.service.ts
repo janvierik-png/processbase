@@ -1,9 +1,21 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, signal } from '@angular/core';
-import { ProcessNode } from '../models/process.model';
+import { Observable } from 'rxjs';
+import {
+  IsoNorm,
+  IsoSuggestion,
+  ProcessChange,
+  ProcessDetail,
+  ProcessNode
+} from '../models/process.model';
 import { StorageService } from './storage.service';
 import { AuthService } from './auth.service';
 import { API_BASE_URL } from './api-url';
+
+export type ProcessPatch = Partial<ProcessNode> & {
+  positionIds?: string[];
+  changeDescription?: string;
+};
 
 @Injectable({ providedIn: 'root' })
 export class ProcessStoreService {
@@ -19,6 +31,11 @@ export class ProcessStoreService {
     private readonly http: HttpClient,
     private readonly auth: AuthService
   ) {}
+
+  // R7: identifikacia autora zmeny pre audit log
+  private userHeaders() {
+    return { headers: { 'x-user-id': this.auth.currentUser()?.id ?? '' } };
+  }
 
   activeProcess(): ProcessNode | null {
     return this.flatten(this.tree()).find((node) => node.id === this.activeProcessId() && node.type === 'process') ?? null;
@@ -46,6 +63,22 @@ export class ProcessStoreService {
     });
   }
 
+  detail(id: string): Observable<ProcessDetail> {
+    return this.http.get<ProcessDetail>(`${API_BASE_URL}/processes/${id}`);
+  }
+
+  history(id: string): Observable<ProcessChange[]> {
+    return this.http.get<ProcessChange[]>(`${API_BASE_URL}/processes/${id}/history`);
+  }
+
+  isoDetect(id: string): Observable<IsoSuggestion[]> {
+    return this.http.post<IsoSuggestion[]>(`${API_BASE_URL}/processes/${id}/iso-detect`, {});
+  }
+
+  isoNorms(): Observable<IsoNorm[]> {
+    return this.http.get<IsoNorm[]>(`${API_BASE_URL}/iso-norms`);
+  }
+
   createProcess(): void {
     this.createNode('process', 'Novy proces');
   }
@@ -54,13 +87,17 @@ export class ProcessStoreService {
     this.createNode('folder', 'Nova skupina');
   }
 
-  updateProcess(id: string, patch: Partial<ProcessNode>): void {
-    this.tree.set(this.walk(this.tree(), (node) => node.id === id ? { ...node, ...patch } : node));
+  updateProcess(id: string, patch: ProcessPatch, onDone?: (updated: ProcessNode) => void): void {
+    const { positionIds, changeDescription, ...nodePatch } = patch;
+    this.tree.set(this.walk(this.tree(), (node) => node.id === id ? { ...node, ...nodePatch } : node));
     this.persist();
-    this.http.patch<ProcessNode>(`${API_BASE_URL}/processes/${id}`, patch).subscribe({
+    this.http.patch<ProcessNode>(`${API_BASE_URL}/processes/${id}`, patch, this.userHeaders()).subscribe({
       next: (updated) => {
         this.tree.set(this.walk(this.tree(), (node) => node.id === id ? { ...node, ...updated } : node));
         this.persist();
+        // presun v strome (zmena parentId) vyzaduje rebuild celej struktury
+        if (patch.parentId !== undefined) this.loadFromDatabase();
+        onDone?.(updated);
       },
       error: (error) => this.error.set(error?.error?.message ?? 'Proces sa nepodarilo ulozit do databazy.')
     });
@@ -130,20 +167,5 @@ export class ProcessStoreService {
       },
       error: (error) => this.error.set(error?.error?.message ?? 'Proces sa nepodarilo vytvorit.')
     });
-  }
-
-  private emptyBpmnXml(id: string, name: string): string {
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
-  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
-  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
-  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
-  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
-  id="Definitions_${id}" targetNamespace="https://processbase.local/bpmn">
-  <bpmn:process id="Process_${id}" name="${name}" isExecutable="true" />
-  <bpmndi:BPMNDiagram id="BPMNDiagram_${id}">
-    <bpmndi:BPMNPlane id="BPMNPlane_${id}" bpmnElement="Process_${id}" />
-  </bpmndi:BPMNDiagram>
-</bpmn:definitions>`;
   }
 }

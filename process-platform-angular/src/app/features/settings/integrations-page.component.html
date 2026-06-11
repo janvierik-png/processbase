@@ -1,0 +1,49 @@
+<header class="page-header">
+  <div>
+    <p class="eyebrow"><a routerLink="/app/settings">Nastavenia</a> / Integracie</p>
+    <h2>Automaticky preklad procesov</h2>
+  </div>
+</header>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+@if (saved()) {
+  <p class="ok">Nastavenia boli ulozene.</p>
+}
+
+<section class="integrations-grid">
+  <form class="panel" (ngSubmit)="save()">
+    <h3>Prekladova sluzba</h3>
+    <label class="check-row">
+      <input type="checkbox" name="autoTranslate" [(ngModel)]="model.autoTranslate">
+      Zapnut automaticky preklad pri ulozeni procesu
+    </label>
+    <label>Provider
+      <select name="provider" [(ngModel)]="model.provider">
+        <option value="deepl">DeepL (odporucane)</option>
+        <option value="google">Google Translate</option>
+      </select>
+    </label>
+    <label>Cielovy jazyk
+      <select name="targetLocale" [(ngModel)]="model.targetLocale">
+        <option value="en">English</option>
+        <option value="de">Deutsch</option>
+        <option value="cs">Cestina</option>
+        <option value="pl">Polski</option>
+      </select>
+    </label>
+    <label>API kluc
+      <input name="apiKey" type="password" [(ngModel)]="model.apiKey"
+        [placeholder]="hasApiKey() ? 'Kluc je ulozeny — vypln len pri zmene' : 'Vloz API kluc'">
+    </label>
+    <p class="muted">Kluc sa uklada zasifrovany (AES-256-GCM). Prelozi sa nazov a dokumentacia procesu.</p>
+    <button class="primary" type="submit">Ulozit nastavenia</button>
+  </form>
+
+  <section class="panel">
+    <h3>Ako to funguje</h3>
+    <p class="muted">Pri kazdom ulozeni procesu so zmenou nazvu alebo dokumentacie sa obsah automaticky prelozi do cieloveho jazyka a ulozi do databazy. Pouzivatelia uvidia prelozenu verziu pri prepnuti jazyka aplikacie.</p>
+    <p class="muted">DeepL free kluce (koncia na :fx) funguju automaticky cez api-free.deepl.com.</p>
+  </section>
+</section>

@@ -94,3 +94,13 @@ label {
   min-height: 20px;
   color: var(--warn);
 }
+
+.field-error {
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.field-ok {
+  color: var(--green);
+  font-size: 12px;
+}

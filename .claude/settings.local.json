@@ -8,7 +8,9 @@
       "PowerShell(Receive-Job -Id 1 -ErrorAction SilentlyContinue; Start-Job -Name \"wait_build\" -ScriptBlock { Start-Sleep 30 } | Out-Null; Wait-Job -Name \"wait_build\" | Out-Null; Receive-Job -Id 1 -ErrorAction SilentlyContinue)",
       "PowerShell(try { \\(Invoke-WebRequest -Uri \"http://127.0.0.1:3000/api/health\" -TimeoutSec 5\\).Content } catch { \"API nedostupne: $_\" })",
       "Read(//c/Users/JV/AppData/Local/Temp/claude/F--Projekty-procesy/c13e5423-e1b9-4bbc-8520-509a3fd5d338/tasks/**)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:4200)",
+      "Bash(curl -s http://127.0.0.1:3000/api/health)"
     ]
   }
 }

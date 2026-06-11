@@ -272,9 +272,10 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     // R7: diff zmenenych poli pre audit log
     const changedFields: Record<string, { from: unknown; to: unknown }> = {};
     const track = (field: string, from: unknown, to: unknown) => {
-      if (to !== undefined && JSON.stringify(from) !== JSON.stringify(to)) {
-        changedFields[field] = { from, to };
-      }
+      if (to === undefined) return;
+      // null a prazdny retazec povazuj za rovnake (ziadna realna zmena)
+      if (JSON.stringify(from ?? '') === JSON.stringify(to ?? '')) return;
+      changedFields[field] = { from, to };
     };
     track('name', current.name, data.name);
     track('purpose', current.description, data.description);

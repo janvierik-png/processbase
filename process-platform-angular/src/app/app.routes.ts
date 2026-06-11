@@ -17,6 +17,10 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/processes/process-workspace.component').then((m) => m.ProcessWorkspaceComponent)
       },
       {
+        path: 'processes/:id',
+        loadComponent: () => import('./features/processes/process-workspace.component').then((m) => m.ProcessWorkspaceComponent)
+      },
+      {
         path: 'documents',
         loadComponent: () => import('./features/documents/documents-page.component').then((m) => m.DocumentsPageComponent)
       },
@@ -25,9 +29,15 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/settings/company-settings.component').then((m) => m.CompanySettingsComponent)
       },
       {
-        path: 'backoffice',
-        loadComponent: () => import('./features/backoffice/translation-backoffice.component').then((m) => m.TranslationBackofficeComponent)
-      }
+        path: 'settings/positions',
+        loadComponent: () => import('./features/settings/positions-page.component').then((m) => m.PositionsPageComponent)
+      },
+      {
+        path: 'settings/integrations',
+        loadComponent: () => import('./features/settings/integrations-page.component').then((m) => m.IntegrationsPageComponent)
+      },
+      // R10: backoffice sekcia bola presunuta do samostatnej aplikacie (port 4300)
+      { path: 'backoffice', redirectTo: 'processes' }
     ]
   },
   { path: '**', redirectTo: '' }

@@ -48,3 +48,21 @@ label {
   color: var(--warn);
   margin: 0;
 }
+
+.settings-link {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.positions em {
+  font-style: normal;
+  background: #e2f1f4;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-right: 4px;
+  font-size: 12px;
+}

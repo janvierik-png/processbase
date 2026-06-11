@@ -1,89 +1,263 @@
-<section class="process-layout">
+<section class="process-layout" [class.panel-narrow]="panelState() === 'narrow'" [class.panel-hidden]="panelState() === 'hidden'">
   <aside class="process-tree">
     <div class="tree-actions">
       <button type="button" (click)="store.createProcess()">Novy proces</button>
-      <button type="button" (click)="store.createFolder()">Nova skupina</button>
+      @if (norms().length > 0) {
+        <button type="button" [class.active]="treeMode() === 'iso'" (click)="toggleTreeMode()">ISO view</button>
+      }
     </div>
+
     @if (store.loading()) {
       <p class="empty">Nacitavam procesy z databazy...</p>
     }
     @if (store.error()) {
       <p class="error">{{ store.error() }}</p>
     }
-    @for (node of visibleNodes(); track node.id) {
-      <div class="tree-row" [class.active]="node.id === store.activeProcessId()" [style.--level]="node.level">
-        <button type="button" class="tree-select" (click)="select(node)">
-          <span>{{ node.type === 'folder' ? (collapsedIds().has(node.id) ? '+' : '-') : 'P' }}</span>
-          {{ node.name }}
-        </button>
-        <button type="button" title="Premenovat" (click)="rename(node, $event)">Aa</button>
-        <button type="button" title="Vymazat" (click)="delete(node, $event)">X</button>
+
+    @if (treeMode() === 'standard') {
+      <div class="root-drop" [class.drop-target]="dropTargetId() === '__root__'"
+        (dragover)="onDragOver(null, $event)" (drop)="onDrop(null, $event)">
+        Korenova uroven (presun sem = bez nadradeneho)
       </div>
-    } @empty {
-      <p class="empty">Firma este nema procesy.</p>
+      @for (row of treeRows(); track row.node.id) {
+        <div class="tree-row"
+          [class.active]="row.node.id === store.activeProcessId()"
+          [class.drop-target]="dropTargetId() === row.node.id"
+          [style.--level]="row.level"
+          draggable="true"
+          (dragstart)="onDragStart(row.node, $event)"
+          (dragover)="onDragOver(row.node, $event)"
+          (drop)="onDrop(row.node, $event)">
+          <button type="button" class="tree-toggle" (click)="toggleCollapse(row.node, $event)">
+            {{ hasChildren(row.node) ? (collapsedIds().has(row.node.id) ? '+' : '-') : '·' }}
+          </button>
+          <button type="button" class="tree-select" (click)="select(row.node)">{{ row.node.name }}</button>
+          <button type="button" title="Premenovat" (click)="rename(row.node, $event)">Aa</button>
+          <button type="button" title="Vymazat" (click)="delete(row.node, $event)">X</button>
+        </div>
+      } @empty {
+        <p class="empty">Firma este nema procesy.</p>
+      }
+    } @else {
+      @for (row of treeRows(); track row.node.id) {
+        @if (row.kind === 'process') {
+          <div class="tree-row" [class.active]="row.node.id === store.activeProcessId()" [style.--level]="row.level">
+            <span class="tree-toggle">P</span>
+            <button type="button" class="tree-select" (click)="select(row.node)">{{ row.node.name }}</button>
+          </div>
+        } @else {
+          <div class="tree-row heading" [class.norm]="row.kind === 'norm'" [style.--level]="row.level">
+            <strong>{{ row.node.name }}</strong>
+          </div>
+        }
+      }
+      @if (unassignedProcesses().length > 0) {
+        <div class="tree-row heading"><strong>Nepriradene</strong></div>
+        @for (process of unassignedProcesses(); track process.id) {
+          <div class="tree-row unassigned" [class.active]="process.id === store.activeProcessId()" [style.--level]="1">
+            <span class="tree-toggle">?</span>
+            <button type="button" class="tree-select" (click)="select(process)">{{ process.name }}</button>
+          </div>
+        }
+      }
     }
   </aside>
 
   <main class="process-main">
-    @if (active(); as process) {
+    <button type="button" class="panel-toggle" (click)="cyclePanel()">{{ panelLabel() }}</button>
+
+    @if (detail(); as process) {
       <header class="process-header">
         <div>
           <p class="eyebrow">Proces</p>
           <h2>{{ process.name }}</h2>
         </div>
-        <div class="header-actions">
-          <button type="button" (click)="detailsOpen.set(!detailsOpen())">Podrobnosti</button>
-          <button type="button" (click)="camundaDetailsOpen.set(!camundaDetailsOpen())">Camunda panel</button>
-          <button type="button" (click)="saveRevision(process)">Ulozit verziu</button>
-          <button type="button" (click)="deployToCamunda(process)">Camunda 7 deploy</button>
-          <button class="primary" type="button" (click)="saveDetails(process)">Ulozit</button>
-        </div>
+        <nav class="tabs">
+          <button type="button" [class.active]="tab() === 'card'" (click)="tab.set('card')">Popis</button>
+          <button type="button" [class.active]="tab() === 'bpmn'" (click)="tab.set('bpmn')">Zobrazit diagram</button>
+          <button type="button" [class.active]="tab() === 'history'" (click)="tab.set('history')">Historia</button>
+        </nav>
       </header>
 
       @if (deployState()) {
         <p class="notice">{{ deployState() }}</p>
       }
 
-      <section class="summary">
-        <div><span>Vlastnik</span><strong>{{ process.owner || '-' }}</strong></div>
-        <div><span>Stav</span><strong>{{ process.status }}</strong></div>
-        <div><span>Revizia</span><strong>{{ process.revision }}</strong></div>
-      </section>
+      @if (tab() === 'card') {
+        <section class="summary">
+          <div><span>Vlastnik</span><strong>{{ process.owner || '-' }}</strong></div>
+          <div><span>Stav</span><strong>{{ process.status }}</strong></div>
+          <div><span>Posledna zmena</span><strong>{{ process.revision }}</strong></div>
+          <div><span>Nadradeny proces</span><strong>{{ process.parentName || '—' }}</strong></div>
+        </section>
 
-      @if (detailsOpen()) {
-        <section class="detail-grid">
-          <label>Nazov procesu <input [(ngModel)]="process.name"></label>
-          <label>Vlastnik <input [(ngModel)]="process.owner"></label>
-          <label>Stav <input [(ngModel)]="process.status"></label>
-          <label>Revizia <input [(ngModel)]="process.revision" type="date"></label>
-          <label class="span-two">Ucel <textarea [(ngModel)]="process.purpose" rows="3"></textarea></label>
-          <label class="span-two">Rizika <textarea [(ngModel)]="process.risks" rows="3"></textarea></label>
+        <form class="detail-card" (ngSubmit)="saveDetail()">
+          <section class="detail-grid">
+            <label>Nazov procesu <input name="name" [(ngModel)]="process.name"></label>
+            <label>Stav
+              <select name="status" [(ngModel)]="process.status">
+                <option>Navrh</option>
+                <option>Na schvalenie</option>
+                <option>Schvalene</option>
+                <option>Archiv</option>
+              </select>
+            </label>
+            <label>Nadradeny proces
+              <select name="parentId" [(ngModel)]="process.parentId">
+                <option [ngValue]="null">— ziadny (korenovy proces)</option>
+                @for (candidate of parentCandidates(); track candidate.id) {
+                  <option [ngValue]="candidate.id">{{ candidate.name }}</option>
+                }
+              </select>
+            </label>
+            <label>Popis zmeny (audit)
+              <input name="changeDescription" [(ngModel)]="changeDescription" placeholder="Co sa zmenilo a preco">
+            </label>
+            <label class="span-two">Ucel <textarea name="purpose" [(ngModel)]="process.purpose" rows="2"></textarea></label>
+            <label class="span-two">Dokumentacia procesu
+              <textarea name="descriptionText" [(ngModel)]="process.descriptionText" rows="5" placeholder="Detailny popis procesu, vstupy, vystupy, zodpovednosti..."></textarea>
+            </label>
+            <label class="span-two">Rizika <textarea name="risks" [(ngModel)]="process.risks" rows="2"></textarea></label>
+          </section>
+
+          <section class="relations-grid">
+            <div class="relation-box">
+              <h3>Suvisiace procesy</h3>
+              @for (candidate of relatedCandidates(); track candidate.id) {
+                <label class="check-row">
+                  <input type="checkbox"
+                    [checked]="(process.relatedProcessIds ?? []).includes(candidate.id)"
+                    (change)="toggleRelated(candidate.id)">
+                  {{ candidate.name }}
+                </label>
+              } @empty {
+                <p class="muted">Ziadne dalsie procesy.</p>
+              }
+            </div>
+
+            <div class="relation-box">
+              <h3>Pracovne pozicie</h3>
+              @for (position of positions(); track position.id) {
+                <label class="check-row">
+                  <input type="checkbox"
+                    [checked]="(process.positionIds ?? []).includes(position.id)"
+                    (change)="togglePosition(position.id)">
+                  {{ position.name }}
+                </label>
+              } @empty {
+                <p class="muted">Organizacia nema definovane pozicie. Vytvor ich v Nastaveniach.</p>
+              }
+            </div>
+
+            <div class="relation-box">
+              <h3>Podriadene procesy</h3>
+              @for (child of process.childProcesses ?? []; track child.id) {
+                <p>{{ child.name }}</p>
+              } @empty {
+                <p class="muted">Ziadne podriadene procesy.</p>
+              }
+            </div>
+
+            <div class="relation-box">
+              <h3>ISO vazby
+                <button type="button" class="small" (click)="detectIso()">Detekovat ISO</button>
+              </h3>
+              @for (link of process.iso ?? []; track $index) {
+                <p class="iso-link">{{ link.standard }} — {{ link.clause }}
+                  <button type="button" class="small" (click)="removeIsoLink($index)">×</button>
+                </p>
+              } @empty {
+                <p class="muted">Ziadne ISO vazby.</p>
+              }
+              @if ((process.isoSuggestions ?? []).length > 0) {
+                <h4>Navrhy</h4>
+                @for (suggestion of process.isoSuggestions ?? []; track $index) {
+                  <p class="iso-suggestion">
+                    {{ suggestion.normName }} {{ suggestion.clause }} — {{ suggestion.title }}
+                    <small>({{ suggestion.confidence * 100 | number:'1.0-0' }} %)</small>
+                    <button type="button" class="small" (click)="acceptSuggestion(suggestion)">Prijat</button>
+                  </p>
+                }
+              }
+            </div>
+          </section>
+
+          <div class="card-actions">
+            <button class="primary" type="submit">Ulozit proces</button>
+          </div>
+        </form>
+
+        <section class="documents-panel">
+          <div>
+            <h3>Dokumenty procesu</h3>
+            <p>{{ documents().length }} dokumentov</p>
+          </div>
+          <label class="upload-button">
+            Upload
+            <input type="file" (change)="uploadDocument($event)">
+          </label>
+          @for (document of documents(); track document.id) {
+            <div class="document-row">
+              <span>{{ document.name }}</span>
+              <small>{{ document.type }} · {{ document.size || 0 }} B</small>
+              <button type="button" (click)="deleteDocument(document)">Vymazat</button>
+            </div>
+          }
         </section>
       }
 
-      <section class="documents-panel">
-        <div>
-          <h3>Dokumenty procesu</h3>
-          <p>{{ documents().length }} dokumentov</p>
+      @if (tab() === 'bpmn') {
+        <div class="bpmn-actions">
+          <button type="button" (click)="camundaDetailsOpen.set(!camundaDetailsOpen())">Camunda panel</button>
+          <button type="button" (click)="saveRevision()">Ulozit verziu</button>
+          <button type="button" (click)="deployToCamunda()">Camunda 7 deploy</button>
         </div>
-        <label class="upload-button">
-          Upload
-          <input type="file" (change)="uploadDocument(process, $event)">
-        </label>
-        @for (document of documents(); track document.id) {
-          <div class="document-row">
-            <span>{{ document.name }}</span>
-            <small>{{ document.type }} · {{ document.size || 0 }} B</small>
-            <button type="button" (click)="deleteDocument(document)">Vymazat</button>
-          </div>
-        }
-      </section>
+        <pp-bpmn-editor [xml]="active()?.bpmnXml || ''" [propertiesVisible]="camundaDetailsOpen()" (xmlChange)="saveBpmn($event)" />
+      }
 
-      <pp-bpmn-editor [xml]="process.bpmnXml || ''" [propertiesVisible]="camundaDetailsOpen()" (xmlChange)="saveBpmn($event)" />
+      @if (tab() === 'history') {
+        @if (viewedRevision(); as revision) {
+          <section class="revision-view">
+            <header>
+              <h3>Historicka verzia: {{ revision.name }} ({{ revision.date }})</h3>
+              <button type="button" (click)="viewedRevision.set(null)">Zavriet</button>
+            </header>
+            <p class="muted">Read-only nahlad — zmeny sa neukladaju.</p>
+            <pp-bpmn-viewer [xml]="revision.bpmnXml" />
+          </section>
+        } @else {
+          <section class="history-grid">
+            <div class="panel">
+              <h3>Zmeny procesu</h3>
+              @for (change of history(); track change.id) {
+                <article class="change-row">
+                  <strong>{{ change.date.slice(0, 16).replace('T', ' ') }} · {{ change.userName }}</strong>
+                  @if (change.description) { <p>{{ change.description }}</p> }
+                  <small>Zmenene polia: {{ changedFieldNames(change) || '—' }}</small>
+                </article>
+              } @empty {
+                <p class="muted">Zatial ziadne zaznamenane zmeny.</p>
+              }
+            </div>
+            <div class="panel">
+              <h3>Ulozene verzie (BPMN)</h3>
+              @for (revision of process.revisions ?? []; track revision.id) {
+                <article class="change-row">
+                  <strong>{{ revision.name }}</strong>
+                  <small>{{ revision.date }}</small>
+                  <button type="button" class="small" (click)="viewedRevision.set(revision)">Otvorit</button>
+                </article>
+              } @empty {
+                <p class="muted">Ziadne ulozene verzie. Verziu ulozis v zalozke diagramu.</p>
+              }
+            </div>
+          </section>
+        }
+      }
     } @else {
       <section class="empty-workspace">
-        <h2>Zatial nie je vytvoreny proces</h2>
-        <p>Vytvorte prvy proces alebo skupinu v stromovej strukture.</p>
+        <h2>Vyber proces zo stromu</h2>
+        <p>Alebo vytvor novy proces tlacidlom v lavom paneli.</p>
       </section>
     }
   </main>
