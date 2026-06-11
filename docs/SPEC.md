@@ -1,9 +1,9 @@
 # PROCESSBASE
 ## Vstupný dokument — technická špecifikácia
 
-> **Účel:** Tento dokument popisuje aktuálny stav implementácie a slúži ako podklad pre ďalší vývoj. Nové požiadavky sú zaznamenané v sekcii 7 s prioritou, popisom a akceptačnými kritériami.
+> **Účel:** Tento dokument popisuje aktuálny stav implementácie a slúži ako podklad pre ďalší vývoj. Nové požiadavky zapisuj do sekcie 7 s prioritou, popisom a akceptačnými kritériami.
 
-Posledná aktualizácia: 10. júna 2026
+Posledná aktualizácia: 11. júna 2026 — **implementované R1–R11 zo SPEC v2.1**
 
 ---
 
@@ -24,19 +24,23 @@ Posledná aktualizácia: 10. júna 2026
 ### Spustenie (vývoj)
 
 ```powershell
-# 1. PostgreSQL
+# 1. PostgreSQL (vyžaduje bežiaci Docker Desktop!)
+cd F:\Projekty\procesy\process-platform-angular
 docker compose up -d postgres
 
-# 2. Platforma
+# 2. Platforma — API + Angular naraz
 npm.cmd run dev          # → http://localhost:4200, API http://localhost:3000
 
-# 3. Backoffice (voliteľné)
-cd process-platform-backoffice
-npm.cmd run dev          # → http://localhost:4300
+# 3. Backoffice
+cd ..\process-platform-backoffice
+npm.cmd run dev          # → http://localhost:4300  (login: jano / Test123)
 
 # Po zmene schema.prisma:
 npm.cmd run db:generate
 npm.cmd run db:migrate
+
+# Seed (demo data + backoffice admin jano/Test123):
+npm.cmd run db:seed
 ```
 
 ---
@@ -46,99 +50,102 @@ npm.cmd run db:migrate
 ### 2.1 Landing page a autentifikácia
 - Verejná úvodná stránka s cenovými plánmi (Starter / Business / Enterprise — len vizuál)
 - **Registrácia firmy:** názov + meno ownera + email + heslo → `User` (scrypt hash), `Organization`, auto-login
+- **R11 — realtime validácia registrácie:** debounced (500 ms) kontrola obsadenosti emailu a názvu firmy cez `/api/check/*`; submit blokovaný pri chybe; duplicitný email vracia 409
 - **Login:** email + heslo, overenie DB, chybové hlásenia
-- **Prijatie pozvánky:** URL `/?invite=TOKEN` → formulár (meno + heslo) → pridanie do org, auto-login
-- Session v localStorage (`ngCurrentUser`, `ngCurrentOrganization`)
-- Route guard: `/app/*` vyžaduje prihlásenie
+- **Prijatie pozvánky:** URL `/?invite=TOKEN` → formulár → pridanie do org, auto-login; pozvanie emailu, ktorý už je členom org, vracia 409
+- Session v localStorage, route guard na `/app/*`
 
-### 2.2 Procesy (`/app/processes`)
-- Stromová štruktúra procesov a skupín (vytváranie, premenovanie, mazanie)
-- **BPMN editor** (bpmn-js) s Camunda 7 properties panelom
-- Popis procesu, riziká, ISO väzby, stavy: Návrh / Na schválenie / Schválené / Archív
-- **Revízie:** pomenovaná verzia s BPMN XML do DB (UI na historickú revíziu chýba)
-- Prílohy k procesu (upload, mazanie), Camunda 7 deploy, história deploymentov
-- Optimistic updates
+### 2.2 Procesy (`/app/processes`, `/app/processes/:id`)
+- **R2 — strom len s procesmi:** skupiny sa nezobrazujú, hierarchia cez nadradený proces; **drag-and-drop** presun (ukladá `parentId`); koreňová drop zóna; panel stromu má 3 stavy (široký 320 / úzky 220 / skrytý), stav v localStorage
+- **R3 — karta procesu:** každý proces má URL `/app/processes/:id`; po otvorení sa zobrazí karta (diagram zbalený); záložky **Popis | Zobraziť diagram | História**; formulár: názov, stav, nadradený proces (selektor s ochranou pred cyklom), účel, **dokumentácia** (`descriptionText`), riziká, súvisiace procesy (multi-select), pracovné pozície (multi-select), podriadené procesy (read-only)
+- **R5 — ISO sugescie:** tlačidlo „Detekovať ISO" + automatická detekcia pri zmene textov; návrhy s confidence; prijatie jedným klikom
+- **R6 — ISO view:** toggle v strome (viditeľný ak existuje norma); procesy zoskupené pod kapitolami noriem; nepriradené sivé v sekcii „Nepriradené"
+- **R7 — audit log:** každý PATCH zapisuje diff polí do `ProcessChangeLog` (autor cez hlavičku `x-user-id`); pole „Popis zmeny" vo formulári; záložka História zobrazuje zmeny + uložené verzie s **read-only BPMN viewerom** (NavigatedViewer)
+- BPMN editor (bpmn-js) s Camunda properties panelom, revízie, prílohy, Camunda 7 deploy
 
 ### 2.3 Dokumenty (`/app/documents`)
 - Prehľad všetkých príloh organizácie, mazanie
 
-### 2.4 Nastavenia firmy (`/app/settings`)
-- Zmena názvu spoločnosti
-- **Pozvánky:** email + rola, token (platnosť 14 dní), tlačidlo „Kopírovať link"
-- Zoznam používateľov + stav pozvánok (pending / accepted / expired)
-- Prehľad rolí a oprávnení (statický)
+### 2.4 Nastavenia (`/app/settings`)
+- Zmena názvu spoločnosti; pozvánky (email + rola, token 14 dní, kopírovanie linku); zoznam používateľov **s pracovnými pozíciami**; prehľad rolí
+- **R1 — `/app/settings/positions`:** CRUD pracovných pozícií (názov + popis, unikátnosť per org), priradenie pozícií používateľom (chips s odobratím), viacnásobné priradenie
+- **R8 — `/app/settings/integrations`:** nastavenia automatického prekladu — provider (DeepL/Google), cieľový jazyk, API kľúč (uložený šifrovane AES-256-GCM), zapnutie/vypnutie; pri uložení procesu sa preloží názov + dokumentácia do `translations` JSON
+- **R10:** tab Setup/Backoffice odstránený; `/app/backoffice` presmeruje na procesy
 
 ### 2.5 Jazyky
-- Prepínač SK / EN v hlavičke, preklady z DB, fallback na defaulty + localStorage cache
+- Prepínač SK / EN, preklady z DB, fallback na defaulty + localStorage cache
 
 ---
 
 ## 3. Implementované — Backoffice (port 4300)
 
-- **Dashboard:** počty organizácií, používateľov, procesov, prekladov
-- **Organizácie:** tabuľka všetkých firiem (slug, jazyk, počty, dátum)
-- **Preklady:** CRUD globálnych prekladov SK/EN, import predvolených, editácia kliknutím
-- **Integrácie:** prehľad Camunda 7 a dokumentového úložiska (read-only)
-- Bez prihlásenia — určené len pre lokálny vývoj
+- **R9 — login:** formulár `/login`; seed admin **jano / Test123**; HMAC-SHA256 token (12 h platnosť) v localStorage; guard presmeruje neprihláseného; interceptor pridáva Bearer a pri 401 odhlási; logout v hlavičke; **všetky `/api/backoffice/*` endpointy (okrem auth) vyžadujú token**
+- **Admini:** zoznam, vytvorenie, mazanie (posledný admin sa nedá vymazať)
+- **R4 — ISO normy:** upload PDF → automatická extrakcia kapitol (úrovne 1–3, pdf-parse v2) do hierarchickej štruktúry; alebo prázdna norma s manuálnym vstupom; editovateľná tabuľka bodov (číslo + názov, hierarchia z číslovania); mazanie noriem
+- Dashboard (počty), Organizácie (tabuľka), Preklady (CRUD + import), Integrácie (read-only)
 
 ---
 
 ## 4. API endpointy (Express, port 3000)
 
-### Auth a organizácie
-
+### Auth, organizácie, validácie
 | Metóda | Endpoint | Popis |
 |--------|----------|-------|
-| POST | `/api/register` | Registrácia firmy + ownera |
-| POST | `/api/login` | Prihlásenie |
-| PATCH | `/api/organizations/:id` | Zmena názvu organizácie |
-| GET | `/api/organizations/:id/users` | Členovia organizácie |
-| GET/POST | `/api/organizations/:id/invitations` | Pozvánky |
-| GET | `/api/invitations/:token` | Detail pozvánky |
-| POST | `/api/invitations/:token/accept` | Prijatie pozvánky |
+| POST | `/api/register`, `/api/login` | Registrácia / prihlásenie |
+| GET | `/api/check/email`, `/api/check/org-name` | R11 — kontrola dostupnosti (`?value=`) |
+| PATCH | `/api/organizations/:id` | Zmena názvu |
+| GET | `/api/organizations/:id/users` | Členovia (s pozíciami) |
+| GET/POST | `/api/organizations/:id/invitations` | Pozvánky (409 pri existujúcom členovi) |
+| GET / POST | `/api/invitations/:token` / `.../accept` | Detail / prijatie pozvánky |
+| GET/POST | `/api/organizations/:id/settings/translation` | R8 — nastavenia prekladu |
+
+### Pozície (R1)
+| Metóda | Endpoint |
+|--------|----------|
+| GET/POST | `/api/organizations/:id/positions` |
+| PATCH/DELETE | `/api/positions/:id` |
+| POST | `/api/users/:id/positions` |
+| DELETE | `/api/users/:id/positions/:positionId` |
 
 ### Procesy
-
 | Metóda | Endpoint | Popis |
 |--------|----------|-------|
-| GET | `/api/organizations/:id/processes` | Strom procesov |
-| POST | `/api/organizations/:id/processes` | Nový proces |
-| PATCH | `/api/processes/:id` | Úprava procesu (BPMN XML) |
+| GET/POST | `/api/organizations/:id/processes` | Strom / nový proces |
+| GET | `/api/processes/:id` | R3 — detail (parent, deti, súvisiace, pozície) |
+| PATCH | `/api/processes/:id` | Úprava + audit log + auto-preklad + ISO sugescie |
 | DELETE | `/api/processes/:id` | Vymazanie |
-| POST | `/api/processes/:id/revisions` | Uloženie revízie |
-| GET/POST | `/api/processes/:id/documents` | Prílohy procesu |
-| GET | `/api/organizations/:id/documents` | Všetky prílohy |
-| DELETE | `/api/documents/:id` | Vymazanie prílohy |
-| POST | `/api/processes/:id/camunda7/deploy` | Deploy do Camunda 7 |
+| GET | `/api/processes/:id/history` | R7 — história zmien |
+| POST | `/api/processes/:id/iso-detect` | R5 — detekcia ISO väzieb |
+| POST | `/api/processes/:id/revisions` | Revízia |
+| GET/POST | `/api/processes/:id/documents` | Prílohy |
+| POST | `/api/processes/:id/camunda7/deploy` | Camunda 7 |
+| GET | `/api/iso-norms` | R6 — verejný zoznam noriem |
+| GET | `/api/translations` | Globálny slovník |
 
-### Preklady a backoffice
-
+### Backoffice (všetko okrem auth vyžaduje Bearer token — R9)
 | Metóda | Endpoint | Popis |
 |--------|----------|-------|
-| GET | `/api/translations` | Globálny slovník |
-| GET | `/api/backoffice/stats` | Štatistiky platformy |
-| GET | `/api/backoffice/organizations` | Všetky organizácie |
+| POST | `/api/backoffice/auth/login` / `logout` | Prihlásenie admina |
+| GET/POST/DELETE | `/api/backoffice/admins[/:id]` | Správa adminov |
+| POST/GET | `/api/backoffice/iso` | R4 — vytvorenie (PDF/manuál) / zoznam |
+| GET/PATCH/DELETE | `/api/backoffice/iso/:id` | Detail / štruktúra / mazanie |
+| GET | `/api/backoffice/stats`, `/organizations` | Štatistiky, organizácie |
 | GET/PUT/DELETE | `/api/backoffice/translations` | CRUD prekladov |
-| POST | `/api/backoffice/translations/import` | Bulk import prekladov |
+| POST | `/api/backoffice/translations/import` | Bulk import |
 
 ---
 
 ## 5. Databázový model (Prisma)
 
-- `Organization` → `OrganizationUser` (rola, isOwner) → `User`
-- `ProcessNode`: strom cez parentId, typ GROUP/PROCESS, BPMN XML, ISO väzby, stav
-- `ProcessRevision` (verzie BPMN + SVG), `Attachment`, `Invitation` (token, exspirácia, stav)
-- `ApprovalRequest` / `ApprovalStep`, `IsoTemplate`, `Translation`, `CamundaDeployment`
+- `Organization` (+ nastavenia prekladu: `autoTranslate`, `translationProvider`, `translationApiKeyEnc`, `translationTargetLocale`) → `OrganizationUser` → `User`
+- **`OrgPosition`** / **`UserPosition`** / **`ProcessPosition`** — R1 pracovné pozície a väzby
+- `ProcessNode` + `descriptionText`, `relatedProcessIds`, `isoSuggestions` (JSON), `translations` (JSON)
+- **`ProcessChangeLog`** — R7 audit (`changedFields` JSON diff, `description`, `userId`)
+- **`BackofficeAdmin`** — R9 admin účty
+- `IsoTemplate` + `name`, `version`, `language`, `sourcePdfUrl`, `structure` (JSON hierarchia) — R4
+- `ProcessRevision`, `Attachment`, `Invitation`, `ApprovalRequest`/`ApprovalStep`, `Translation`, `CamundaDeployment`
 
-**Mapovanie rolí (frontend ↔ DB):**
-
-| Frontend | DB rola |
-|----------|---------|
-| owner | OWNER |
-| admin | ADMIN |
-| quality | MANAGER |
-| approver | MODELER |
-| iso | AUDITOR |
+Mapovanie rolí: owner→OWNER, admin→ADMIN, quality→MANAGER, approver→MODELER, iso→AUDITOR
 
 ---
 
@@ -146,232 +153,34 @@ npm.cmd run db:migrate
 
 | # | Problém | Závažnosť |
 |---|---------|-----------|
-| 1 | API nemá autorizáciu — žiadne session/JWT tokeny. Pred produkciou nutné. | **KRITICKÁ** |
-| 2 | Backoffice nemá login — ktokoľvek s URL má admin prístup. | **KRITICKÁ** |
-| 3 | Pozvánkové emaily sa neposielajú — manuálne kopírovanie linku. | Stredná |
-| 4 | Schvaľovací workflow má DB model, ale chýba UI aj API. | Stredná |
-| 5 | ISO šablóny (`IsoTemplate`) majú DB model, ale nepoužívajú sa. | Nízka |
-| 6 | PDF/DOCX export chýba v Angular verzii. | Stredná |
-| 7 | Prílohy uložené ako dataURL v DB — nevhodné pre väčšie súbory. | Stredná |
-| 8 | Per-org preklady sa nepoužívajú — všetky sú globálne. | Nízka |
-| 9 | Camunda 7 vyžaduje bežiacu inštanciu na porte 8080. | Nízka |
-| 10 | Žiadne automatizované testy. | Stredná |
-| 11 | UI na historickú revíziu a drag-and-drop strom chýba v Angular verzii. | Stredná |
+| 1 | **Platformové API nemá autorizáciu** (backoffice API už áno — R9). Identifikácia autora zmien cez `x-user-id` hlavičku je dôverovaná klientovi. | **KRITICKÁ** |
+| 2 | Pozvánkové emaily sa neposielajú — manuálne kopírovanie linku. | Stredná |
+| 3 | Schvaľovací workflow má DB model, ale chýba UI aj API. | Stredná |
+| 4 | PDF/DOCX export procesnej dokumentácie chýba v Angular verzii. | Stredná |
+| 5 | Prílohy uložené ako dataURL v DB — nevhodné pre väčšie súbory. | Stredná |
+| 6 | Per-org preklady UI textov sa nepoužívajú — všetky sú globálne. | Nízka |
+| 7 | Camunda 7 vyžaduje bežiacu inštanciu na porte 8080. | Nízka |
+| 8 | Žiadne automatizované testy. | Stredná |
+| 9 | Auto-preklad (R8) vyžaduje platný API kľúč — bez neho zlyhá potichu (zámerne). | Nízka |
+| 10 | Preložené verzie procesov (R8) sa ukladajú do DB, ale UI ich pri prepnutí jazyka zatiaľ nezobrazuje. | Stredná |
+| 11 | ISO PDF extrakcia je regex-based — pri netypických PDF treba štruktúru doladiť manuálne v editore. | Nízka |
+| 12 | Zmena hesla backoffice admina po prvom prihlásení nie je implementovaná (odporúčané v R9). | Nízka |
 
 ---
 
 ## 7. Plánované požiadavky
 
-### Prehľad
-
-| # | Názov | Oblasť | Priorita |
-|---|-------|--------|---------|
-| R1 | Organizačná štruktúra a pracovné pozície | Platforma / API / DB | **P1** |
-| R2 | Prepracovaný procesný strom (len procesy, drag-and-drop) | Platforma / API | **P1** |
-| R3 | Karta procesu — rozšírený formulár a detailná stránka | Platforma | **P1** |
-| R4 | ISO normy v Backoffice — upload PDF a generovanie štruktúry | Backoffice / API / DB | P2 |
-| R5 | Auto-detekcia ISO normy a bodu z procesov | API / Platforma | P2 |
-| R6 | Zobrazenie procesov podľa ISO štruktúry | Platforma | P2 |
-| R7 | Audit log zmien procesov + verzie + detailná stránka procesu | Platforma / API / DB | **P1** |
-| R8 | Automatický preklad do druhého jazyka | Platforma / API | P2 |
-| R9 | Backoffice login formulár (admin účet) | Backoffice / API | **P1** |
-| R10 | Odstránenie Backoffice sekcie z platformy (4200) | Platforma | P2 |
-| R11 | Validácia registračného formulára voči DB | Platforma / API | **P1** |
+> Implementované požiadavky R1–R11 zo SPEC v2.1 boli presunuté do sekcií 2–5 (11. júna 2026).
+>
+> **Sem dopisuj nové požiadavky.** Formát:
+>
+> ### R12: Názov funkcie
+> - **Priorita:** P1 (kritická) / P2 (dôležitá) / P3 (nice-to-have)
+> - **Kde:** platforma / backoffice / API
+> - **Popis:** čo má funkcia robiť, pre koho (rola)
+> - **Akceptačné kritériá:** ako overíme, že je hotová
+> - **Závislosti:** —
 
 ---
 
-### R1: Organizačná štruktúra a pracovné pozície
-- **Priorita:** P1 — Kritická
-- **Kde:** Platforma (`/app/settings`), API, Databáza
-- **Popis:** Owner/admin môže v nastaveniach firmy spravovať organizačnú štruktúru: vytvárať a premenovávať pracovné pozície (nie systémové roly), priraďovať ich jednotlivým používateľom. Pracovné pozície sú samostatný DB model naviazaný na organizáciu a používateľa. Sekcia nahrádza doterajší odkaz na backoffice v nastaveniach.
-- **Akceptačné kritériá:**
-  - Existuje CRUD pre pracovné pozície v `/app/settings/positions`
-  - Pozícia sa dá priradiť používateľovi (viacnásobné priradenie)
-  - Priradenie je uložené v DB (tabuľky `OrgPosition` a `UserPosition`)
-  - Selektor pozícií je dostupný vo formulári procesu (R3)
-  - Pozície sú viditeľné v zozname používateľov
-- **Závislosti:** —
-- **Technické detaily:**
-  - DB: nová tabuľka `OrgPosition { id, organizationId, name, description, createdAt }`
-  - DB: nová tabuľka `UserPosition { userId, positionId, assignedAt }`
-  - API: `GET/POST/PATCH/DELETE /api/organizations/:id/positions`
-  - API: `POST/DELETE /api/users/:id/positions`
-
----
-
-### R2: Prepracovaný procesný strom
-- **Priorita:** P1 — Kritická
-- **Kde:** Platforma (`/app/processes`), API
-- **Popis:** Procesný strom bude zobrazovať len procesy (žiadne skupiny). Každý proces môže byť nadradený inému procesu — hierarchia sa definuje nadriadeným procesom. Drag-and-drop presunutie procesu pod iný proces prepíše nadradený proces v DB aj v karte procesu. Panel so stromom sa dá rozšíriť, zúžiť a úplne skryť (responzívne).
-- **Akceptačné kritériá:**
-  - V strome sa zobrazujú len uzly typu `PROCESS`
-  - Drag-and-drop funguje a ukladá `parentProcessId` do DB
-  - Karta procesu zobrazuje správny nadradený proces po presunutí
-  - Panel strom má tri stavy: široký / úzky / skrytý; stav sa zachováva v localStorage
-- **Závislosti:** R3 (parentProcessId sa zobrazuje v karte)
-- **Technické detaily:**
-  - Zrušiť typ GROUP z UI (DB model možno zachovať pre spätnú kompatibilitu)
-  - Upraviť `PATCH /api/processes/:id` na aktualizáciu `parentId` pri drag-and-drop
-  - Responzívny panel: min-width 220px, max-width 400px, resizable + toggle tlačidlo
-
----
-
-### R3: Karta procesu — rozšírený formulár a detailná stránka
-- **Priorita:** P1 — Kritická
-- **Kde:** Platforma (`/app/processes/:id`)
-- **Popis:** Primárne sa po kliknutí na proces otvorí karta s popisom a dokumentáciou (nie BPMN diagram). Diagram je skrytý a zobrazí sa na kliknutie. Formulár procesu sa rozširuje o: nadradený proces (selektor), podriadené procesy (read-only zoznam), súvisiace procesy (multi-select), priradené pracovné pozície (multi-select z R1). Každý proces má vlastnú URL `/app/processes/:id`.
-- **Akceptačné kritériá:**
-  - Otvorenie procesu zobrazí kartu (popis, metadata) — diagram je zbalený
-  - Tlačidlo „Zobraziť diagram" rozbalí BPMN panel
-  - Formulár obsahuje fieldy: nadradený proces, súvisiace procesy, pracovné pozície
-  - URL `/app/processes/:id` je funkčná a otvorí správny proces aj po refresh
-- **Závislosti:** R1 (selektor pozícií), R2 (parentId)
-- **Technické detaily:**
-  - Pridať `descriptionText` (rich-text alebo textarea) do DB a formulára
-  - API: rozšíriť response `GET /api/processes/:id` o `relatedProcesses` a `positions`
-  - Routa `/app/processes/:id` cez Angular Router s lazy-load
-
----
-
-### R4: ISO normy v Backoffice — upload PDF a generovanie štruktúry
-- **Priorita:** P2 — Dôležitá
-- **Kde:** Backoffice (`/backoffice/iso`), API, Databáza
-- **Popis:** Operátor platformy môže v backoffice nahrať ISO normu (PDF alebo manuálny vstup). Systém spracuje PDF a vygeneruje hierarchickú štruktúru kapitol/bodov normy uloženú do DB (tabuľka `IsoTemplate`). Vygenerovaná štruktúra je editovateľná v Backoffice.
-- **Akceptačné kritériá:**
-  - V Backoffice existuje sekcia ISO normy s možnosťou uploadu PDF
-  - Po nahraní systém extrahuje kapitoly a body (aspoň úrovne 1 a 2)
-  - Štruktúra je uložená v DB a zobrazená v editovateľnej tabuľke
-  - Norma má názov, verziu a jazyk
-- **Závislosti:** Vyžaduje knižnicu na extrakciu textu z PDF (napr. `pdf-parse`) na backende
-- **Technické detaily:**
-  - DB: rozšíriť `IsoTemplate` o `{ name, version, language, sourcePdfUrl, structure: JSON }`
-  - API: `POST /api/backoffice/iso` (multipart upload), `GET/PATCH/DELETE /api/backoffice/iso/:id`
-  - Backoffice UI: upload formulár + stromový editor štruktúry
-
----
-
-### R5: Auto-detekcia ISO normy a bodu z procesov
-- **Priorita:** P2 — Dôležitá
-- **Kde:** API, Platforma
-- **Popis:** Systém analyzuje názov, popis a metadáta procesu a navrhne, ku ktorej ISO norme a ktorému bodu by proces patril. Detekcia prebehne automaticky pri uložení procesu alebo na vyžiadanie (tlačidlo „Detekovať ISO"). Výsledok je sugesciya — používateľ ju môže potvrdiť alebo zmeniť.
-- **Akceptačné kritériá:**
-  - Pri uložení procesu API vráti pole navrhnutých ISO väzieb (`isoSuggestions`)
-  - Používateľ vidí sugescie v karte procesu a môže ich prijať jedným kliknutím
-  - Potvrdené väzby sa uložia do DB
-- **Závislosti:** R4 (ISO štruktúra musí byť v DB)
-- **Technické detaily:**
-  - Jednoduchý keyword-matching ako MVP; neskôr možno nahradiť LLM klasifikátorom
-  - API: `POST /api/processes/:id/iso-detect` → vracia `[{ isoTemplateId, clauseId, confidence }]`
-
----
-
-### R6: Zobrazenie procesov podľa ISO štruktúry
-- **Priorita:** P2 — Dôležitá
-- **Kde:** Platforma (`/app/processes`)
-- **Popis:** Používateľ môže prepnúť procesný strom na zobrazenie podľa ISO normy (toggle v hornej lište). V ISO mode sú procesy zoskupené pod kapitolami normy. Procesy bez ISO väzby sú sivé a označené ako „Nepriradené". Kliknutím na sivý proces sa otvorí jeho karta kde sa dá doplniť ISO väzba.
-- **Akceptačné kritériá:**
-  - Toggle „ISO view" v procesnom strome je viditeľný ak existuje aspoň jedna ISO norma v DB
-  - V ISO mode sú kapitoly normy nadradzené procesy, reálne procesy sú listové uzly
-  - Procesy bez väzby sú zobrazené sivou farbou
-  - Prepnutie späť obnoví štandardný strom
-- **Závislosti:** R4, R5
-
----
-
-### R7: Audit log zmien procesov + verzie + detailná stránka
-- **Priorita:** P1 — Kritická
-- **Kde:** Platforma, API, Databáza
-- **Popis:** Každá zmena procesu (úprava formulára, BPMN, stav, priradenie pozícií) sa zaznamená do audit logu s dátumom, ID používateľa a popisom zmeny. V karte procesu je záložka „História" kde sú všetky zmeny zoradené od najnovšej. Kliknutím na revíziu sa zobrazí jej obsah (BPMN, metadáta v čase revízie). Pridáva sa aj pole „Popis zmeny".
-- **Akceptačné kritériá:**
-  - Každé `PATCH /api/processes/:id` zapíše záznam do `ProcessChangeLog`
-  - Záznam obsahuje: `userId`, `timestamp`, `changedFields` (JSON diff), `description`
-  - `GET /api/processes/:id/history` vracia zoradený zoznam zmien
-  - UI zobrazuje históriu v záložke a umožňuje otvoriť historickú verziu (read-only BPMN viewer)
-  - Formulár procesu má textové pole „Popis zmeny" (nepovinné)
-- **Závislosti:** R3 (detailná stránka procesu)
-- **Technické detaily:**
-  - DB: nová tabuľka `ProcessChangeLog { id, processId, userId, timestamp, changedFields: JSON, description }`
-  - API: `GET /api/processes/:id/history`
-  - UI: tabbed layout v karte procesu — Popis | BPMN | História
-
----
-
-### R8: Automatický preklad do druhého jazyka
-- **Priorita:** P2 — Dôležitá
-- **Kde:** Platforma, API, Nastavenia organizácie
-- **Popis:** V nastaveniach organizácie sa dá zapnúť automatický preklad obsahu procesov do druhého jazyka (napr. SK → EN). Preklad sa volá cez konfigurovateľnú prekladovú API (DeepL alebo Google Translate — API kľúč sa ukladá v nastaveniach org). Preložené polia (názov, popis procesu) sú uložené v DB vedľa originálneho jazyka.
-- **Akceptačné kritériá:**
-  - V `/app/settings/integrations` existuje sekcia pre nastavenie prekladu (jazyk cieľ, API kľúč, provider)
-  - Po zapnutí sa pri uložení procesu automaticky preloží názov a popis
-  - Preložené hodnoty sú uložené v DB
-  - Používateľ vidí prekladanú verziu pri prepnutí jazyka
-- **Závislosti:** R3 (popis procesu musí byť v DB)
-- **Technické detaily:**
-  - Konfigurovateľný provider: DeepL (preferovaný) alebo Google Translate
-  - API kľúč sa ukladá zašifrovaný v DB (organizačné nastavenia)
-  - API: `POST /api/organizations/:id/settings/translation`
-
----
-
-### R9: Backoffice login formulár
-- **Priorita:** P1 — Kritická
-- **Kde:** Backoffice (port 4300), API
-- **Popis:** Backoffice bude chránený prihlasovacím formulárom. Prvé konto (admin) sa vytvorí seedom — username: `jano`, heslo: `Test123` (zmena po prvom prihlásení sa odporúča). Ďalšie kontá vytvára len prihlásený admin. Session backoffice admina je oddelená od session platformy.
-- **Akceptačné kritériá:**
-  - Neprihlásený používateľ je presmerovaný na `/login` v rámci backoffice
-  - Správne prihlasovacie údaje vydajú JWT platný pre `/api/backoffice/*` endpointy
-  - Neplatný token vracia `401`
-  - Logout je dostupný v hlavičke
-- **Závislosti:** Súvisí s R10 — po implementácii R9 môže byť backoffice sekcia z platformy odstránená
-- **Technické detaily:**
-  - DB: nová tabuľka `BackofficeAdmin { id, username, passwordHash, createdAt }`
-  - API: `POST /api/backoffice/auth/login`, `POST /api/backoffice/auth/logout`
-  - Middleware: overenie backoffice JWT na všetkých `/api/backoffice/*` routách
-  - Seed: `npm run db:seed` vytvorí admina `jano` / `Test123`
-
----
-
-### R10: Odstránenie Backoffice sekcie z platformy (4200)
-- **Priorita:** P2 — Dôležitá
-- **Kde:** Platforma (`/app/backoffice`)
-- **Popis:** Tab a routa `/app/backoffice` budú odstránené zo štandardnej používateľskej aplikácie na porte 4200. Správa prekladov a systémového setupu bude dostupná výhradne cez Backoffice na porte 4300.
-- **Akceptačné kritériá:**
-  - V menu platformy (4200) neexistuje odkaz na backoffice
-  - Priamy prístup na `/app/backoffice` vracia 404 alebo redirect na `/app/processes`
-  - Všetky funkcie sú zachované na 4300
-- **Závislosti:** R9 (backoffice musí mať login pred odstránením z platformy)
-
----
-
-### R11: Validácia registračného formulára voči DB
-- **Priorita:** P1 — Kritická
-- **Kde:** Platforma (`/register`), API
-- **Popis:** Registračný formulár overuje jedinečnosť emailu a názvu firmy v reálnom čase (debounced request) aj pri odoslaní. Backend vracia prehľadné chybové hlášky. Rovnaká kontrola sa aplikuje pri pozývaní používateľov (email už existuje v organizácii).
-- **Akceptačné kritériá:**
-  - Pri zadávaní emailu sa po 500ms odoberie `GET /api/check/email?value=...` a zobrazí „Email už existuje" ak je obsadený
-  - Rovnako pre názov firmy
-  - `POST /api/register` s duplicitným emailom vracia `409` s prehľadnou hláškou
-  - Formulár nedá odoslať kým sú validačné chyby
-- **Závislosti:** —
-- **Technické detaily:**
-  - API: `GET /api/check/email?value=`, `GET /api/check/org-name?value=`
-  - Frontend: `ReactiveForm` validators s `asyncValidators` volajúcimi check endpointy
-  - Rovnaká logika pre pozvánky: kontrola či email už je člen org
-
----
-
-## Súhrn — rozsah zmien v DB a API
-
-| Vrstva | Nové / zmenené |
-|--------|---------------|
-| **DB — nové tabuľky** | `OrgPosition`, `UserPosition`, `ProcessChangeLog`, `BackofficeAdmin`; rozšírenie `IsoTemplate` |
-| **DB — zmeny** | `ProcessNode`: + `descriptionText`, `isoSuggestions`, prekladové polia |
-| **API — nové endpointy** | `/api/organizations/:id/positions`, `/api/users/:id/positions`, `/api/processes/:id/history`, `/api/processes/:id/iso-detect`, `/api/backoffice/iso`, `/api/backoffice/auth/*`, `/api/check/*` |
-| **API — zmeny** | `PATCH /api/processes/:id`: zápis do audit logu, spustenie prekladu, aktualizácia parentId |
-| **Platforma — nové stránky** | `/app/settings/positions`, `/app/processes/:id` (detail), `/app/settings/integrations` |
-| **Platforma — zmeny** | Procesný strom: drag-and-drop, resize panel; Karta procesu: tabbed layout + História; `/app/backoffice`: odstrániť |
-| **Backoffice — nové** | Sekcia ISO normy (upload + editor), Login formulár, správa adminov |
-
----
-
-*Processbase — interný dokument | Aktualizované: 10. júna 2026*
+*Processbase — interný dokument | Aktualizované: 11. júna 2026*
