@@ -1367,10 +1367,11 @@ app.delete('/api/backoffice/admins/:adminId', async (request, response, next) =>
 // --- R4: ISO normy — upload PDF a generovanie struktury ---
 
 async function extractIsoStructureFromPdf(pdfBase64: string): Promise<IsoClause[]> {
-  // @ts-ignore — pdf-parse nema typy; import cez lib/ obchadza debug kod v indexe balika
-  const { default: pdfParse } = await import('pdf-parse/lib/pdf-parse.js');
+  const { PDFParse } = await import('pdf-parse');
   const buffer = Buffer.from(pdfBase64, 'base64');
-  const parsed = await pdfParse(buffer);
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  const parsed = await parser.getText();
+  await parser.destroy();
   const lines: string[] = String(parsed.text ?? '').split(/\r?\n/);
 
   const clausePattern = /^(\d{1,2}(?:\.\d{1,2}){0,2})[\s.):–—-]+(\S.{2,90})$/;

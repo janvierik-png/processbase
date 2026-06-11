@@ -1,0 +1,12 @@
+<section class="login-shell">
+  <form class="login-panel" (ngSubmit)="login()">
+    <p class="eyebrow">Processbase / Admin</p>
+    <h1>Backoffice login</h1>
+    <label>Pouzivatelske meno <input name="username" [(ngModel)]="model.username" required autocomplete="username"></label>
+    <label>Heslo <input name="password" type="password" [(ngModel)]="model.password" required autocomplete="current-password"></label>
+    <button class="primary" type="submit" [disabled]="auth.loading()">Prihlasit sa</button>
+    @if (auth.error()) {
+      <p class="error">{{ auth.error() }}</p>
+    }
+  </form>
+</section>

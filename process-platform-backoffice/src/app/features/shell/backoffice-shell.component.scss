@@ -43,3 +43,13 @@
 .shell-content {
   padding: 24px;
 }
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.session span {
+  color: var(--muted);
+}

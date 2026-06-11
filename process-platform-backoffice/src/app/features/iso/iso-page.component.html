@@ -1,0 +1,71 @@
+<header class="page-header">
+  <p class="eyebrow">ISO normy</p>
+  <h2>Sprava ISO noriem platformy</h2>
+</header>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+<section class="iso-grid">
+  <form class="panel" (ngSubmit)="create()">
+    <h3>Nova norma</h3>
+    <label>Nazov normy <input name="name" [(ngModel)]="model.name" placeholder="ISO 9001" required></label>
+    <label>Verzia <input name="version" [(ngModel)]="model.version" placeholder="2015"></label>
+    <label>Jazyk
+      <select name="language" [(ngModel)]="model.language">
+        <option value="sk">Slovencina</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+    <label class="upload-button">
+      {{ pdfFileName || 'Vybrat PDF normy (volitelne)' }}
+      <input type="file" accept="application/pdf" (change)="onPdfSelected($event)">
+    </label>
+    <p class="muted">Z PDF sa automaticky extrahuju kapitoly a body (urovne 1—3). Bez PDF sa vytvori prazdna norma a strukturu doplnis manualne.</p>
+    <button class="primary" type="submit" [disabled]="busy()">{{ busy() ? 'Spracovavam...' : 'Vytvorit normu' }}</button>
+  </form>
+
+  <section class="panel">
+    <h3>Normy v databaze</h3>
+    @for (norm of norms(); track norm.id) {
+      <article class="norm-row" [class.active]="selected()?.id === norm.id" (click)="select(norm)">
+        <div>
+          <strong>{{ norm.name }} {{ norm.version }}</strong>
+          <span>{{ norm.language }} · {{ norm.createdAt }}</span>
+        </div>
+        <button type="button" (click)="remove(norm, $event)">Vymazat</button>
+      </article>
+    } @empty {
+      <p class="muted">Zatial ziadne normy.</p>
+    }
+  </section>
+
+  @if (selected(); as norm) {
+    <section class="panel span-two">
+      <header class="structure-header">
+        <h3>Struktura: {{ norm.name }} {{ norm.version }}</h3>
+        <div>
+          <button type="button" (click)="addRow()">Pridat bod</button>
+          <button class="primary" type="button" (click)="saveStructure()" [disabled]="busy()">Ulozit strukturu</button>
+        </div>
+      </header>
+      <table>
+        <thead>
+          <tr><th class="col-clause">Bod</th><th>Nazov</th><th class="col-actions"></th></tr>
+        </thead>
+        <tbody>
+          @for (row of editRows(); track $index) {
+            <tr [style.--level]="row.level">
+              <td><input [(ngModel)]="row.clause" [name]="'clause-' + $index" placeholder="4.1"></td>
+              <td class="title-cell"><input [(ngModel)]="row.title" [name]="'title-' + $index" placeholder="Nazov kapitoly / bodu"></td>
+              <td><button type="button" (click)="removeRow($index)">×</button></td>
+            </tr>
+          } @empty {
+            <tr><td colspan="3" class="muted">Prazdna struktura — pridaj body manualne.</td></tr>
+          }
+        </tbody>
+      </table>
+    </section>
+  }
+</section>

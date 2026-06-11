@@ -22,3 +22,24 @@ export interface TranslationEntry {
   key: string;
   value: string;
 }
+
+export interface IsoClause {
+  clause: string;
+  title: string;
+  children?: IsoClause[];
+}
+
+export interface IsoNorm {
+  id: string;
+  name: string;
+  version: string;
+  language: string;
+  structure: IsoClause[];
+  createdAt: string;
+}
+
+export interface BackofficeAdmin {
+  id: string;
+  username: string;
+  createdAt: string;
+}

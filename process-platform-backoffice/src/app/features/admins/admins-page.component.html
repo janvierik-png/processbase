@@ -1,0 +1,34 @@
+<header class="page-header">
+  <p class="eyebrow">Admini</p>
+  <h2>Backoffice administratori</h2>
+</header>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+<section class="admins-grid">
+  <form class="panel" (ngSubmit)="create()">
+    <h3>Novy admin</h3>
+    <label>Pouzivatelske meno <input name="username" [(ngModel)]="model.username" required></label>
+    <label>Heslo <input name="password" type="password" [(ngModel)]="model.password" required></label>
+    <button class="primary" type="submit">Vytvorit admina</button>
+  </form>
+
+  <section class="panel">
+    <h3>Zoznam adminov</h3>
+    @for (admin of admins(); track admin.id) {
+      <article class="admin-row">
+        <div>
+          <strong>{{ admin.username }}</strong>
+          <span>vytvoreny {{ admin.createdAt }}</span>
+        </div>
+        @if (admin.username !== auth.username()) {
+          <button type="button" (click)="remove(admin)">Vymazat</button>
+        } @else {
+          <span class="muted">(ty)</span>
+        }
+      </article>
+    }
+  </section>
+</section>

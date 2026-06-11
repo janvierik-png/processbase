@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { BackofficeAuthService } from '../../core/services/backoffice-auth.service';
 
 @Component({
   selector: 'bo-shell',
@@ -8,4 +9,6 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
   templateUrl: './backoffice-shell.component.html',
   styleUrl: './backoffice-shell.component.scss'
 })
-export class BackofficeShellComponent {}
+export class BackofficeShellComponent {
+  constructor(readonly auth: BackofficeAuthService) {}
+}
