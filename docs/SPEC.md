@@ -21,27 +21,46 @@ Posledná aktualizácia: 11. júna 2026 — **implementované R1–R11 zo SPEC v
 - Prisma klient sa generuje do `process-platform-angular/generated/` (nie je v gite)
 - GitHub: https://github.com/janvierik-png/processbase
 
-### Spustenie (vývoj)
+### Spustenie — variant A: celé cez Docker (odporúčané)
 
 ```powershell
-# 1. PostgreSQL (vyžaduje bežiaci Docker Desktop!)
+cd F:\Projekty\procesy\process-platform-angular
+docker compose up -d --build
+```
+
+Spustí 4 kontajnery: `postgres`, `api` (3000), `angular` (4200), `backoffice` (4300).
+API kontajner pri štarte automaticky aplikuje migrácie (`migrate deploy`), vygeneruje
+Prisma klienta a spustí seed (demo dáta + admin **jano / Test123**). Kód je mountnutý
+z hosta — zmeny súborov sa prejavia hot-reloadom aj v Dockeri.
+
+Po zmene `package.json` treba rebuild s obnovou node_modules volume:
+
+```powershell
+docker compose down
+docker volume rm process-platform-angular_angular_node_modules process-platform-angular_backoffice_node_modules
+docker compose up -d --build
+```
+
+**POZOR:** nesmie bežať starý prototyp (`process-platform` stack v Dockeri) — koliduje na porte 3000.
+
+### Spustenie — variant B: npm na hoste (len postgres v Dockeri)
+
+```powershell
 cd F:\Projekty\procesy\process-platform-angular
 docker compose up -d postgres
+npm.cmd run dev          # → 4200 + API 3000
 
-# 2. Platforma — API + Angular naraz
-npm.cmd run dev          # → http://localhost:4200, API http://localhost:3000
-
-# 3. Backoffice
 cd ..\process-platform-backoffice
-npm.cmd run dev          # → http://localhost:4300  (login: jano / Test123)
+npm.cmd run dev          # → 4300
 
 # Po zmene schema.prisma:
 npm.cmd run db:generate
 npm.cmd run db:migrate
-
-# Seed (demo data + backoffice admin jano/Test123):
 npm.cmd run db:seed
 ```
+
+Frontendové aplikácie volajú API relatívne cez `/api` — dev proxy (`proxy.conf.mjs`)
+smeruje na `127.0.0.1:3000` na hoste, v Dockeri na službu `api:3000` (env `API_PROXY_TARGET`).
 
 ---
 

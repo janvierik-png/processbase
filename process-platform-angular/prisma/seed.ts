@@ -107,15 +107,20 @@ async function main() {
     }
   });
 
-  await prisma.processRevision.create({
-    data: {
-      processNodeId: process.id,
-      authorId: owner.id,
-      name: 'Vychozia verzia',
-      note: 'Seed revizia pre ukazkovy proces.',
-      bpmnXml: emptyBpmn
-    }
+  const hasSeedRevision = await prisma.processRevision.findFirst({
+    where: { processNodeId: process.id, name: 'Vychozia verzia' }
   });
+  if (!hasSeedRevision) {
+    await prisma.processRevision.create({
+      data: {
+        processNodeId: process.id,
+        authorId: owner.id,
+        name: 'Vychozia verzia',
+        note: 'Seed revizia pre ukazkovy proces.',
+        bpmnXml: emptyBpmn
+      }
+    });
+  }
 
   await prisma.invitation.upsert({
     where: { token: 'demo-invite-token' },
