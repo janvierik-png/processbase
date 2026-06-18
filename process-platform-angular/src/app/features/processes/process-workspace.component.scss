@@ -226,6 +226,78 @@ label {
   color: var(--muted);
 }
 
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #e8f0fe;
+  color: #1a56db;
+  border-radius: 14px;
+  padding: 3px 10px 3px 12px;
+  font-size: 13px;
+}
+
+.chip-remove {
+  background: none;
+  border: none;
+  color: #1a56db;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.6;
+  &:hover { opacity: 1; }
+}
+
+.muted-small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.related-search {
+  position: relative;
+
+  input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+.search-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.1);
+  z-index: 100;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.search-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--ink);
+  &:hover { background: #f0f4ff; }
+}
+
 button.small {
   min-height: 26px;
   padding: 0 8px;

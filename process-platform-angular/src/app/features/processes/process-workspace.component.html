@@ -123,16 +123,36 @@
           <section class="relations-grid">
             <div class="relation-box">
               <h3>Suvisiace procesy</h3>
-              @for (candidate of relatedCandidates(); track candidate.id) {
-                <label class="check-row">
-                  <input type="checkbox"
-                    [checked]="(process.relatedProcessIds ?? []).includes(candidate.id)"
-                    (change)="toggleRelated(candidate.id)">
-                  {{ candidate.name }}
-                </label>
-              } @empty {
-                <p class="muted">Ziadne dalsie procesy.</p>
-              }
+              <div class="chip-list">
+                @for (id of (process.relatedProcessIds ?? []); track id) {
+                  <span class="chip">
+                    {{ relatedName(id) }}
+                    <button type="button" class="chip-remove" (click)="toggleRelated(id)" title="Odstranit">×</button>
+                  </span>
+                } @empty {
+                  <span class="muted-small">Ziadne priradene procesy.</span>
+                }
+              </div>
+              <div class="related-search">
+                <input
+                  type="text"
+                  placeholder="Hladat a pridat proces..."
+                  [(ngModel)]="relatedSearch"
+                  name="relatedSearch"
+                  autocomplete="off"
+                  (focus)="relatedOpen = true"
+                  (blur)="onRelatedBlur()"
+                />
+                @if (relatedOpen && relatedSearchResults().length > 0) {
+                  <div class="search-dropdown">
+                    @for (candidate of relatedSearchResults(); track candidate.id) {
+                      <button type="button" class="search-item" (mousedown)="addRelated(candidate.id)">
+                        {{ candidate.name }}
+                      </button>
+                    }
+                  </div>
+                }
+              </div>
             </div>
 
             <div class="relation-box">

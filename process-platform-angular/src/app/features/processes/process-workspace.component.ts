@@ -56,6 +56,18 @@ export class ProcessWorkspaceComponent implements OnInit {
   readonly norms = signal<IsoNorm[]>([]);
   readonly treeMode = signal<'standard' | 'iso'>('standard');
 
+  // Suvisiace procesy — vyhladavanie
+  relatedSearch = '';
+  relatedOpen = false;
+  readonly relatedSearchResults = computed(() => {
+    const q = this.relatedSearch.trim().toLowerCase();
+    const detail = this.detail();
+    const assigned = new Set(detail?.relatedProcessIds ?? []);
+    return this.processes()
+      .filter((p) => p.id !== detail?.id && !assigned.has(p.id) && (!q || p.name.toLowerCase().includes(q)))
+      .slice(0, 10);
+  });
+
   // R2: drag-and-drop
   readonly dragId = signal<string | null>(null);
   readonly dropTargetId = signal<string | null>(null);
@@ -188,6 +200,23 @@ export class ProcessWorkspaceComponent implements OnInit {
     detail.relatedProcessIds = current.includes(processId)
       ? current.filter((id) => id !== processId)
       : [...current, processId];
+  }
+
+  addRelated(processId: string): void {
+    const detail = this.detail();
+    if (!detail) return;
+    const current = detail.relatedProcessIds ?? [];
+    if (!current.includes(processId)) detail.relatedProcessIds = [...current, processId];
+    this.relatedSearch = '';
+    this.relatedOpen = false;
+  }
+
+  relatedName(id: string): string {
+    return this.processes().find((p) => p.id === id)?.name ?? id;
+  }
+
+  onRelatedBlur(): void {
+    setTimeout(() => { this.relatedOpen = false; }, 150);
   }
 
   togglePosition(positionId: string): void {
