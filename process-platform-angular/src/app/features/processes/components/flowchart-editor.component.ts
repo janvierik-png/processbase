@@ -10,6 +10,7 @@ import {
   SimpleChanges,
   ViewChild
 } from '@angular/core';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 
 @Component({
   selector: 'pp-flowchart-editor',
@@ -18,7 +19,7 @@ import {
     <div class="flowchart-wrap">
       <iframe
         #frame
-        [src]="embedUrl"
+        [src]="safeEmbedUrl"
         class="flowchart-frame"
         frameborder="0"
       ></iframe>
@@ -44,11 +45,17 @@ export class FlowchartEditorComponent implements OnInit, OnChanges, OnDestroy {
   @Output() xmlChange = new EventEmitter<string>();
   @ViewChild('frame') frameRef!: ElementRef<HTMLIFrameElement>;
 
-  readonly embedUrl = 'https://embed.diagrams.net/?embed=1&proto=json&spin=1&ui=atlas&noSaveBtn=0&saveAndExit=0&noExitBtn=1';
+  readonly safeEmbedUrl: SafeResourceUrl;
 
   private listener!: (event: MessageEvent) => void;
   private initialized = false;
   private pendingXml: string | null = null;
+
+  constructor(sanitizer: DomSanitizer) {
+    this.safeEmbedUrl = sanitizer.bypassSecurityTrustResourceUrl(
+      'https://embed.diagrams.net/?embed=1&proto=json&spin=1&ui=atlas&noSaveBtn=0&saveAndExit=0&noExitBtn=1'
+    );
+  }
 
   ngOnInit(): void {
     this.listener = (event: MessageEvent) => {
