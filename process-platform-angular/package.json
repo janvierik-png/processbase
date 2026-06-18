@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "concurrently \"npm:api\" \"npm:frontend\"",
-    "frontend": "ng serve --host 0.0.0.0 --port 4200 --proxy-config proxy.conf.mjs",
+    "frontend": "ng serve --host 0.0.0.0 --port 4200 --proxy-config proxy.conf.mjs --poll 1000",
     "api": "tsx watch server/index.ts",
     "dev": "npm start",
     "build": "ng build",
