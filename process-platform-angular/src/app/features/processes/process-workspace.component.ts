@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { BpmnEditorComponent } from './components/bpmn-editor.component';
 import { BpmnViewerComponent } from './components/bpmn-viewer.component';
+import { FlowchartEditorComponent } from './components/flowchart-editor.component';
 import { ProcessStoreService } from '../../core/services/process-store.service';
 import { PositionService } from '../../core/services/position.service';
 import {
@@ -27,7 +28,7 @@ type Tab = 'card' | 'bpmn' | 'history';
 @Component({
   selector: 'pp-process-workspace',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, BpmnEditorComponent, BpmnViewerComponent],
+  imports: [FormsModule, DecimalPipe, BpmnEditorComponent, BpmnViewerComponent, FlowchartEditorComponent],
   templateUrl: './process-workspace.component.html',
   styleUrl: './process-workspace.component.scss'
 })
@@ -221,6 +222,18 @@ export class ProcessWorkspaceComponent implements OnInit {
   saveBpmn(xml: string): void {
     const process = this.active();
     if (process) this.store.updateProcess(process.id, { bpmnXml: xml });
+  }
+
+  saveFlowchart(xml: string): void {
+    const process = this.active();
+    if (process) this.store.updateProcess(process.id, { flowchartXml: xml });
+  }
+
+  saveDiagramType(type: 'NONE' | 'BPMN' | 'FLOWCHART'): void {
+    const detail = this.detail();
+    if (!detail) return;
+    this.detail.update((current) => current ? { ...current, diagramType: type } : current);
+    this.store.updateProcess(detail.id, { diagramType: type });
   }
 
   saveRevision(): void {

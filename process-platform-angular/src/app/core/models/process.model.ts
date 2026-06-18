@@ -16,6 +16,8 @@ export interface ProcessNode {
   isoSuggestions?: IsoSuggestion[];
   translations?: Record<string, { name: string; descriptionText: string }> | null;
   bpmnXml?: string;
+  diagramType?: 'NONE' | 'BPMN' | 'FLOWCHART';
+  flowchartXml?: string;
   diagramSvg?: string;
   iso?: IsoLink[];
   history?: string[];

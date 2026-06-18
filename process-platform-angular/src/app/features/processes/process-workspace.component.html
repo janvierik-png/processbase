@@ -208,11 +208,37 @@
 
       @if (tab() === 'bpmn') {
         <div class="bpmn-actions">
-          <button type="button" (click)="camundaDetailsOpen.set(!camundaDetailsOpen())">Camunda panel</button>
-          <button type="button" (click)="saveRevision()">Ulozit verziu</button>
-          <button type="button" (click)="deployToCamunda()">Camunda 7 deploy</button>
+          <span class="diagram-type-label">Typ diagramu:</span>
+          <button type="button"
+            [class.active]="(detail()?.diagramType ?? 'NONE') === 'NONE'"
+            (click)="saveDiagramType('NONE')">Bez diagramu</button>
+          <button type="button"
+            [class.active]="(detail()?.diagramType ?? 'NONE') === 'BPMN'"
+            (click)="saveDiagramType('BPMN')">BPMN</button>
+          <button type="button"
+            [class.active]="(detail()?.diagramType ?? 'NONE') === 'FLOWCHART'"
+            (click)="saveDiagramType('FLOWCHART')">Flowchart</button>
+
+          @if ((detail()?.diagramType ?? 'NONE') === 'BPMN') {
+            <span class="divider">|</span>
+            <button type="button" (click)="camundaDetailsOpen.set(!camundaDetailsOpen())">Camunda panel</button>
+            <button type="button" (click)="saveRevision()">Ulozit verziu</button>
+            <button type="button" (click)="deployToCamunda()">Camunda 7 deploy</button>
+          }
         </div>
-        <pp-bpmn-editor [xml]="active()?.bpmnXml || ''" [propertiesVisible]="camundaDetailsOpen()" (xmlChange)="saveBpmn($event)" />
+
+        @if ((detail()?.diagramType ?? 'NONE') === 'NONE') {
+          <div class="diagram-empty">
+            <p>Tento proces nema priradeny diagram.</p>
+            <p>Zvol typ diagramu vyššie — <strong>BPMN</strong> pre procesné modely alebo <strong>Flowchart</strong> pre jednoduché vývojové diagramy.</p>
+          </div>
+        }
+        @if ((detail()?.diagramType ?? 'NONE') === 'BPMN') {
+          <pp-bpmn-editor [xml]="active()?.bpmnXml || ''" [propertiesVisible]="camundaDetailsOpen()" (xmlChange)="saveBpmn($event)" />
+        }
+        @if ((detail()?.diagramType ?? 'NONE') === 'FLOWCHART') {
+          <pp-flowchart-editor [xml]="detail()?.flowchartXml || ''" (xmlChange)="saveFlowchart($event)" />
+        }
       }
 
       @if (tab() === 'history') {

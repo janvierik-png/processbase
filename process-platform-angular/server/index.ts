@@ -35,6 +35,8 @@ type ProcessTreeNode = {
   isoSuggestions?: unknown;
   translations?: unknown;
   bpmnXml?: string;
+  diagramType?: string;
+  flowchartXml?: string;
   diagramSvg?: string;
   iso?: Array<{ standard: string; clause: string; evidence: string }>;
   revisions?: Array<{ id: string; name: string; date: string; bpmnXml: string; diagramSvg?: string }>;
@@ -125,6 +127,8 @@ function mapNode(node: any): ProcessTreeNode {
     isoSuggestions: node.isoSuggestions ?? [],
     translations: node.translations ?? null,
     bpmnXml: node.bpmnXml ?? undefined,
+    diagramType: node.diagramType ?? 'NONE',
+    flowchartXml: node.flowchartXml ?? undefined,
     iso: (node.isoLinks ?? []).map((link: string) => {
       const [standard, clause = ''] = link.split(':');
       return { standard, clause, evidence: '' };
@@ -263,6 +267,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       descriptionText: body.descriptionText ?? undefined,
       status: body.status ? mapStatusToDb(body.status) : undefined,
       bpmnXml: body.bpmnXml ?? undefined,
+      diagramType: body.diagramType ?? undefined,
+      flowchartXml: body.flowchartXml !== undefined ? (body.flowchartXml ?? null) : undefined,
       isoLinks: body.iso ? isoLinksFromBody(body.iso) : undefined,
       parentId: body.parentId === undefined ? undefined : body.parentId,
       sortOrder: body.sortOrder === undefined ? undefined : Number(body.sortOrder),
@@ -286,6 +292,12 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     track('isoLinks', current.isoLinks, data.isoLinks);
     if (data.bpmnXml !== undefined && data.bpmnXml !== current.bpmnXml) {
       changedFields['bpmnXml'] = { from: '(diagram)', to: '(diagram zmeneny)' };
+    }
+    if ((data as any).diagramType !== undefined && (data as any).diagramType !== (current as any).diagramType) {
+      changedFields['diagramType'] = { from: (current as any).diagramType, to: (data as any).diagramType };
+    }
+    if ((data as any).flowchartXml !== undefined && (data as any).flowchartXml !== (current as any).flowchartXml) {
+      changedFields['flowchartXml'] = { from: '(flowchart)', to: '(flowchart zmeneny)' };
     }
 
     await prisma.processNode.update({ where: { id: processId }, data });

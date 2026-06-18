@@ -155,6 +155,8 @@ model ProcessNode {
   status             ProcessStatus       @default(DRAFT)
   sortOrder          Int                 @default(0)
   bpmnXml            String?
+  diagramType        String              @default("NONE")
+  flowchartXml       String?
   isoLinks           String[]
   relatedProcessIds  String[]
   isoSuggestions     Json?

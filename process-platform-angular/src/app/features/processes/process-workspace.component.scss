@@ -253,6 +253,34 @@ button.small {
 .bpmn-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.diagram-type-label {
+  font-size: 13px;
+  color: var(--muted, #888);
+  margin-right: 2px;
+}
+
+.divider {
+  color: var(--line, #ddd);
+  margin: 0 2px;
+}
+
+.diagram-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  gap: 12px;
+  color: var(--muted, #888);
+  text-align: center;
+  border: 2px dashed var(--line, #ddd);
+  border-radius: 8px;
+  padding: 40px;
 }
 
 .history-grid {
