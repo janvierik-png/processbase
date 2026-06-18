@@ -226,7 +226,9 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   saveFlowchart(xml: string): void {
     const process = this.active();
-    if (process) this.store.updateProcess(process.id, { flowchartXml: xml });
+    if (!process) return;
+    this.detail.update((current) => current ? { ...current, flowchartXml: xml } : current);
+    this.store.updateProcess(process.id, { flowchartXml: xml });
   }
 
   saveDiagramType(type: 'NONE' | 'BPMN' | 'FLOWCHART'): void {
