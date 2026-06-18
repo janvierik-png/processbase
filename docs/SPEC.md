@@ -203,4 +203,3 @@ Mapovanie rolí: owner→OWNER, admin→ADMIN, quality→MANAGER, approver→MOD
 ---
 
 *Processbase — interný dokument | Aktualizované: 11. júna 2026*
-# nastavenie PC Thu Jun 18 17:10:53     2026
