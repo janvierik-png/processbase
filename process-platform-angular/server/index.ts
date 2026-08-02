@@ -55,9 +55,20 @@ function mapAttachment(attachment: any) {
     createdAt: attachment.createdAt.toISOString().slice(0, 10),
     dataUrl: attachment.storagePath,
     processId: attachment.processNodeId ?? undefined,
-    processName: attachment.processNode?.name ?? undefined
+    processName: attachment.processNode?.name ?? undefined,
+    positionIds: (attachment.positions ?? []).map((item: any) => item.positionId),
+    positions: (attachment.positions ?? []).map((item: any) => ({
+      id: item.position?.id ?? item.positionId,
+      name: item.position?.name ?? ''
+    }))
   };
 }
+
+const ATTACHMENT_INCLUDE = {
+  processNode: true,
+  uploadedBy: true,
+  positions: { include: { position: true } }
+};
 
 function emptyBpmnXml(id: string, name: string): string {
   const escapedName = escapeXml(name);
@@ -406,7 +417,7 @@ app.get('/api/organizations/:organizationId/documents', async (request, response
     const attachments = await prisma.attachment.findMany({
       where: { organizationId: organization.id },
       orderBy: { createdAt: 'desc' },
-      include: { processNode: true, uploadedBy: true }
+      include: ATTACHMENT_INCLUDE
     });
     response.json(attachments.map(mapAttachment));
   } catch (error) {
@@ -419,7 +430,7 @@ app.get('/api/processes/:processId/documents', async (request, response, next) =
     const attachments = await prisma.attachment.findMany({
       where: { processNodeId: request.params.processId },
       orderBy: { createdAt: 'desc' },
-      include: { processNode: true, uploadedBy: true }
+      include: ATTACHMENT_INCLUDE
     });
     response.json(attachments.map(mapAttachment));
   } catch (error) {
@@ -443,9 +454,47 @@ app.post('/api/processes/:processId/documents', async (request, response, next) 
         sizeBytes: Number(request.body.sizeBytes ?? 0),
         storagePath: request.body.dataUrl ?? ''
       },
-      include: { processNode: true, uploadedBy: true }
+      include: ATTACHMENT_INCLUDE
     });
     response.status(201).json(mapAttachment(attachment));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// premenovanie dokumentu + priradenie pracovnym poziciam
+app.patch('/api/documents/:documentId', async (request, response, next) => {
+  try {
+    const { documentId } = request.params;
+    const existing = await prisma.attachment.findUnique({ where: { id: documentId } });
+    if (!existing) {
+      response.status(404).json({ message: 'Dokument sa nenasiel.' });
+      return;
+    }
+
+    const fileName = typeof request.body?.name === 'string' ? request.body.name.trim() : undefined;
+    if (fileName !== undefined && !fileName) throw new HttpError(400, 'Nazov dokumentu nesmie byt prazdny.');
+
+    if (fileName !== undefined) {
+      await prisma.attachment.update({ where: { id: documentId }, data: { fileName } });
+    }
+
+    if (Array.isArray(request.body?.positionIds)) {
+      const nextIds = [...new Set(request.body.positionIds as string[])];
+      await prisma.attachmentPosition.deleteMany({ where: { attachmentId: documentId } });
+      if (nextIds.length > 0) {
+        await prisma.attachmentPosition.createMany({
+          data: nextIds.map((positionId) => ({ attachmentId: documentId, positionId })),
+          skipDuplicates: true
+        });
+      }
+    }
+
+    const fresh = await prisma.attachment.findUnique({
+      where: { id: documentId },
+      include: ATTACHMENT_INCLUDE
+    });
+    response.json(mapAttachment(fresh));
   } catch (error) {
     next(error);
   }
@@ -959,6 +1008,8 @@ function mapOrgPosition(position: any) {
   return {
     id: position.id,
     organizationId: position.organizationId,
+    unitId: position.unitId ?? null,
+    unitName: position.unit?.name ?? null,
     name: position.name,
     description: position.description ?? '',
     createdAt: position.createdAt.toISOString().slice(0, 10),
@@ -966,7 +1017,82 @@ function mapOrgPosition(position: any) {
   };
 }
 
-const POSITION_INCLUDE = { users: { include: { user: true } } };
+function mapOrgUnit(unit: any) {
+  return {
+    id: unit.id,
+    organizationId: unit.organizationId,
+    name: unit.name,
+    description: unit.description ?? '',
+    sortOrder: unit.sortOrder ?? 0,
+    positionCount: unit._count?.positions ?? (unit.positions?.length ?? 0)
+  };
+}
+
+const POSITION_INCLUDE = { users: { include: { user: true } }, unit: true };
+
+// --- organizacne zlozky (utvary) ---
+
+app.get('/api/organizations/:organizationId/units', async (request, response, next) => {
+  try {
+    const units = await prisma.orgUnit.findMany({
+      where: { organizationId: request.params.organizationId },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      include: { _count: { select: { positions: true } } }
+    });
+    response.json(units.map(mapOrgUnit));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/organizations/:organizationId/units', async (request, response, next) => {
+  try {
+    const { name, description } = request.body ?? {};
+    if (!name?.trim()) throw new HttpError(400, 'name je povinny');
+    const existing = await prisma.orgUnit.findFirst({
+      where: { organizationId: request.params.organizationId, name: { equals: name.trim(), mode: 'insensitive' } }
+    });
+    if (existing) throw new HttpError(409, 'Zlozka s tymto nazvom uz existuje.');
+    const unit = await prisma.orgUnit.create({
+      data: {
+        organizationId: request.params.organizationId,
+        name: name.trim(),
+        description: description?.trim() || null
+      },
+      include: { _count: { select: { positions: true } } }
+    });
+    response.status(201).json(mapOrgUnit(unit));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/units/:unitId', async (request, response, next) => {
+  try {
+    const unit = await prisma.orgUnit.update({
+      where: { id: request.params.unitId },
+      data: {
+        name: request.body.name?.trim() || undefined,
+        description: request.body.description === undefined ? undefined : (request.body.description?.trim() || null),
+        sortOrder: request.body.sortOrder === undefined ? undefined : Number(request.body.sortOrder)
+      },
+      include: { _count: { select: { positions: true } } }
+    });
+    response.json(mapOrgUnit(unit));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/units/:unitId', async (request, response, next) => {
+  try {
+    // pozicie ostavaju, len stratia zaradenie (onDelete: SetNull)
+    await prisma.orgUnit.delete({ where: { id: request.params.unitId } });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get('/api/organizations/:organizationId/positions', async (request, response, next) => {
   try {
@@ -983,7 +1109,7 @@ app.get('/api/organizations/:organizationId/positions', async (request, response
 
 app.post('/api/organizations/:organizationId/positions', async (request, response, next) => {
   try {
-    const { name, description } = request.body ?? {};
+    const { name, description, unitId } = request.body ?? {};
     if (!name) throw new HttpError(400, 'name je povinny');
     const existing = await prisma.orgPosition.findFirst({
       where: { organizationId: request.params.organizationId, name: { equals: name, mode: 'insensitive' } }
@@ -993,7 +1119,8 @@ app.post('/api/organizations/:organizationId/positions', async (request, respons
       data: {
         organizationId: request.params.organizationId,
         name,
-        description: description || null
+        description: description || null,
+        unitId: unitId || null
       },
       include: POSITION_INCLUDE
     });
@@ -1009,7 +1136,8 @@ app.patch('/api/positions/:positionId', async (request, response, next) => {
       where: { id: request.params.positionId },
       data: {
         name: request.body.name ?? undefined,
-        description: request.body.description === undefined ? undefined : (request.body.description || null)
+        description: request.body.description === undefined ? undefined : (request.body.description || null),
+        unitId: request.body.unitId === undefined ? undefined : (request.body.unitId || null)
       },
       include: POSITION_INCLUDE
     });

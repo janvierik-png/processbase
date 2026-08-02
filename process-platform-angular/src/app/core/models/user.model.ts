@@ -12,9 +12,20 @@ export interface User {
   positions?: Array<{ id: string; name: string }>;
 }
 
+export interface OrgUnit {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  positionCount: number;
+}
+
 export interface OrgPosition {
   id: string;
   organizationId: string;
+  unitId: string | null;
+  unitName: string | null;
   name: string;
   description: string;
   createdAt: string;

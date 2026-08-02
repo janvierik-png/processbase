@@ -29,6 +29,10 @@ export class DocumentService {
     });
   }
 
+  update(id: string, patch: { name?: string; positionIds?: string[] }) {
+    return this.http.patch<Attachment>(`${API_BASE_URL}/documents/${id}`, patch);
+  }
+
   delete(id: string) {
     return this.http.delete<void>(`${API_BASE_URL}/documents/${id}`);
   }

@@ -28,6 +28,9 @@ services:
       CAMUNDA7_BASE_URL: http://host.docker.internal:8080/engine-rest
       CAMUNDA7_USERNAME: ""
       CAMUNDA7_PASSWORD: ""
+      # bind-mount na Windows neposiela inotify eventy — tsx watch potrebuje polling
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "1000"
     ports:
       - "3000:3000"
     volumes:

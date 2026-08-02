@@ -90,6 +90,8 @@ export interface Attachment {
   dataUrl?: string;
   processId?: string;
   processName?: string;
+  positionIds?: string[];
+  positions?: ProcessPositionRef[];
 }
 
 export interface ProcessRevision {

@@ -12,17 +12,37 @@
     <div class="table-head">
       <span>Nazov</span>
       <span>Proces</span>
+      <span>Pracovne pozicie</span>
       <span>Typ</span>
       <span>Velkost</span>
       <span></span>
     </div>
     @for (document of documents(); track document.id) {
       <div class="table-row">
-        <strong>{{ document.name }}</strong>
+        @if (editingId === document.id) {
+          <input [(ngModel)]="nameDraft" name="docName" (keydown.enter)="saveName(document)">
+        } @else {
+          <strong>{{ document.name }}</strong>
+        }
         <span>{{ document.processName || '-' }}</span>
+        <span class="positions-cell">
+          @for (position of document.positions ?? []; track position.id) {
+            <span class="chip">{{ position.name }}</span>
+          } @empty {
+            <span class="muted">—</span>
+          }
+        </span>
         <span>{{ document.type }}</span>
         <span>{{ document.size || 0 }} B</span>
-        <button type="button" (click)="deleteDocument(document)">Vymazat</button>
+        <span class="row-actions">
+          @if (editingId === document.id) {
+            <button type="button" (click)="saveName(document)">Ulozit</button>
+            <button type="button" (click)="cancelEdit()">Zrusit</button>
+          } @else {
+            <button type="button" (click)="startEdit(document)">Premenovat</button>
+            <button type="button" (click)="deleteDocument(document)">Vymazat</button>
+          }
+        </span>
       </div>
     } @empty {
       <p class="empty">Zatial nie su nahrate ziadne dokumenty.</p>

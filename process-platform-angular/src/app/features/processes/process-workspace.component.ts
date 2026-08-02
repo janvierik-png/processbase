@@ -52,6 +52,10 @@ export class ProcessWorkspaceComponent implements OnInit {
   // R1: pozicie organizacie
   readonly positions = signal<OrgPosition[]>([]);
 
+  // dokumenty — premenovanie
+  editingDocumentId: string | null = null;
+  documentNameDraft = '';
+
   // R6: ISO normy a rezim stromu
   readonly norms = signal<IsoNorm[]>([]);
   readonly treeMode = signal<'standard' | 'iso'>('standard');
@@ -334,6 +338,57 @@ export class ProcessWorkspaceComponent implements OnInit {
       input.value = '';
     };
     reader.readAsDataURL(file);
+  }
+
+  startDocumentEdit(document: Attachment): void {
+    this.editingDocumentId = document.id;
+    this.documentNameDraft = document.name;
+  }
+
+  cancelDocumentEdit(): void {
+    this.editingDocumentId = null;
+    this.documentNameDraft = '';
+  }
+
+  saveDocumentName(document: Attachment): void {
+    const name = this.documentNameDraft.trim();
+    if (!name || name === document.name) {
+      this.cancelDocumentEdit();
+      return;
+    }
+    this.documentsApi.update(document.id, { name }).subscribe({
+      next: (updated) => {
+        this.documents.update((items) => items.map((item) => item.id === updated.id ? updated : item));
+        this.cancelDocumentEdit();
+      },
+      error: (error) => this.store.error.set(error?.error?.message ?? 'Dokument sa nepodarilo premenovat.')
+    });
+  }
+
+  availableDocumentPositions(document: Attachment): OrgPosition[] {
+    const assigned = new Set(document.positionIds ?? []);
+    return this.positions().filter((position) => !assigned.has(position.id));
+  }
+
+  addDocumentPosition(document: Attachment, positionId: string): void {
+    if (!positionId) return;
+    const next = [...new Set([...(document.positionIds ?? []), positionId])];
+    this.persistDocumentPositions(document, next);
+  }
+
+  toggleDocumentPosition(document: Attachment, positionId: string): void {
+    const current = document.positionIds ?? [];
+    const next = current.includes(positionId)
+      ? current.filter((id) => id !== positionId)
+      : [...current, positionId];
+    this.persistDocumentPositions(document, next);
+  }
+
+  private persistDocumentPositions(document: Attachment, positionIds: string[]): void {
+    this.documentsApi.update(document.id, { positionIds }).subscribe({
+      next: (updated) => this.documents.update((items) => items.map((item) => item.id === updated.id ? updated : item)),
+      error: (error) => this.store.error.set(error?.error?.message ?? 'Priradenie pozicie sa nepodarilo ulozit.')
+    });
   }
 
   deleteDocument(document: Attachment): void {

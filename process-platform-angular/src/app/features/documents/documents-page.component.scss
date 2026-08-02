@@ -17,11 +17,37 @@ h2 {
 .table-head,
 .table-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) 140px 110px 100px;
+  grid-template-columns: minmax(200px, 1.3fr) minmax(150px, 1fr) minmax(160px, 1fr) 120px 90px 190px;
   gap: 12px;
   align-items: center;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
+}
+
+.positions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  background: #e2f1f4;
+  border: 1px solid #b8dbe2;
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--accent-strong);
+  font-size: 12px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.muted {
+  color: var(--muted);
 }
 
 .table-head {

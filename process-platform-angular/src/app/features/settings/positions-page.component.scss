@@ -110,3 +110,24 @@ label {
 .error {
   color: var(--warn);
 }
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.unit-group {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.unit-heading {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 5px;
+}

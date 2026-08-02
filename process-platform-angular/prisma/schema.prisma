@@ -72,6 +72,7 @@ model Organization {
   approvalRequests   ApprovalRequest[]
   camundaDeployments CamundaDeployment[]
   positions          OrgPosition[]
+  units              OrgUnit[]
 }
 
 model User {
@@ -211,6 +212,7 @@ model Attachment {
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   processNode    ProcessNode?   @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
   uploadedBy     User?          @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  positions      AttachmentPosition[]
 
   @@index([organizationId, processNodeId])
 }
@@ -278,18 +280,46 @@ model Translation {
   @@index([locale, key])
 }
 
+model OrgUnit {
+  id             String        @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  sortOrder      Int           @default(0)
+  createdAt      DateTime      @default(now())
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  positions      OrgPosition[]
+
+  @@unique([organizationId, name])
+}
+
 model OrgPosition {
   id             String       @id @default(uuid())
   organizationId String
+  unitId         String?
   name           String
   description    String?
   createdAt      DateTime     @default(now())
 
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  unit           OrgUnit?             @relation(fields: [unitId], references: [id], onDelete: SetNull)
   users          UserPosition[]
   processes      ProcessPosition[]
+  documents      AttachmentPosition[]
 
   @@unique([organizationId, name])
+}
+
+model AttachmentPosition {
+  id           String      @id @default(uuid())
+  attachmentId String
+  positionId   String
+
+  attachment   Attachment  @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  position     OrgPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  @@unique([attachmentId, positionId])
 }
 
 model UserPosition {

@@ -218,9 +218,44 @@
           </label>
           @for (document of documents(); track document.id) {
             <div class="document-row">
-              <span>{{ document.name }}</span>
-              <small>{{ document.type }} · {{ document.size || 0 }} B</small>
-              <button type="button" (click)="deleteDocument(document)">Vymazat</button>
+              @if (editingDocumentId === document.id) {
+                <input class="doc-name-input" [(ngModel)]="documentNameDraft" name="docName" (keydown.enter)="saveDocumentName(document)">
+                <small>{{ document.type }} · {{ document.size || 0 }} B</small>
+                <div class="doc-actions">
+                  <button type="button" (click)="saveDocumentName(document)">Ulozit</button>
+                  <button type="button" (click)="cancelDocumentEdit()">Zrusit</button>
+                </div>
+              } @else {
+                <span>{{ document.name }}</span>
+                <small>{{ document.type }} · {{ document.size || 0 }} B</small>
+                <div class="doc-actions">
+                  <button type="button" (click)="startDocumentEdit(document)">Premenovat</button>
+                  <button type="button" (click)="deleteDocument(document)">Vymazat</button>
+                </div>
+              }
+
+              <div class="doc-positions">
+                <div class="chip-list">
+                  @for (position of document.positions ?? []; track position.id) {
+                    <span class="chip">
+                      {{ position.name }}
+                      <button type="button" class="chip-remove" (click)="toggleDocumentPosition(document, position.id)">×</button>
+                    </span>
+                  } @empty {
+                    <span class="muted-small">Bez priradenej pozicie</span>
+                  }
+                </div>
+                @if (positions().length > 0) {
+                  <select class="doc-position-select"
+                    [ngModel]="''" [name]="'docpos-' + document.id"
+                    (ngModelChange)="addDocumentPosition(document, $event)">
+                    <option value="">+ Priradit poziciu...</option>
+                    @for (position of availableDocumentPositions(document); track position.id) {
+                      <option [value]="position.id">{{ position.unitName ? position.unitName + ' — ' + position.name : position.name }}</option>
+                    }
+                  </select>
+                }
+              </div>
             </div>
           }
         </section>
