@@ -409,6 +409,17 @@ export class ProcessWorkspaceComponent implements OnInit {
     reader.readAsDataURL(file);
   }
 
+  documentUrl(document: Attachment): string {
+    return this.documentsApi.downloadUrl(document.id);
+  }
+
+  formatSize(bytes?: number): string {
+    const value = bytes ?? 0;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} kB`;
+    return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  }
+
   startDocumentEdit(document: Attachment): void {
     this.editingDocumentId = document.id;
     this.documentNameDraft = document.name;

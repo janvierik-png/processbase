@@ -374,10 +374,13 @@
                   </div>
                 } @else {
                   <div class="doc-main">
-                    <span class="doc-name">{{ document.name }}</span>
-                    <small>Pridane {{ document.createdAt }} · {{ document.size || 0 }} B</small>
+                    <a class="doc-name" [href]="documentUrl(document)" [attr.download]="document.name" [title]="'Stiahnut ' + document.name">
+                      {{ document.name }}
+                    </a>
+                    <small>Pridane {{ document.createdAt }} · {{ formatSize(document.size) }}</small>
                   </div>
                   <div class="doc-actions">
+                    <a class="doc-download" [href]="documentUrl(document)" [attr.download]="document.name" title="Stiahnut">Stiahnut</a>
                     <button type="button" class="ghost small" (click)="startDocumentEdit(document)">Premenovat</button>
                     <button type="button" class="ghost small" (click)="deleteDocument(document)">Vymazat</button>
                   </div>

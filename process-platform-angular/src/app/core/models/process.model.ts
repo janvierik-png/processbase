@@ -87,7 +87,6 @@ export interface Attachment {
   owner: string;
   size?: number;
   createdAt?: string;
-  dataUrl?: string;
   processId?: string;
   processName?: string;
   positionIds?: string[];

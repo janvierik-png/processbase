@@ -29,6 +29,11 @@ export class DocumentService {
     });
   }
 
+  /** URL na stiahnutie — obsah sa tahá az na vyziadanie, nie vo vypise. */
+  downloadUrl(id: string): string {
+    return `${API_BASE_URL}/documents/${id}/download`;
+  }
+
   update(id: string, patch: { name?: string; positionIds?: string[] }) {
     return this.http.patch<Attachment>(`${API_BASE_URL}/documents/${id}`, patch);
   }

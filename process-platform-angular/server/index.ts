@@ -53,7 +53,7 @@ function mapAttachment(attachment: any) {
     owner: attachment.uploadedBy?.name ?? '',
     size: attachment.sizeBytes,
     createdAt: attachment.createdAt.toISOString().slice(0, 10),
-    dataUrl: attachment.storagePath,
+    // obsah suboru sa vo vypisoch neposiela — na stiahnutie sluzi /api/documents/:id/download
     processId: attachment.processNodeId ?? undefined,
     processName: attachment.processNode?.name ?? undefined,
     positionIds: (attachment.positions ?? []).map((item: any) => item.positionId),
@@ -495,6 +495,43 @@ app.patch('/api/documents/:documentId', async (request, response, next) => {
       include: ATTACHMENT_INCLUDE
     });
     response.json(mapAttachment(fresh));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// stiahnutie dokumentu — obsah je ulozeny ako data URL v storagePath
+app.get('/api/documents/:documentId/download', async (request, response, next) => {
+  try {
+    const attachment = await prisma.attachment.findUnique({ where: { id: request.params.documentId } });
+    if (!attachment) {
+      response.status(404).json({ message: 'Dokument sa nenasiel.' });
+      return;
+    }
+
+    const stored = attachment.storagePath ?? '';
+    const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(stored);
+    if (!match) {
+      response.status(409).json({ message: 'Dokument nema ulozeny obsah.' });
+      return;
+    }
+
+    const [, storedMime, base64Flag, payload] = match;
+    const body = base64Flag
+      ? Buffer.from(payload, 'base64')
+      : Buffer.from(decodeURIComponent(payload), 'utf8');
+
+    // RFC 5987 — aby fungovala aj diakritika v nazve suboru
+    const fileName = attachment.fileName || 'dokument';
+    const asciiName = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+
+    response.setHeader('Content-Type', attachment.mimeType || storedMime || 'application/octet-stream');
+    response.setHeader('Content-Length', String(body.length));
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+    );
+    response.send(body);
   } catch (error) {
     next(error);
   }
