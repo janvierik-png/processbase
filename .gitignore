@@ -11,6 +11,9 @@ process-platform-angular/generated/
 .env
 *.local
 
+# Osobne nastavenia Claude Code (kazdy PC ma vlastne cesty)
+.claude/settings.local.json
+
 # IDE a OS
 .idea/
 .vscode/
