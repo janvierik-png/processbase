@@ -1,9 +1,24 @@
 <section class="process-layout" [class.panel-narrow]="panelState() === 'narrow'" [class.panel-hidden]="panelState() === 'hidden'">
   <aside class="process-tree">
-    <div class="tree-actions">
-      <button type="button" (click)="store.createProcess()">Novy proces</button>
-      @if (norms().length > 0) {
-        <button type="button" [class.active]="treeMode() === 'iso'" (click)="toggleTreeMode()">ISO view</button>
+    <header class="tree-header">
+      <h3>Strom procesov</h3>
+      <div class="tree-header-actions">
+        <button type="button" class="icon-btn" title="Novy proces" (click)="store.createProcess()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        @if (norms().length > 0) {
+          <button type="button" class="icon-btn" [class.active]="treeMode() === 'iso'" title="ISO pohlad" (click)="toggleTreeMode()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+          </button>
+        }
+      </div>
+    </header>
+
+    <div class="tree-search">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>
+      <input type="text" placeholder="Hladat v strome..." [(ngModel)]="treeSearch" name="treeSearch" autocomplete="off">
+      @if (treeSearch) {
+        <button type="button" class="search-clear" (click)="clearTreeSearch()" title="Zrusit hladanie">×</button>
       }
     </div>
 
@@ -15,34 +30,51 @@
     }
 
     @if (treeMode() === 'standard') {
-      <div class="root-drop" [class.drop-target]="dropTargetId() === '__root__'"
-        (dragover)="onDragOver(null, $event)" (drop)="onDrop(null, $event)">
-        Korenova uroven (presun sem = bez nadradeneho)
-      </div>
-      @for (row of treeRows(); track row.node.id) {
+      @if (!treeSearch) {
+        <div class="root-drop" [class.drop-target]="dropTargetId() === '__root__'"
+          (dragover)="onDragOver(null, $event)" (drop)="onDrop(null, $event)">
+          Korenova uroven (presun sem = bez nadradeneho)
+        </div>
+      }
+      @for (row of visibleTreeRows(); track row.node.id) {
         <div class="tree-row"
           [class.active]="row.node.id === store.activeProcessId()"
           [class.drop-target]="dropTargetId() === row.node.id"
           [style.--level]="row.level"
-          draggable="true"
+          [attr.draggable]="!treeSearch"
           (dragstart)="onDragStart(row.node, $event)"
           (dragover)="onDragOver(row.node, $event)"
           (drop)="onDrop(row.node, $event)">
           <button type="button" class="tree-toggle" (click)="toggleCollapse(row.node, $event)">
-            {{ hasChildren(row.node) ? (collapsedIds().has(row.node.id) ? '+' : '-') : '·' }}
+            @if (hasChildren(row.node)) {
+              <svg class="chevron" [class.open]="!collapsedIds().has(row.node.id)" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+            }
           </button>
+          <svg class="tree-icon" viewBox="0 0 24 24" aria-hidden="true">
+            @if (hasChildren(row.node)) {
+              <path d="M3 6h6l2 2h10v11H3z"/>
+            } @else {
+              <path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>
+            }
+          </svg>
           <button type="button" class="tree-select" (click)="select(row.node)">{{ row.node.name }}</button>
-          <button type="button" title="Premenovat" (click)="rename(row.node, $event)">Aa</button>
-          <button type="button" title="Vymazat" (click)="delete(row.node, $event)">X</button>
+          <span class="tree-row-actions">
+            <button type="button" class="icon-btn" title="Premenovat" (click)="rename(row.node, $event)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16z"/></svg>
+            </button>
+            <button type="button" class="icon-btn danger" title="Vymazat" (click)="delete(row.node, $event)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>
+            </button>
+          </span>
         </div>
       } @empty {
-        <p class="empty">Firma este nema procesy.</p>
+        <p class="empty">{{ treeSearch ? 'Ziadny proces nezodpoveda hladaniu.' : 'Firma este nema procesy.' }}</p>
       }
     } @else {
       @for (row of treeRows(); track row.node.id) {
         @if (row.kind === 'process') {
-          <div class="tree-row" [class.active]="row.node.id === store.activeProcessId()" [style.--level]="row.level">
-            <span class="tree-toggle">P</span>
+          <div class="tree-row simple" [class.active]="row.node.id === store.activeProcessId()" [style.--level]="row.level">
+            <svg class="tree-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>
             <button type="button" class="tree-select" (click)="select(row.node)">{{ row.node.name }}</button>
           </div>
         } @else {
@@ -54,8 +86,8 @@
       @if (unassignedProcesses().length > 0) {
         <div class="tree-row heading"><strong>Nepriradene</strong></div>
         @for (process of unassignedProcesses(); track process.id) {
-          <div class="tree-row unassigned" [class.active]="process.id === store.activeProcessId()" [style.--level]="1">
-            <span class="tree-toggle">?</span>
+          <div class="tree-row simple unassigned" [class.active]="process.id === store.activeProcessId()" [style.--level]="1">
+            <svg class="tree-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>
             <button type="button" class="tree-select" (click)="select(process)">{{ process.name }}</button>
           </div>
         }
@@ -68,13 +100,24 @@
 
     @if (detail(); as process) {
       <header class="process-header">
-        <div>
-          <p class="eyebrow">Proces</p>
-          <h2>{{ process.name }}</h2>
+        <div class="process-identity">
+          <span class="process-mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v5H4zM14 5h6v5h-6zM9 14h6v5H9z"/><path d="M7 10v2h10v-2M12 12v2"/></svg>
+          </span>
+          <div class="process-titles">
+            @if (process.parentName) {
+              <p class="breadcrumb">{{ process.parentName }} <span>/</span></p>
+            }
+            <div class="title-row">
+              <h2>{{ process.name }}</h2>
+              <span [class]="'badge ' + statusClass(process.status)">{{ process.status }}</span>
+            </div>
+          </div>
         </div>
+
         <nav class="tabs">
-          <button type="button" [class.active]="tab() === 'card'" (click)="tab.set('card')">Popis</button>
-          <button type="button" [class.active]="tab() === 'bpmn'" (click)="tab.set('bpmn')">Zobrazit diagram</button>
+          <button type="button" [class.active]="tab() === 'card'" (click)="tab.set('card')">Prehlad</button>
+          <button type="button" [class.active]="tab() === 'bpmn'" (click)="tab.set('bpmn')">Diagram</button>
           <button type="button" [class.active]="tab() === 'history'" (click)="tab.set('history')">Historia</button>
         </nav>
       </header>
@@ -84,113 +127,210 @@
       }
 
       @if (tab() === 'card') {
-        <section class="summary">
-          <div><span>Vlastnik</span><strong>{{ process.owner || '-' }}</strong></div>
-          <div><span>Stav</span><strong>{{ process.status }}</strong></div>
-          <div><span>Posledna zmena</span><strong>{{ process.revision }}</strong></div>
-          <div><span>Nadradeny proces</span><strong>{{ process.parentName || '—' }}</strong></div>
+      <div class="overview-layout">
+        <div class="overview-main">
+
+        <section class="card">
+          <header class="card-head">
+            <h3>Zakladne informacie</h3>
+            @if (editSection() !== 'basic') {
+              <button type="button" class="ghost small" (click)="startEdit('basic')">Upravit</button>
+            }
+          </header>
+
+          @if (editSection() === 'basic') {
+            <form class="card-body edit-grid" (ngSubmit)="saveDetail()">
+              <label>Nazov procesu <input name="name" [(ngModel)]="process.name"></label>
+              <label>Stav
+                <select name="status" [(ngModel)]="process.status">
+                  <option>Navrh</option>
+                  <option>Na schvalenie</option>
+                  <option>Schvalene</option>
+                  <option>Archiv</option>
+                </select>
+              </label>
+              <label>Nadradeny proces
+                <select name="parentId" [(ngModel)]="process.parentId">
+                  <option [ngValue]="null">— ziadny (korenovy proces)</option>
+                  @for (candidate of parentCandidates(); track candidate.id) {
+                    <option [ngValue]="candidate.id">{{ candidate.name }}</option>
+                  }
+                </select>
+              </label>
+              <label>Popis zmeny (audit)
+                <input name="changeDescription" [(ngModel)]="changeDescription" placeholder="Co sa zmenilo a preco">
+              </label>
+              <div class="edit-actions span-two">
+                <button class="primary" type="submit">Ulozit</button>
+                <button type="button" (click)="cancelEdit()">Zrusit</button>
+              </div>
+            </form>
+          } @else {
+            <div class="card-body info-grid">
+              <div class="info-item">
+                <span>Stav</span>
+                <strong><span [class]="'badge ' + statusClass(process.status)">{{ process.status }}</span></strong>
+              </div>
+              <div class="info-item">
+                <span>Vlastnik</span>
+                <strong class="owner-cell">
+                  <span class="avatar">{{ initials(process.owner) }}</span>
+                  {{ process.owner || '—' }}
+                </strong>
+              </div>
+              <div class="info-item">
+                <span>Nadradeny proces</span>
+                <strong>{{ process.parentName || '—' }}</strong>
+              </div>
+              <div class="info-item">
+                <span>Posledna zmena</span>
+                <strong>{{ process.revision || '—' }}</strong>
+              </div>
+            </div>
+          }
         </section>
 
-        <form class="detail-card" (ngSubmit)="saveDetail()">
-          <section class="detail-grid">
-            <label>Nazov procesu <input name="name" [(ngModel)]="process.name"></label>
-            <label>Stav
-              <select name="status" [(ngModel)]="process.status">
-                <option>Navrh</option>
-                <option>Na schvalenie</option>
-                <option>Schvalene</option>
-                <option>Archiv</option>
-              </select>
-            </label>
-            <label>Nadradeny proces
-              <select name="parentId" [(ngModel)]="process.parentId">
-                <option [ngValue]="null">— ziadny (korenovy proces)</option>
-                @for (candidate of parentCandidates(); track candidate.id) {
-                  <option [ngValue]="candidate.id">{{ candidate.name }}</option>
-                }
-              </select>
-            </label>
-            <label>Popis zmeny (audit)
-              <input name="changeDescription" [(ngModel)]="changeDescription" placeholder="Co sa zmenilo a preco">
-            </label>
-            <label class="span-two">Ucel <textarea name="purpose" [(ngModel)]="process.purpose" rows="2"></textarea></label>
-            <label class="span-two">Dokumentacia procesu
-              <textarea name="descriptionText" [(ngModel)]="process.descriptionText" rows="5" placeholder="Detailny popis procesu, vstupy, vystupy, zodpovednosti..."></textarea>
-            </label>
-            <label class="span-two">Rizika <textarea name="risks" [(ngModel)]="process.risks" rows="2"></textarea></label>
-          </section>
+        <section class="card">
+          <header class="card-head">
+            <h3>Popis procesu</h3>
+            @if (editSection() !== 'description') {
+              <button type="button" class="ghost small" (click)="startEdit('description')">Upravit</button>
+            }
+          </header>
 
+          @if (editSection() === 'description') {
+            <form class="card-body" (ngSubmit)="saveDetail()">
+              <label>Ucel <textarea name="purpose" [(ngModel)]="process.purpose" rows="2"></textarea></label>
+              <label>Dokumentacia procesu
+                <textarea name="descriptionText" [(ngModel)]="process.descriptionText" rows="6" placeholder="Detailny popis procesu, vstupy, vystupy, zodpovednosti..."></textarea>
+              </label>
+              <label>Rizika <textarea name="risks" [(ngModel)]="process.risks" rows="2"></textarea></label>
+              <label>Popis zmeny (audit)
+                <input name="changeDescription" [(ngModel)]="changeDescription" placeholder="Co sa zmenilo a preco">
+              </label>
+              <div class="edit-actions">
+                <button class="primary" type="submit">Ulozit</button>
+                <button type="button" (click)="cancelEdit()">Zrusit</button>
+              </div>
+            </form>
+          } @else {
+            <div class="card-body read-body">
+              <div class="read-field">
+                <span>Ucel</span>
+                <p>{{ process.purpose || '—' }}</p>
+              </div>
+              <div class="read-field">
+                <span>Dokumentacia</span>
+                <p class="prewrap">{{ process.descriptionText || '—' }}</p>
+              </div>
+              <div class="read-field">
+                <span>Rizika</span>
+                <p>{{ process.risks || '—' }}</p>
+              </div>
+            </div>
+          }
+        </section>
+
+        <section class="card">
+          <header class="card-head">
+            <h3>Vazby a zaradenie</h3>
+            @if (editSection() !== 'relations') {
+              <button type="button" class="ghost small" (click)="startEdit('relations')">Upravit</button>
+            }
+          </header>
+
+          <form class="card-body" (ngSubmit)="saveDetail()">
           <section class="relations-grid">
             <div class="relation-box">
-              <h3>Suvisiace procesy</h3>
+              <h4>Suvisiace procesy</h4>
               <div class="chip-list">
                 @for (id of (process.relatedProcessIds ?? []); track id) {
                   <span class="chip">
                     {{ relatedName(id) }}
-                    <button type="button" class="chip-remove" (click)="toggleRelated(id)" title="Odstranit">×</button>
+                    @if (editSection() === 'relations') {
+                      <button type="button" class="chip-remove" (click)="toggleRelated(id)" title="Odstranit">×</button>
+                    }
                   </span>
                 } @empty {
                   <span class="muted-small">Ziadne priradene procesy.</span>
                 }
               </div>
-              <div class="related-search">
-                <input
-                  type="text"
-                  placeholder="Hladat a pridat proces..."
-                  [(ngModel)]="relatedSearch"
-                  name="relatedSearch"
-                  autocomplete="off"
-                  (focus)="relatedOpen = true"
-                  (blur)="onRelatedBlur()"
-                />
-                @if (relatedOpen && relatedSearchResults().length > 0) {
-                  <div class="search-dropdown">
-                    @for (candidate of relatedSearchResults(); track candidate.id) {
-                      <button type="button" class="search-item" (mousedown)="addRelated(candidate.id)">
-                        {{ candidate.name }}
-                      </button>
+              @if (editSection() === 'relations') {
+                <div class="related-search">
+                  <input
+                    type="text"
+                    placeholder="Hladat a pridat proces..."
+                    [(ngModel)]="relatedSearch"
+                    name="relatedSearch"
+                    autocomplete="off"
+                    (focus)="relatedOpen = true"
+                    (blur)="onRelatedBlur()"
+                  />
+                  @if (relatedOpen && relatedSearchResults().length > 0) {
+                    <div class="search-dropdown">
+                      @for (candidate of relatedSearchResults(); track candidate.id) {
+                        <button type="button" class="search-item" (mousedown)="addRelated(candidate.id)">
+                          {{ candidate.name }}
+                        </button>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+
+            <div class="relation-box">
+              <h4>Pracovne pozicie</h4>
+              @if (editSection() === 'relations') {
+                @for (position of positions(); track position.id) {
+                  <label class="check-row">
+                    <input type="checkbox"
+                      [checked]="(process.positionIds ?? []).includes(position.id)"
+                      (change)="togglePosition(position.id)">
+                    {{ position.unitName ? position.unitName + ' — ' + position.name : position.name }}
+                  </label>
+                } @empty {
+                  <p class="muted-small">Organizacia nema definovane pozicie. Vytvor ich v Nastaveniach.</p>
+                }
+              } @else {
+                <div class="chip-list">
+                  @for (position of process.positions ?? []; track position.id) {
+                    <span class="chip">{{ position.name }}</span>
+                  } @empty {
+                    <span class="muted-small">Ziadne priradene pozicie.</span>
+                  }
+                </div>
+              }
+            </div>
+
+            <div class="relation-box">
+              <h4>Podriadene procesy</h4>
+              @for (child of process.childProcesses ?? []; track child.id) {
+                <button type="button" class="link-row" (click)="selectById(child.id)">{{ child.name }}</button>
+              } @empty {
+                <p class="muted-small">Ziadne podriadene procesy.</p>
+              }
+            </div>
+
+            <div class="relation-box">
+              <h4>ISO vazby
+                @if (editSection() === 'relations') {
+                  <button type="button" class="small" (click)="detectIso()">Detekovat ISO</button>
+                }
+              </h4>
+              <div class="chip-list">
+                @for (link of process.iso ?? []; track $index) {
+                  <span class="chip">{{ link.standard }} — {{ link.clause }}
+                    @if (editSection() === 'relations') {
+                      <button type="button" class="chip-remove" (click)="removeIsoLink($index)">×</button>
                     }
-                  </div>
+                  </span>
+                } @empty {
+                  <span class="muted-small">Ziadne ISO vazby.</span>
                 }
               </div>
-            </div>
-
-            <div class="relation-box">
-              <h3>Pracovne pozicie</h3>
-              @for (position of positions(); track position.id) {
-                <label class="check-row">
-                  <input type="checkbox"
-                    [checked]="(process.positionIds ?? []).includes(position.id)"
-                    (change)="togglePosition(position.id)">
-                  {{ position.name }}
-                </label>
-              } @empty {
-                <p class="muted">Organizacia nema definovane pozicie. Vytvor ich v Nastaveniach.</p>
-              }
-            </div>
-
-            <div class="relation-box">
-              <h3>Podriadene procesy</h3>
-              @for (child of process.childProcesses ?? []; track child.id) {
-                <p>{{ child.name }}</p>
-              } @empty {
-                <p class="muted">Ziadne podriadene procesy.</p>
-              }
-            </div>
-
-            <div class="relation-box">
-              <h3>ISO vazby
-                <button type="button" class="small" (click)="detectIso()">Detekovat ISO</button>
-              </h3>
-              @for (link of process.iso ?? []; track $index) {
-                <p class="iso-link">{{ link.standard }} — {{ link.clause }}
-                  <button type="button" class="small" (click)="removeIsoLink($index)">×</button>
-                </p>
-              } @empty {
-                <p class="muted">Ziadne ISO vazby.</p>
-              }
-              @if ((process.isoSuggestions ?? []).length > 0) {
-                <h4>Navrhy</h4>
+              @if (editSection() === 'relations' && (process.isoSuggestions ?? []).length > 0) {
+                <p class="suggest-label">Navrhy</p>
                 @for (suggestion of process.isoSuggestions ?? []; track $index) {
                   <p class="iso-suggestion">
                     {{ suggestion.normName }} {{ suggestion.clause }} — {{ suggestion.title }}
@@ -202,63 +342,106 @@
             </div>
           </section>
 
-          <div class="card-actions">
-            <button class="primary" type="submit">Ulozit proces</button>
-          </div>
-        </form>
-
-        <section class="documents-panel">
-          <div>
-            <h3>Dokumenty procesu</h3>
-            <p>{{ documents().length }} dokumentov</p>
-          </div>
-          <label class="upload-button">
-            Upload
-            <input type="file" (change)="uploadDocument($event)">
-          </label>
-          @for (document of documents(); track document.id) {
-            <div class="document-row">
-              @if (editingDocumentId === document.id) {
-                <input class="doc-name-input" [(ngModel)]="documentNameDraft" name="docName" (keydown.enter)="saveDocumentName(document)">
-                <small>{{ document.type }} · {{ document.size || 0 }} B</small>
-                <div class="doc-actions">
-                  <button type="button" (click)="saveDocumentName(document)">Ulozit</button>
-                  <button type="button" (click)="cancelDocumentEdit()">Zrusit</button>
-                </div>
-              } @else {
-                <span>{{ document.name }}</span>
-                <small>{{ document.type }} · {{ document.size || 0 }} B</small>
-                <div class="doc-actions">
-                  <button type="button" (click)="startDocumentEdit(document)">Premenovat</button>
-                  <button type="button" (click)="deleteDocument(document)">Vymazat</button>
-                </div>
-              }
-
-              <div class="doc-positions">
-                <div class="chip-list">
-                  @for (position of document.positions ?? []; track position.id) {
-                    <span class="chip">
-                      {{ position.name }}
-                      <button type="button" class="chip-remove" (click)="toggleDocumentPosition(document, position.id)">×</button>
-                    </span>
-                  } @empty {
-                    <span class="muted-small">Bez priradenej pozicie</span>
-                  }
-                </div>
-                @if (positions().length > 0) {
-                  <select class="doc-position-select"
-                    [ngModel]="''" [name]="'docpos-' + document.id"
-                    (ngModelChange)="addDocumentPosition(document, $event)">
-                    <option value="">+ Priradit poziciu...</option>
-                    @for (position of availableDocumentPositions(document); track position.id) {
-                      <option [value]="position.id">{{ position.unitName ? position.unitName + ' — ' + position.name : position.name }}</option>
-                    }
-                  </select>
-                }
-              </div>
+          @if (editSection() === 'relations') {
+            <div class="edit-actions">
+              <button class="primary" type="submit">Ulozit</button>
+              <button type="button" (click)="cancelEdit()">Zrusit</button>
             </div>
           }
+        </form>
         </section>
+
+        <section class="card">
+          <header class="card-head">
+            <h3>Dokumenty <span class="count">({{ documents().length }})</span></h3>
+            <label class="upload-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v10M8 9l4-4 4 4M5 19h14"/></svg>
+              Pridat
+              <input type="file" (change)="uploadDocument($event)">
+            </label>
+          </header>
+
+          <div class="card-body doc-list">
+            @for (document of documents(); track document.id) {
+              <div class="document-row">
+                <span class="doc-badge">{{ fileExtension(document) }}</span>
+
+                @if (editingDocumentId === document.id) {
+                  <input class="doc-name-input" [(ngModel)]="documentNameDraft" name="docName" (keydown.enter)="saveDocumentName(document)">
+                  <div class="doc-actions">
+                    <button type="button" class="small" (click)="saveDocumentName(document)">Ulozit</button>
+                    <button type="button" class="small" (click)="cancelDocumentEdit()">Zrusit</button>
+                  </div>
+                } @else {
+                  <div class="doc-main">
+                    <span class="doc-name">{{ document.name }}</span>
+                    <small>Pridane {{ document.createdAt }} · {{ document.size || 0 }} B</small>
+                  </div>
+                  <div class="doc-actions">
+                    <button type="button" class="ghost small" (click)="startDocumentEdit(document)">Premenovat</button>
+                    <button type="button" class="ghost small" (click)="deleteDocument(document)">Vymazat</button>
+                  </div>
+                }
+
+                <div class="doc-positions">
+                  <div class="chip-list">
+                    @for (position of document.positions ?? []; track position.id) {
+                      <span class="chip">
+                        {{ position.name }}
+                        <button type="button" class="chip-remove" (click)="toggleDocumentPosition(document, position.id)">×</button>
+                      </span>
+                    } @empty {
+                      <span class="muted-small">Bez priradenej pozicie</span>
+                    }
+                  </div>
+                  @if (positions().length > 0) {
+                    <select class="doc-position-select"
+                      [ngModel]="''" [name]="'docpos-' + document.id"
+                      (ngModelChange)="addDocumentPosition(document, $event)">
+                      <option value="">+ Priradit poziciu...</option>
+                      @for (position of availableDocumentPositions(document); track position.id) {
+                        <option [value]="position.id">{{ position.unitName ? position.unitName + ' — ' + position.name : position.name }}</option>
+                      }
+                    </select>
+                  }
+                </div>
+              </div>
+            } @empty {
+              <p class="muted-small">Zatial ziadne dokumenty.</p>
+            }
+          </div>
+        </section>
+
+        </div>
+
+        <aside class="overview-aside">
+          <section class="card diagram-card">
+            <header class="card-head">
+              <h3>Diagram procesu</h3>
+              <button type="button" class="ghost small" (click)="tab.set('bpmn')">Otvorit editor</button>
+            </header>
+            <div class="diagram-preview">
+              @if ((process.diagramType ?? 'NONE') === 'BPMN' && process.bpmnXml) {
+                <pp-bpmn-viewer [xml]="process.bpmnXml" />
+              } @else if ((process.diagramType ?? 'NONE') === 'FLOWCHART' && process.flowchartXml) {
+                <div class="diagram-placeholder">
+                  <p>Flowchart je ulozeny.</p>
+                  <button type="button" class="small" (click)="tab.set('bpmn')">Zobrazit</button>
+                </div>
+              } @else {
+                <div class="diagram-placeholder">
+                  <p>Tento proces nema diagram.</p>
+                  <button type="button" class="small" (click)="tab.set('bpmn')">Vytvorit diagram</button>
+                </div>
+              }
+            </div>
+            <footer class="diagram-meta">
+              <div><span>Posledna uprava</span><strong>{{ process.revision || '—' }}</strong></div>
+              <div><span>Verzie</span><strong>{{ (process.revisions ?? []).length }}</strong></div>
+            </footer>
+          </section>
+        </aside>
+      </div>
       }
 
       @if (tab() === 'bpmn') {

@@ -1,68 +1,233 @@
 .workspace-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-columns: 232px minmax(0, 1fr);
+  transition: grid-template-columns .16s ease;
 }
 
-.app-header {
+.workspace-shell.nav-collapsed {
+  grid-template-columns: 62px minmax(0, 1fr);
+}
+
+/* --- lavy sidebar --- */
+
+.sidenav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 6px;
+  padding: 16px 10px 12px;
+  background: var(--nav-bg);
+  overflow: hidden;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 8px 14px;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.brand-name {
+  color: #fff;
+  font-weight: 640;
+  font-size: 15.5px;
+  letter-spacing: -.01em;
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-content: start;
+  overflow-y: auto;
+}
+
+.nav-section {
+  margin: 14px 0 4px;
+  padding: 0 10px;
+  color: #64748b;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.nav-list a {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 10px;
+  border-radius: var(--r-sm);
+  color: var(--nav-text);
+  text-decoration: none;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: background .12s, color .12s;
+}
+
+.nav-list a:hover {
+  background: var(--nav-hover);
+  color: #fff;
+}
+
+.nav-list a.active {
+  background: var(--nav-hover);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--nav-active);
+}
+
+.nav-list svg,
+.nav-collapse svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nav-collapse {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: #64748b;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.nav-collapse:hover:not(:disabled) {
+  background: var(--nav-hover);
+  color: #fff;
+}
+
+/* zbaleny stav — ostanu len ikony */
+.nav-collapsed {
+  .brand-name,
+  .nav-list a span,
+  .nav-collapse span {
+    display: none;
+  }
+
+  .nav-section {
+    height: 1px;
+    margin: 10px 8px;
+    padding: 0;
+    overflow: hidden;
+    background: var(--nav-hover);
+    color: transparent;
+  }
+
+  .nav-list a,
+  .nav-collapse {
+    justify-content: center;
+    padding-inline: 0;
+  }
+}
+
+/* --- horna lista --- */
+
+.main-column {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+}
+
+.topbar {
   position: sticky;
   top: 0;
   z-index: 10;
-  display: grid;
-  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 18px;
-  padding: 14px 24px;
-  background: #fbfcfe;
+  padding: 12px 24px;
+  background: rgba(255, 255, 255, .88);
+  backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
 }
 
-h1,
-h2 {
-  margin: 0;
+.topbar-title {
+  min-width: 0;
 }
 
-h1 {
-  font-size: 22px;
+.topbar-title .eyebrow {
+  margin-bottom: 3px;
 }
 
-.brand span {
-  color: var(--muted);
-}
-
-nav {
+.topbar-actions {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.lang-select {
+  width: auto;
+  min-height: 36px;
+  padding: 6px 9px;
+  font-size: 13px;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
   gap: 8px;
-}
-
-a {
-  padding: 11px 12px;
-  border-radius: 6px;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-a.active {
-  background: #e2f1f4;
-  color: var(--accent-strong);
+  padding: 4px 11px 4px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .workspace {
-  padding: 24px;
+  padding: 22px 24px 32px;
+  min-width: 0;
 }
 
-.page-title {
-  margin-bottom: 18px;
-}
+@media (max-width: 1000px) {
+  .workspace-shell,
+  .workspace-shell.nav-collapsed {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
 
-.actions {
-  display: flex;
-  gap: 8px;
-}
+  .brand-name,
+  .nav-list a span,
+  .nav-collapse span {
+    display: none;
+  }
 
-@media (max-width: 900px) {
-  .app-header {
-    grid-template-columns: 1fr;
+  .nav-list a,
+  .nav-collapse {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .user-name {
+    display: none;
   }
 }

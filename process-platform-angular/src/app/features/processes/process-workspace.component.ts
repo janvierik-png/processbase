@@ -24,6 +24,7 @@ import { StorageService } from '../../core/services/storage.service';
 type TreeRow = { node: ProcessNode; level: number; kind: 'process' | 'clause' | 'norm' };
 type PanelState = 'wide' | 'narrow' | 'hidden';
 type Tab = 'card' | 'bpmn' | 'history';
+type EditSection = 'basic' | 'description' | 'relations' | null;
 
 @Component({
   selector: 'pp-process-workspace',
@@ -55,6 +56,12 @@ export class ProcessWorkspaceComponent implements OnInit {
   // dokumenty — premenovanie
   editingDocumentId: string | null = null;
   documentNameDraft = '';
+
+  // karta procesu — ktora sekcia je prave v rezime upravy
+  readonly editSection = signal<EditSection>(null);
+
+  // vyhladavanie v strome
+  treeSearch = '';
 
   // R6: ISO normy a rezim stromu
   readonly norms = signal<IsoNorm[]>([]);
@@ -110,7 +117,11 @@ export class ProcessWorkspaceComponent implements OnInit {
   // --- R2: strom ---
 
   select(node: ProcessNode): void {
-    this.router.navigate(['/app/processes', node.id]);
+    this.selectById(node.id);
+  }
+
+  selectById(id: string): void {
+    this.router.navigate(['/app/processes', id]);
   }
 
   cyclePanel(): void {
@@ -174,6 +185,8 @@ export class ProcessWorkspaceComponent implements OnInit {
   openDetail(id: string): void {
     this.tab.set('card');
     this.viewedRevision.set(null);
+    this.editSection.set(null);
+    this.editingDocumentId = null;
     this.changeDescription = '';
     this.store.detail(id).subscribe({
       next: (detail) => this.detail.set(detail),
@@ -232,6 +245,61 @@ export class ProcessWorkspaceComponent implements OnInit {
       : [...current, positionId];
   }
 
+  // --- karta procesu: rezim upravy po sekciach ---
+
+  startEdit(section: Exclude<EditSection, null>): void {
+    this.editSection.set(section);
+  }
+
+  cancelEdit(): void {
+    const detail = this.detail();
+    this.editSection.set(null);
+    this.changeDescription = '';
+    // zahod neulozene zmeny — nacitaj cerstvy stav z databazy
+    if (detail) this.openDetail(detail.id);
+  }
+
+  /** Stav procesu -> CSS trieda badge. */
+  statusClass(status?: string): string {
+    const value = (status ?? '').toLowerCase();
+    if (value.includes('schval') && !value.includes('na ')) return 'is-approved';
+    if (value.includes('na schval') || value.includes('review') || value.includes('kontrol')) return 'is-review';
+    if (value.includes('arch')) return 'is-archived';
+    return 'is-draft';
+  }
+
+  initials(name?: string | null): string {
+    return (name ?? '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? '')
+      .join('') || '?';
+  }
+
+  /** Pripona suboru pre ikonu dokumentu. */
+  fileExtension(document: Attachment): string {
+    const fromName = document.name?.split('.').pop() ?? '';
+    if (fromName && fromName.length <= 5 && fromName !== document.name) return fromName.toUpperCase();
+    return (document.type?.split('/').pop() ?? 'file').slice(0, 4).toUpperCase();
+  }
+
+  // --- vyhladavanie v strome ---
+
+  visibleTreeRows(): TreeRow[] {
+    const query = this.treeSearch.trim().toLowerCase();
+    const rows = this.treeRows();
+    if (!query) return rows;
+    // pri hladani zobraz plochy zoznam zhod — bez hierarchie, aby bolo vidno vsetko
+    return rows
+      .filter((row) => row.kind === 'process' && row.node.name.toLowerCase().includes(query))
+      .map((row) => ({ ...row, level: 0 }));
+  }
+
+  clearTreeSearch(): void {
+    this.treeSearch = '';
+  }
+
   saveDetail(): void {
     const detail = this.detail();
     if (!detail) return;
@@ -248,6 +316,7 @@ export class ProcessWorkspaceComponent implements OnInit {
       changeDescription: this.changeDescription
     }, () => {
       this.changeDescription = '';
+      this.editSection.set(null);
       this.openDetail(detail.id);
     });
   }

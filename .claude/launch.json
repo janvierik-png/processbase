@@ -2,6 +2,11 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "platform-docker",
+      "url": "http://localhost:4200",
+      "port": 4200
+    },
+    {
       "name": "backoffice",
       "runtimeExecutable": "npm.cmd",
       "runtimeArgs": ["run", "dev", "--prefix", "process-platform-backoffice"],
