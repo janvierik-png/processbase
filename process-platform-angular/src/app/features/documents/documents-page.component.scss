@@ -87,8 +87,9 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 36px;
-  padding: 0 11px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   background: var(--panel);
@@ -100,8 +101,8 @@
   &:hover { background: var(--surface-alt); border-color: var(--faint); color: var(--ink); }
 
   svg {
-    width: 15px;
-    height: 15px;
+    width: 14px;
+    height: 14px;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.7;
@@ -121,14 +122,20 @@ h2 {
   border: 1px solid var(--line);
 }
 
+.documents-table {
+  overflow-x: auto;
+}
+
 .table-head,
 .table-row {
   display: grid;
-  grid-template-columns: minmax(200px, 1.3fr) minmax(150px, 1fr) minmax(160px, 1fr) 120px 90px 190px;
+  // posledny stlpec je auto — akcie sa nesmu orezat
+  grid-template-columns: minmax(180px, 1.2fr) minmax(120px, .8fr) minmax(140px, .9fr) 110px 85px auto;
   gap: 12px;
   align-items: center;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
+  min-width: 940px;
 }
 
 .positions-cell {
@@ -151,6 +158,13 @@ h2 {
 .row-actions {
   display: flex;
   gap: 6px;
+  justify-content: flex-end;
+
+  button {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
 }
 
 .muted {

@@ -1,71 +1,343 @@
-<section class="landing-shell">
-  <header class="landing-header">
-    <div>
-      <p class="eyebrow">ISO / BPMN / Camunda 7</p>
-      <h1>Processbase</h1>
+<header class="site">
+  <div class="wrap site-header-inner">
+    <div class="brand">
+      <a href="#top" class="logo" aria-label="Processbase — domov">
+        <span class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v4a2 2 0 0 0 2 2h5"/></svg>
+        </span>
+        Processbase
+      </a>
+      <div class="crumbs" aria-hidden="true"><span>ISO</span><span>BPMN</span><span>Camunda 7</span></div>
     </div>
-    <div class="landing-actions">
-      <button type="button" [class.active]="mode() === 'register'" (click)="mode.set('register')">Registracia</button>
-      <button type="button" [class.active]="mode() === 'login'" (click)="mode.set('login')">Login</button>
+    <div class="header-actions">
+      <button type="button" class="btn btn-ghost" (click)="openModal('login')">Prihlásiť sa</button>
+      <button type="button" class="btn btn-primary" (click)="openModal('register')">Registrácia</button>
     </div>
-  </header>
+  </div>
+</header>
 
-  <main class="landing-main">
-    <section class="landing-copy">
-      <h2>Procesna kniznica pre male firmy</h2>
-      <p>Modelujte BPMN procesy, spravujte revizie, prilohy, ISO vazby a pripravte procesy na Camunda 7 deployment.</p>
-      <div class="price-grid">
-        <article><strong>Starter</strong><span>0 EUR / testovanie</span><p>Procesy, BPMN editor, revizie a zakladne exporty.</p></article>
-        <article><strong>Business</strong><span>49 EUR / mesiac</span><p>Viac pouzivatelov, pozvanky, roly, prilohy a ISO sablony.</p></article>
-        <article><strong>Enterprise</strong><span>Individualne</span><p>Camunda 7 konektor, audit, vlastne preklady a backoffice.</p></article>
+<main id="top">
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <span class="eyebrow-badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.5 7.2 7.5 1.1-5.5 5.2 1.3 7.5L12 19.5 5.2 23l1.3-7.5L1 10.3l7.5-1.1z"/></svg>
+        Pre malé a stredné firmy
+      </span>
+      <h1 class="headline">Procesná knižnica pre <span class="accent-word">malé firmy</span></h1>
+      <p class="hero-sub">Modelujte BPMN procesy, spravujte revízie, prílohy, ISO väzby a pripravte procesy na Camunda&nbsp;7 deployment — všetko na jednom mieste.</p>
+      <div class="hero-ctas">
+        <button type="button" class="btn btn-primary btn-lg" (click)="openModal('register')">
+          Začať zadarmo
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+        <a href="#cennik" class="btn btn-ghost btn-lg">Pozrieť cenník</a>
       </div>
-    </section>
+      <div class="trust-row">
+        <div class="trust-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>ISO väzby a audit</div>
+        <div class="trust-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg></span>BPMN editor</div>
+        <div class="trust-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg></span>Camunda 7 export</div>
+      </div>
+    </div>
+  </section>
 
-    <section class="auth-panel">
-      @if (mode() === 'invite') {
-        <form (ngSubmit)="acceptInvite()">
-          <h3>Pozvanka do organizacie</h3>
-          @if (invitationError()) {
-            <p class="error">{{ invitationError() }}</p>
-          } @else {
-            @if (invitation(); as inv) {
-              <p>Organizacia <strong>{{ inv.organizationName }}</strong> ta pozyva ako <strong>{{ inv.roleId }}</strong> ({{ inv.email }}).</p>
-              <label>Tvoje meno <input name="inviteName" [(ngModel)]="inviteModel.name" required></label>
-              <label>Heslo <input name="invitePassword" type="password" [(ngModel)]="inviteModel.password" required></label>
-              <button class="primary" type="submit" [disabled]="auth.loading()">Prijat pozvanku</button>
-              <p class="error">{{ auth.error() }}</p>
-            } @else {
-              <p>Nacitavam pozvanku...</p>
-            }
+  <section id="funkcie">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-kicker">Čo Processbase robí</span>
+        <h2 class="section-title">Od BPMN diagramu po nasadenie</h2>
+        <p class="section-desc">Štyri kroky, ktoré vaše procesy posunú od nápadu k reálnemu, auditovateľnému a nasaditeľnému procesu.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <span class="feature-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><path d="M9 6h6M18 9v6"/></svg></span>
+          <h3>BPMN editor</h3>
+          <p>Modelujte procesy priamo v prehliadači podľa štandardu BPMN 2.0, bez inštalácie.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></span>
+          <h3>Revízie a prílohy</h3>
+          <p>Sledujte históriu zmien procesu a pripájajte podklady, smernice či prílohy priamo k verzii.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
+          <h3>ISO väzby</h3>
+          <p>Prepojte procesy s požiadavkami ISO noriem a majte prehľad pripravený na audit.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg></span>
+          <h3>Camunda 7 deployment</h3>
+          <p>Exportujte hotové procesy a nasaďte ich rovno do Camunda&nbsp;7 bez ručného prepisovania.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pricing" id="cennik">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-kicker">Cenník</span>
+        <h2 class="section-title">Plán, ktorý rastie s vašou firmou</h2>
+        <p class="section-desc">Začnite zadarmo a prejdite na vyšší plán, keď bude vaša firma pripravená.</p>
+      </div>
+      <div class="pricing-grid">
+        <article class="plan-card">
+          <p class="plan-name">Starter</p>
+          <div class="plan-price"><span class="amount">0&nbsp;€</span><span class="period">/ testovanie</span></div>
+          <p class="plan-desc">Na vyskúšanie, bez záväzkov.</p>
+          <ul class="plan-features">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Procesy a BPMN editor</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Revízie procesov</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Základné exporty</li>
+          </ul>
+          <button type="button" class="btn btn-ghost btn-block" (click)="openModal('register', 'Starter')">Vyskúšať zadarmo</button>
+        </article>
+
+        <article class="plan-card featured">
+          <span class="plan-badge">Najobľúbenejší</span>
+          <p class="plan-name">Business</p>
+          <div class="plan-price"><span class="amount">49&nbsp;€</span><span class="period">/ mesiac</span></div>
+          <p class="plan-desc">Pre rastúce tímy s viacerými procesmi.</p>
+          <ul class="plan-features">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Viac používateľov a pozvánky</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Role a oprávnenia</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Prílohy a ISO šablóny</li>
+          </ul>
+          <button type="button" class="btn btn-primary btn-block" (click)="openModal('register', 'Business')">Vybrať Business</button>
+        </article>
+
+        <article class="plan-card">
+          <p class="plan-name">Enterprise</p>
+          <div class="plan-price"><span class="amount">Individuálne</span></div>
+          <p class="plan-desc">Pre firmy s vlastnými požiadavkami.</p>
+          <ul class="plan-features">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Camunda 7 konektor</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Audit a vlastné preklady</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Backoffice prístup</li>
+          </ul>
+          <button type="button" class="btn btn-ghost btn-block" (click)="openModal('register', 'Enterprise')">Kontaktovať nás</button>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="cta-banner">
+        <div>
+          <h2>Pripravení nastaviť si prvý proces?</h2>
+          <p>Vytvorte si firmu zadarmo a začnite modelovať procesy ešte dnes.</p>
+        </div>
+        <button type="button" class="btn btn-primary btn-lg" (click)="openModal('register')">Vytvoriť účet zadarmo</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap footer-inner">
+    <a href="#top" class="logo footer-logo">
+      <span class="logo-mark small">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v4a2 2 0 0 0 2 2h5"/></svg>
+      </span>
+      Processbase
+    </a>
+    <nav class="footer-links">
+      <a href="#funkcie">Funkcie</a>
+      <a href="#cennik">Cenník</a>
+      <button type="button" class="link-btn" (click)="openModal('login')">Prihlásenie</button>
+    </nav>
+    <p class="footer-copy">© 2026 Processbase. Všetky práva vyhradené.</p>
+  </div>
+</footer>
+
+<!-- ===================== PRIHLASENIE ===================== -->
+@if (modal() === 'login') {
+  <div class="modal-overlay" (click)="onOverlayClick($event)">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="login-title">
+      <button type="button" class="modal-close" (click)="closeModal()" aria-label="Zavrieť">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+      <span class="modal-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+      </span>
+      <h2 id="login-title">Prihlásenie</h2>
+      <p class="modal-sub">Prihláste sa do svojho konta Processbase.</p>
+
+      <form (ngSubmit)="login()">
+        <div class="field">
+          <label for="login-email">E-mail</label>
+          <div class="input-wrap">
+            <svg class="field-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+            <input type="email" id="login-email" name="loginEmail" [(ngModel)]="loginModel.email" placeholder="vas@email.sk" autocomplete="email" required>
+          </div>
+        </div>
+        <div class="field">
+          <label for="login-password">Heslo</label>
+          <div class="input-wrap">
+            <svg class="field-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+            <input [type]="showLoginPassword() ? 'text' : 'password'" id="login-password" name="loginPassword" [(ngModel)]="loginModel.password" placeholder="••••••••••" autocomplete="current-password" class="has-eye" required>
+            <button type="button" class="toggle-eye" (click)="showLoginPassword.set(!showLoginPassword())" [attr.aria-label]="showLoginPassword() ? 'Skryť heslo' : 'Zobraziť heslo'">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        @if (auth.error()) {
+          <p class="form-error">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+            {{ auth.error() }}
+          </p>
+        }
+
+        <button type="submit" class="btn btn-primary btn-block btn-lg" [disabled]="auth.loading()">
+          {{ auth.loading() ? 'Prihlasujem...' : 'Prihlásiť sa' }}
+        </button>
+      </form>
+
+      <p class="modal-foot">Nemáte účet? <button type="button" class="link-btn" (click)="openModal('register')">Zaregistrujte firmu</button></p>
+    </div>
+  </div>
+}
+
+<!-- ===================== REGISTRACIA ===================== -->
+@if (modal() === 'register') {
+  <div class="modal-overlay" (click)="onOverlayClick($event)">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="register-title">
+      <button type="button" class="modal-close" (click)="closeModal()" aria-label="Zavrieť">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+      <span class="modal-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v4a2 2 0 0 0 2 2h5"/></svg>
+      </span>
+      <h2 id="register-title">Registrácia firmy</h2>
+      <p class="modal-sub">Vytvorte si firemné konto Processbase.</p>
+
+      <div class="plan-select" role="group" aria-label="Vyberte plán">
+        @for (plan of ['Starter', 'Business', 'Enterprise']; track plan) {
+          <button type="button" class="plan-chip" [class.checked]="selectedPlan() === plan" (click)="selectPlan(plan)">{{ plan }}</button>
+        }
+      </div>
+
+      <form (ngSubmit)="register()">
+        <div class="field" [class.has-error]="orgNameState() === 'taken'">
+          <label for="reg-company">Názov spoločnosti</label>
+          <div class="input-wrap">
+            <svg class="field-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M9 8h1M14 8h1M9 12h1M14 12h1M9 16h6"/></svg>
+            <input type="text" id="reg-company" name="organizationName" [(ngModel)]="registerModel.organizationName" (ngModelChange)="orgNameChanged($event)" placeholder="Vaša s.r.o." autocomplete="organization" required>
+          </div>
+          @if (orgNameState() === 'taken') {
+            <p class="field-error">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+              Firma s týmto názvom už existuje.
+            </p>
           }
-        </form>
-      } @else if (mode() === 'register') {
-        <form (ngSubmit)="register()">
-          <h3>Registracia firmy</h3>
-          <label>Nazov spolocnosti
-            <input name="organizationName" [(ngModel)]="registerModel.organizationName" (ngModelChange)="orgNameChanged($event)" required>
-            @if (orgNameState() === 'taken') { <span class="field-error">Firma s tymto nazvom uz existuje.</span> }
-            @if (orgNameState() === 'available') { <span class="field-ok">Nazov je volny.</span> }
-          </label>
-          <label>Meno ownera <input name="ownerName" [(ngModel)]="registerModel.ownerName" required></label>
-          <label>Email
-            <input name="email" type="email" [(ngModel)]="registerModel.email" (ngModelChange)="emailChanged($event)" required>
-            @if (emailState() === 'taken') { <span class="field-error">Email uz existuje. Prihlas sa.</span> }
-            @if (emailState() === 'available') { <span class="field-ok">Email je volny.</span> }
-          </label>
-          <label>Heslo <input name="password" type="password" [(ngModel)]="registerModel.password" required></label>
-          <button class="primary" type="submit" [disabled]="registerBlocked()">Vytvorit firmu</button>
-          <p class="error">{{ auth.error() }}</p>
+          @if (orgNameState() === 'available') { <p class="field-ok">Názov je voľný.</p> }
+          @if (orgNameState() === 'checking') { <p class="field-checking">Overujem...</p> }
+        </div>
+
+        <div class="field">
+          <label for="reg-owner">Meno ownera</label>
+          <div class="input-wrap">
+            <svg class="field-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+            <input type="text" id="reg-owner" name="ownerName" [(ngModel)]="registerModel.ownerName" placeholder="Jano Vierik" autocomplete="name" required>
+          </div>
+        </div>
+
+        <div class="field" [class.has-error]="emailState() === 'taken'">
+          <label for="reg-email">E-mail</label>
+          <div class="input-wrap">
+            <svg class="field-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+            <input type="email" id="reg-email" name="email" [(ngModel)]="registerModel.email" (ngModelChange)="emailChanged($event)" placeholder="jan.vierik@firma.sk" autocomplete="email" required>
+          </div>
+          @if (emailState() === 'taken') {
+            <p class="field-error">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+              Tento e-mail už existuje. <button type="button" class="link-btn inline" (click)="openModal('login')">Prihláste sa</button>
+            </p>
+          }
+          @if (emailState() === 'available') { <p class="field-ok">E-mail je voľný.</p> }
+          @if (emailState() === 'checking') { <p class="field-checking">Overujem...</p> }
+        </div>
+
+        <div class="field">
+          <label for="reg-password">Heslo</label>
+          <div class="input-wrap">
+            <svg class="field-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+            <input [type]="showRegisterPassword() ? 'text' : 'password'" id="reg-password" name="password" [(ngModel)]="registerModel.password" placeholder="min. 10 znakov" autocomplete="new-password" class="has-eye" required>
+            <button type="button" class="toggle-eye" (click)="showRegisterPassword.set(!showRegisterPassword())" [attr.aria-label]="showRegisterPassword() ? 'Skryť heslo' : 'Zobraziť heslo'">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        @if (auth.error()) {
+          <p class="form-error">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+            {{ auth.error() }}
+          </p>
+        }
+
+        <button type="submit" class="btn btn-primary btn-block btn-lg" [disabled]="registerBlocked()">
+          {{ auth.loading() ? 'Vytváram...' : 'Vytvoriť firmu' }}
+        </button>
+      </form>
+
+      <p class="modal-foot">Už máte konto? <button type="button" class="link-btn" (click)="openModal('login')">Prihláste sa</button></p>
+    </div>
+  </div>
+}
+
+<!-- ===================== POZVANKA ===================== -->
+@if (modal() === 'invite') {
+  <div class="modal-overlay">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="invite-title">
+      <span class="modal-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+      </span>
+      <h2 id="invite-title">Pozvánka do organizácie</h2>
+
+      @if (invitationError()) {
+        <p class="form-error">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+          {{ invitationError() }}
+        </p>
+      } @else if (invitation()) {
+        <p class="modal-sub">
+          Organizácia <strong>{{ invitation()?.organizationName }}</strong> vás pozýva ako
+          <strong>{{ invitation()?.roleId }}</strong> ({{ invitation()?.email }}).
+        </p>
+
+        <form (ngSubmit)="acceptInvite()">
+          <div class="field">
+            <label for="invite-name">Vaše meno</label>
+            <div class="input-wrap">
+              <svg class="field-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+              <input type="text" id="invite-name" name="inviteName" [(ngModel)]="inviteModel.name" placeholder="Meno a priezvisko" autocomplete="name" required>
+            </div>
+          </div>
+          <div class="field">
+            <label for="invite-password">Heslo</label>
+            <div class="input-wrap">
+              <svg class="field-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+              <input [type]="showInvitePassword() ? 'text' : 'password'" id="invite-password" name="invitePassword" [(ngModel)]="inviteModel.password" placeholder="min. 10 znakov" autocomplete="new-password" class="has-eye" required>
+              <button type="button" class="toggle-eye" (click)="showInvitePassword.set(!showInvitePassword())" [attr.aria-label]="showInvitePassword() ? 'Skryť heslo' : 'Zobraziť heslo'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+          </div>
+
+          @if (auth.error()) {
+            <p class="form-error">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+              {{ auth.error() }}
+            </p>
+          }
+
+          <button type="submit" class="btn btn-primary btn-block btn-lg" [disabled]="auth.loading()">Prijať pozvánku</button>
         </form>
       } @else {
-        <form (ngSubmit)="login()">
-          <h3>Prihlasenie</h3>
-          <label>Email <input name="loginEmail" type="email" [(ngModel)]="loginModel.email" required></label>
-          <label>Heslo <input name="loginPassword" type="password" [(ngModel)]="loginModel.password" required></label>
-          <button class="primary" type="submit" [disabled]="auth.loading()">Prihlasit</button>
-          <p class="error">{{ auth.error() }}</p>
-        </form>
+        <p class="modal-sub">Načítavam pozvánku...</p>
       }
-    </section>
-  </main>
-</section>
+    </div>
+  </div>
+}
