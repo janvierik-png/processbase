@@ -5,6 +5,8 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { BpmnEditorComponent } from './components/bpmn-editor.component';
 import { BpmnViewerComponent } from './components/bpmn-viewer.component';
 import { FlowchartEditorComponent } from './components/flowchart-editor.component';
+import { RichTextEditorComponent } from './components/rich-text-editor.component';
+import { markdownToHtml } from '../../core/utils/markdown';
 import { ProcessStoreService } from '../../core/services/process-store.service';
 import { PositionService } from '../../core/services/position.service';
 import {
@@ -29,7 +31,14 @@ type EditSection = 'basic' | 'description' | 'relations' | null;
 @Component({
   selector: 'pp-process-workspace',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, BpmnEditorComponent, BpmnViewerComponent, FlowchartEditorComponent],
+  imports: [
+    FormsModule,
+    DecimalPipe,
+    BpmnEditorComponent,
+    BpmnViewerComponent,
+    FlowchartEditorComponent,
+    RichTextEditorComponent
+  ],
   templateUrl: './process-workspace.component.html',
   styleUrl: './process-workspace.component.scss'
 })
@@ -243,6 +252,15 @@ export class ProcessWorkspaceComponent implements OnInit {
     detail.positionIds = current.includes(positionId)
       ? current.filter((id) => id !== positionId)
       : [...current, positionId];
+  }
+
+  /**
+   * Dokumentácia sa ukladá ako Markdown — na čítanie ju prevedieme na HTML.
+   * Angular výstup ešte sanitizuje, a markdownToHtml navyše escapuje vstup,
+   * takže sa cez dokumentáciu nedá vložiť vlastné HTML.
+   */
+  renderedDocumentation(): string {
+    return markdownToHtml(this.detail()?.descriptionText ?? '');
   }
 
   // --- karta procesu: rezim upravy po sekciach ---

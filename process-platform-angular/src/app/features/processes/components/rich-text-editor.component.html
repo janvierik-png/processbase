@@ -1,0 +1,57 @@
+<div class="editor-shell">
+  <div class="editor-toolbar">
+    @if (mode() === 'rich') {
+      <div class="tool-group">
+        <button type="button" title="Tucne (Ctrl+B)" (click)="format('bold')"><strong>B</strong></button>
+        <button type="button" title="Kurziva (Ctrl+I)" (click)="format('italic')"><em>I</em></button>
+        <button type="button" title="Kod" (click)="format('formatBlock', 'pre')"><code>&lt;&gt;</code></button>
+      </div>
+      <div class="tool-group">
+        <button type="button" title="Nadpis" (click)="format('formatBlock', 'h2')">H2</button>
+        <button type="button" title="Podnadpis" (click)="format('formatBlock', 'h3')">H3</button>
+        <button type="button" title="Bezny text" (click)="format('formatBlock', 'p')">P</button>
+      </div>
+      <div class="tool-group">
+        <button type="button" title="Odrazkovy zoznam" (click)="format('insertUnorderedList')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="7" r="1.4"/><circle cx="5" cy="12" r="1.4"/><circle cx="5" cy="17" r="1.4"/><path d="M10 7h9M10 12h9M10 17h9"/></svg>
+        </button>
+        <button type="button" title="Cislovany zoznam" (click)="format('insertOrderedList')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 7h9M10 12h9M10 17h9M4 6h1v3M4 15h2v1H4v2h2"/></svg>
+        </button>
+        <button type="button" title="Odkaz" (click)="insertLink()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 1 0-5.7-5.7L11.5 6"/><path d="M14 11a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 1 0 5.7 5.7L12.5 18"/></svg>
+        </button>
+      </div>
+    } @else {
+      <span class="markdown-hint">Píšte priamo v Markdowne — <code>**tučné**</code>, <code>## nadpis</code>, <code>- odrážka</code></span>
+    }
+
+    <div class="mode-switch">
+      <button type="button" [class.active]="mode() === 'rich'" (click)="setMode('rich')">Formátovanie</button>
+      <button type="button" [class.active]="mode() === 'markdown'" (click)="setMode('markdown')">Markdown</button>
+    </div>
+  </div>
+
+  @if (mode() === 'rich') {
+    <div
+      #editable
+      class="editable"
+      contenteditable="true"
+      role="textbox"
+      aria-multiline="true"
+      aria-label="Dokumentácia procesu"
+      (input)="onEditableInput()"
+      (paste)="onPaste($event)"
+      (blur)="onEditableInput()"
+    ></div>
+  } @else {
+    <textarea
+      class="markdown-source"
+      [(ngModel)]="markdownDraft"
+      (ngModelChange)="onMarkdownInput()"
+      [ngModelOptions]="{ standalone: true }"
+      rows="14"
+      placeholder="Detailný popis procesu, vstupy, výstupy, zodpovednosti..."
+    ></textarea>
+  }
+</div>

@@ -201,9 +201,12 @@
           @if (editSection() === 'description') {
             <form class="card-body" (ngSubmit)="saveDetail()">
               <label>Ucel <textarea name="purpose" [(ngModel)]="process.purpose" rows="2"></textarea></label>
-              <label>Dokumentacia procesu
-                <textarea name="descriptionText" [(ngModel)]="process.descriptionText" rows="6" placeholder="Detailny popis procesu, vstupy, vystupy, zodpovednosti..."></textarea>
-              </label>
+              <div class="editor-field">
+                <span class="editor-label">Dokumentacia procesu</span>
+                <pp-rich-text-editor
+                  [value]="process.descriptionText || ''"
+                  (valueChange)="process.descriptionText = $event" />
+              </div>
               <label>Rizika <textarea name="risks" [(ngModel)]="process.risks" rows="2"></textarea></label>
               <label>Popis zmeny (audit)
                 <input name="changeDescription" [(ngModel)]="changeDescription" placeholder="Co sa zmenilo a preco">
@@ -221,7 +224,11 @@
               </div>
               <div class="read-field">
                 <span>Dokumentacia</span>
-                <p class="prewrap">{{ process.descriptionText || '—' }}</p>
+                @if (process.descriptionText) {
+                  <div class="rendered-doc" [innerHTML]="renderedDocumentation()"></div>
+                } @else {
+                  <p>—</p>
+                }
               </div>
               <div class="read-field">
                 <span>Rizika</span>
@@ -415,35 +422,34 @@
           </div>
         </section>
 
-        </div>
+        <!-- diagram je siroky (BPMN je vodorovny) — preto cez celu sirku dole -->
+        <section class="card diagram-card">
+          <header class="card-head">
+            <h3>Diagram procesu</h3>
+            <button type="button" class="ghost small" (click)="tab.set('bpmn')">Otvorit editor</button>
+          </header>
+          <div class="diagram-preview">
+            @if ((process.diagramType ?? 'NONE') === 'BPMN' && process.bpmnXml) {
+              <pp-bpmn-viewer [xml]="process.bpmnXml" />
+            } @else if ((process.diagramType ?? 'NONE') === 'FLOWCHART' && process.flowchartXml) {
+              <div class="diagram-placeholder">
+                <p>Flowchart je ulozeny.</p>
+                <button type="button" class="small" (click)="tab.set('bpmn')">Zobrazit</button>
+              </div>
+            } @else {
+              <div class="diagram-placeholder">
+                <p>Tento proces nema diagram.</p>
+                <button type="button" class="small" (click)="tab.set('bpmn')">Vytvorit diagram</button>
+              </div>
+            }
+          </div>
+          <footer class="diagram-meta">
+            <div><span>Posledna uprava</span><strong>{{ process.revision || '—' }}</strong></div>
+            <div><span>Verzie</span><strong>{{ (process.revisions ?? []).length }}</strong></div>
+          </footer>
+        </section>
 
-        <aside class="overview-aside">
-          <section class="card diagram-card">
-            <header class="card-head">
-              <h3>Diagram procesu</h3>
-              <button type="button" class="ghost small" (click)="tab.set('bpmn')">Otvorit editor</button>
-            </header>
-            <div class="diagram-preview">
-              @if ((process.diagramType ?? 'NONE') === 'BPMN' && process.bpmnXml) {
-                <pp-bpmn-viewer [xml]="process.bpmnXml" />
-              } @else if ((process.diagramType ?? 'NONE') === 'FLOWCHART' && process.flowchartXml) {
-                <div class="diagram-placeholder">
-                  <p>Flowchart je ulozeny.</p>
-                  <button type="button" class="small" (click)="tab.set('bpmn')">Zobrazit</button>
-                </div>
-              } @else {
-                <div class="diagram-placeholder">
-                  <p>Tento proces nema diagram.</p>
-                  <button type="button" class="small" (click)="tab.set('bpmn')">Vytvorit diagram</button>
-                </div>
-              }
-            </div>
-            <footer class="diagram-meta">
-              <div><span>Posledna uprava</span><strong>{{ process.revision || '—' }}</strong></div>
-              <div><span>Verzie</span><strong>{{ (process.revisions ?? []).length }}</strong></div>
-            </footer>
-          </section>
-        </aside>
+        </div>
       </div>
       }
 

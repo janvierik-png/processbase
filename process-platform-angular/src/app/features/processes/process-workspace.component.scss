@@ -341,28 +341,13 @@
 /* ---------- prehlad: obsah + bocny diagram ---------- */
 
 .overview-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 16px;
-  align-items: start;
+  display: block;
 }
 
 .overview-main {
   display: grid;
   gap: 16px;
   min-width: 0;
-}
-
-.overview-aside {
-  position: sticky;
-  top: 82px;
-  display: grid;
-  gap: 16px;
-}
-
-@media (max-width: 1400px) {
-  .overview-layout { grid-template-columns: minmax(0, 1fr); }
-  .overview-aside { position: static; }
 }
 
 /* ---------- citaci rezim kariet ---------- */
@@ -416,6 +401,55 @@
 }
 
 .prewrap { white-space: pre-wrap; }
+
+/* pole s editorom dokumentacie — nie je to <label>, aby sa neaplikoval grid */
+.editor-field {
+  display: grid;
+  gap: 6px;
+  grid-column: 1 / -1;
+}
+
+.editor-label {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+/* vykreslena Markdown dokumentacia v citacom rezime */
+.rendered-doc {
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.6;
+
+  :first-child { margin-top: 0; }
+  :last-child { margin-bottom: 0; }
+
+  h2 { font-size: 17px; font-weight: 650; margin: 16px 0 7px; color: var(--ink); }
+  h3 { font-size: 15px; font-weight: 620; margin: 14px 0 5px; color: var(--ink); }
+  p { margin: 0 0 9px; }
+
+  ul, ol { margin: 0 0 9px; padding-left: 22px; }
+  li { margin-bottom: 3px; }
+
+  a { color: var(--accent-strong); }
+
+  code {
+    background: var(--surface-alt);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 12.5px;
+  }
+
+  pre {
+    background: var(--surface-alt);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    padding: 10px 12px;
+    overflow-x: auto;
+    margin: 0 0 9px;
+  }
+}
 
 /* ---------- editacny rezim ---------- */
 
@@ -720,7 +754,8 @@ button.small {
 
 .diagram-preview {
   padding: 10px;
-  min-height: 260px;
+  // BPMN je vodorovny — cez celu sirku znesie vyssi nahlad
+  min-height: 420px;
   background: var(--surface-alt);
 }
 
