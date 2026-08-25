@@ -83,6 +83,26 @@
   &:hover { text-decoration: underline; }
 }
 
+.preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+  white-space: nowrap;
+
+  svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
 .download-btn {
   display: inline-flex;
   align-items: center;
@@ -130,12 +150,12 @@ h2 {
 .table-row {
   display: grid;
   // posledny stlpec je auto — akcie sa nesmu orezat
-  grid-template-columns: minmax(180px, 1.2fr) minmax(120px, .8fr) minmax(140px, .9fr) 110px 85px auto;
+  grid-template-columns: minmax(170px, 1.1fr) minmax(110px, .7fr) minmax(130px, .85fr) 105px 80px auto;
   gap: 12px;
   align-items: center;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
-  min-width: 940px;
+  min-width: 1040px;
 }
 
 .positions-cell {

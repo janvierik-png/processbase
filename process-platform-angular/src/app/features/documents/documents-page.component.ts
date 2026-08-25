@@ -4,11 +4,13 @@ import { Attachment } from '../../core/models/process.model';
 import { OrgPosition } from '../../core/models/user.model';
 import { DocumentService } from '../../core/services/document.service';
 import { PositionService } from '../../core/services/position.service';
+import { formatBytes, isPreviewable } from '../../core/utils/upload-limits';
+import { PdfPreviewComponent } from '../../shared/pdf-preview.component';
 
 @Component({
   selector: 'pp-documents-page',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, PdfPreviewComponent],
   templateUrl: './documents-page.component.html',
   styleUrl: './documents-page.component.scss'
 })
@@ -82,8 +84,22 @@ export class DocumentsPageComponent implements OnInit {
     });
   }
 
+  readonly previewDocument = signal<Attachment | null>(null);
+
   downloadUrl(document: Attachment): string {
     return this.documentsApi.downloadUrl(document.id);
+  }
+
+  previewUrl(document: Attachment): string {
+    return this.documentsApi.previewUrl(document.id);
+  }
+
+  canPreview(document: Attachment): boolean {
+    return isPreviewable(document.type);
+  }
+
+  openPreview(document: Attachment): void {
+    this.previewDocument.set(document);
   }
 
   clearFilters(): void {
@@ -97,10 +113,7 @@ export class DocumentsPageComponent implements OnInit {
   }
 
   formatSize(bytes?: number): string {
-    const value = bytes ?? 0;
-    if (value < 1024) return `${value} B`;
-    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} kB`;
-    return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    return formatBytes(bytes);
   }
 
   startEdit(document: Attachment): void {

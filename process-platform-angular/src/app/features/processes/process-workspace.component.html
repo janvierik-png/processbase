@@ -361,11 +361,14 @@
         <section class="card">
           <header class="card-head">
             <h3>Dokumenty <span class="count">({{ documents().length }})</span></h3>
-            <label class="upload-button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v10M8 9l4-4 4 4M5 19h14"/></svg>
-              Pridat
-              <input type="file" (change)="uploadDocument($event)">
-            </label>
+            <div class="upload-area">
+              <span class="upload-limit">max. {{ maxUploadLabel }}</span>
+              <label class="upload-button" [class.busy]="uploading()">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v10M8 9l4-4 4 4M5 19h14"/></svg>
+                {{ uploading() ? 'Nahrávam...' : 'Pridat' }}
+                <input type="file" (change)="uploadDocument($event)" [disabled]="uploading()">
+              </label>
+            </div>
           </header>
 
           <div class="card-body doc-list">
@@ -387,6 +390,9 @@
                     <small>Pridane {{ document.createdAt }} · {{ formatSize(document.size) }}</small>
                   </div>
                   <div class="doc-actions">
+                    @if (canPreview(document)) {
+                      <button type="button" class="doc-download" (click)="openPreview(document)" title="Zobrazit nahlad">Nahlad</button>
+                    }
                     <a class="doc-download" [href]="documentUrl(document)" [attr.download]="document.name" title="Stiahnut">Stiahnut</a>
                     <button type="button" class="ghost small" (click)="startDocumentEdit(document)">Premenovat</button>
                     <button type="button" class="ghost small" (click)="deleteDocument(document)">Vymazat</button>
@@ -535,3 +541,11 @@
     }
   </main>
 </section>
+
+@if (previewDocument(); as document) {
+  <pp-pdf-preview
+    [fileName]="document.name"
+    [downloadUrl]="documentUrl(document)"
+    [previewUrl]="previewUrl(document)"
+    (closed)="previewDocument.set(null)" />
+}

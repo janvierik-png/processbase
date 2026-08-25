@@ -7,6 +7,8 @@ import { BpmnViewerComponent } from './components/bpmn-viewer.component';
 import { FlowchartEditorComponent } from './components/flowchart-editor.component';
 import { RichTextEditorComponent } from './components/rich-text-editor.component';
 import { markdownToHtml } from '../../core/utils/markdown';
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, formatBytes, isPreviewable } from '../../core/utils/upload-limits';
+import { PdfPreviewComponent } from '../../shared/pdf-preview.component';
 import { ProcessStoreService } from '../../core/services/process-store.service';
 import { PositionService } from '../../core/services/position.service';
 import {
@@ -37,7 +39,8 @@ type EditSection = 'basic' | 'description' | 'relations' | null;
     BpmnEditorComponent,
     BpmnViewerComponent,
     FlowchartEditorComponent,
-    RichTextEditorComponent
+    RichTextEditorComponent,
+    PdfPreviewComponent
   ],
   templateUrl: './process-workspace.component.html',
   styleUrl: './process-workspace.component.scss'
@@ -62,9 +65,11 @@ export class ProcessWorkspaceComponent implements OnInit {
   // R1: pozicie organizacie
   readonly positions = signal<OrgPosition[]>([]);
 
-  // dokumenty — premenovanie
+  // dokumenty — premenovanie, nahravanie, nahlad
   editingDocumentId: string | null = null;
   documentNameDraft = '';
+  readonly uploading = signal(false);
+  readonly previewDocument = signal<Attachment | null>(null);
 
   // karta procesu — ktora sekcia je prave v rezime upravy
   readonly editSection = signal<EditSection>(null);
@@ -411,20 +416,60 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   // --- dokumenty ---
 
+  readonly maxUploadLabel = MAX_UPLOAD_LABEL;
+
   uploadDocument(event: Event): void {
     const detail = this.detail();
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file || !detail) return;
+
+    // kontrola pred citanim suboru — velky subor by zbytocne zabral pamat
+    if (file.size > MAX_UPLOAD_BYTES) {
+      this.store.error.set(
+        `Súbor „${file.name}" má ${formatBytes(file.size)} a prekračuje limit ${MAX_UPLOAD_LABEL}. Nahrajte menší súbor.`
+      );
+      input.value = '';
+      return;
+    }
+
+    this.store.error.set('');
+    this.uploading.set(true);
+
     const reader = new FileReader();
     reader.onload = () => {
       this.documentsApi.upload(detail.id, file, String(reader.result ?? '')).subscribe({
-        next: (document) => this.documents.update((items) => [document, ...items]),
-        error: (error) => this.store.error.set(error?.error?.message ?? 'Dokument sa nepodarilo nahrat.')
+        next: (document) => {
+          this.documents.update((items) => [document, ...items]);
+          this.uploading.set(false);
+        },
+        error: (error) => {
+          this.store.error.set(error?.error?.message ?? 'Dokument sa nepodarilo nahrat.');
+          this.uploading.set(false);
+        }
       });
       input.value = '';
     };
+    reader.onerror = () => {
+      this.store.error.set('Súbor sa nepodarilo načítať.');
+      this.uploading.set(false);
+      input.value = '';
+    };
     reader.readAsDataURL(file);
+  }
+
+  // --- nahlad PDF ---
+
+  canPreview(document: Attachment): boolean {
+    return isPreviewable(document.type);
+  }
+
+  openPreview(document: Attachment): void {
+    this.previewDocument.set(document);
+  }
+
+  previewUrl(document: Attachment): string {
+    return this.documentsApi.previewUrl(document.id);
   }
 
   documentUrl(document: Attachment): string {
@@ -432,10 +477,7 @@ export class ProcessWorkspaceComponent implements OnInit {
   }
 
   formatSize(bytes?: number): string {
-    const value = bytes ?? 0;
-    if (value < 1024) return `${value} B`;
-    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} kB`;
-    return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    return formatBytes(bytes);
   }
 
   startDocumentEdit(document: Attachment): void {

@@ -15,7 +15,14 @@ const port = Number(process.env['API_PORT'] ?? 3000);
 const host = process.env['API_HOST'] ?? '0.0.0.0';
 
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: '15mb' }));
+/**
+ * Maximalna velkost nahravaneho suboru. Subor sa posiela ako data URL (base64),
+ * ktory je o ~33 % vacsi — telo poziadavky preto musi byt vyrazne vyssie.
+ * Rovnaka hodnota je aj na klientovi v src/app/core/utils/upload-limits.ts.
+ */
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+app.use(express.json({ limit: '150mb' }));
 
 type ProcessTreeNode = {
   id: string;
@@ -445,13 +452,19 @@ app.post('/api/processes/:processId/documents', async (request, response, next) 
       response.status(404).json({ message: 'Process not found' });
       return;
     }
+    // kontrola aj na serveri — klientsku kontrolu je mozne obist
+    const sizeBytes = Number(request.body.sizeBytes ?? 0);
+    if (sizeBytes > MAX_UPLOAD_BYTES) {
+      throw new HttpError(413, `Subor je prilis velky. Maximalna velkost je ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
+    }
+
     const attachment = await prisma.attachment.create({
       data: {
         organizationId: processNode.organizationId,
         processNodeId: processNode.id,
         fileName: request.body.fileName,
         mimeType: request.body.mimeType ?? 'application/octet-stream',
-        sizeBytes: Number(request.body.sizeBytes ?? 0),
+        sizeBytes,
         storagePath: request.body.dataUrl ?? ''
       },
       include: ATTACHMENT_INCLUDE
@@ -525,11 +538,14 @@ app.get('/api/documents/:documentId/download', async (request, response, next) =
     const fileName = attachment.fileName || 'dokument';
     const asciiName = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
 
+    // ?inline=1 zobrazi subor priamo v prehliadaci (nahlad PDF), inak sa stiahne
+    const disposition = request.query['inline'] ? 'inline' : 'attachment';
+
     response.setHeader('Content-Type', attachment.mimeType || storedMime || 'application/octet-stream');
     response.setHeader('Content-Length', String(body.length));
     response.setHeader(
       'Content-Disposition',
-      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
     );
     response.send(body);
   } catch (error) {
@@ -1790,6 +1806,13 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
   console.error(error);
   if (error instanceof HttpError) {
     response.status(error.status).json({ message: error.message });
+    return;
+  }
+  // telo poziadavky prekrocilo limit express.json
+  if ((error as any)?.type === 'entity.too.large' || (error as any)?.status === 413) {
+    response.status(413).json({
+      message: `Subor je prilis velky. Maximalna velkost je ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`
+    });
     return;
   }
   response.status(500).json({

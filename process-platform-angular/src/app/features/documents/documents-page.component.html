@@ -80,6 +80,12 @@
             <button type="button" (click)="saveName(document)">Ulozit</button>
             <button type="button" (click)="cancelEdit()">Zrusit</button>
           } @else {
+            @if (canPreview(document)) {
+              <button type="button" class="preview-btn" (click)="openPreview(document)" title="Zobrazit nahlad">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                Nahlad
+              </button>
+            }
             <a class="download-btn" [href]="downloadUrl(document)" [attr.download]="document.name" title="Stiahnut">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M8 10l4 4 4-4M5 19h14"/></svg>
               Stiahnut
@@ -100,3 +106,11 @@
     }
   </section>
 </section>
+
+@if (previewDocument(); as document) {
+  <pp-pdf-preview
+    [fileName]="document.name"
+    [downloadUrl]="downloadUrl(document)"
+    [previewUrl]="previewUrl(document)"
+    (closed)="previewDocument.set(null)" />
+}

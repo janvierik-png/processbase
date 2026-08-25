@@ -34,6 +34,11 @@ export class DocumentService {
     return `${API_BASE_URL}/documents/${id}/download`;
   }
 
+  /** URL na zobrazenie v prehliadaci (nahlad PDF) namiesto stiahnutia. */
+  previewUrl(id: string): string {
+    return `${API_BASE_URL}/documents/${id}/download?inline=1`;
+  }
+
   update(id: string, patch: { name?: string; positionIds?: string[] }) {
     return this.http.patch<Attachment>(`${API_BASE_URL}/documents/${id}`, patch);
   }

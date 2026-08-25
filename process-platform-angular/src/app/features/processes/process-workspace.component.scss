@@ -629,6 +629,17 @@ button.small {
 
 .doc-list { gap: 4px; }
 
+.upload-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.upload-limit {
+  color: var(--faint);
+  font-size: 12px;
+}
+
 .upload-button {
   display: inline-flex;
   align-items: center;
@@ -644,6 +655,7 @@ button.small {
   cursor: pointer;
 
   &:hover { background: var(--surface-alt); }
+  &.busy { opacity: .6; cursor: progress; }
 
   svg {
     width: 15px;
