@@ -765,10 +765,18 @@ button.small {
 }
 
 .diagram-preview {
+  display: flex;
   padding: 10px;
   // BPMN je vodorovny — cez celu sirku znesie vyssi nahlad
   min-height: 420px;
   background: var(--surface-alt);
+
+  // nahlad musi vyplnit celu plochu, inak sa diagram fitne do rohu
+  pp-bpmn-viewer,
+  .diagram-placeholder {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 .diagram-placeholder {
