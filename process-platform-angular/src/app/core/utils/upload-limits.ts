@@ -18,3 +18,23 @@ export function formatBytes(bytes?: number): string {
 export function isPreviewable(mimeType?: string): boolean {
   return (mimeType ?? '').toLowerCase().startsWith('application/pdf');
 }
+
+/**
+ * Krátke označenie typu súboru pre tabuľku — plný MIME typ je pri
+ * kancelárskych formátoch neúnosne dlhý (napr. `application/vnd.openxmlformats-
+ * officedocument.presentationml.presentation`) a rozbíja rozloženie.
+ * Prednosť má prípona zo súboru, MIME typ je záloha.
+ */
+export function fileTypeLabel(fileName?: string, mimeType?: string): string {
+  const extension = (fileName ?? '').split('.').pop() ?? '';
+  if (extension && extension.length <= 5 && extension !== fileName) {
+    return extension.toUpperCase();
+  }
+
+  const subtype = (mimeType ?? '').toLowerCase().split('/').pop() ?? '';
+  if (!subtype) return '—';
+
+  // z "vnd.openxmlformats-officedocument.presentationml.presentation" spravi "PRESENTATION"
+  const tail = subtype.split(/[.+]/).pop() ?? subtype;
+  return tail.slice(0, 8).toUpperCase();
+}

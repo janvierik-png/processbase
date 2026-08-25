@@ -73,6 +73,7 @@
 }
 
 .doc-link {
+  display: block;   // bez toho neplati orezanie dlheho nazvu
   font-weight: 550;
   color: var(--accent-strong);
   text-decoration: none;
@@ -114,7 +115,6 @@
   border-radius: var(--r-sm);
   background: var(--panel);
   color: var(--ink-soft);
-  font-size: 14px;
   text-decoration: none;
   white-space: nowrap;
 
@@ -149,13 +149,20 @@ h2 {
 .table-head,
 .table-row {
   display: grid;
-  // posledny stlpec je auto — akcie sa nesmu orezat
-  grid-template-columns: minmax(170px, 1.1fr) minmax(110px, .7fr) minmax(130px, .85fr) 105px 80px auto;
+  // Vsetky sirky musia byt rovnake v hlavicke aj v riadkoch, inak sa stlpce
+  // rozidu — preto ziadne `auto`: to by sa v prazdnej hlavicke zmrstilo na nulu.
+  grid-template-columns:
+    minmax(180px, 1.2fr)   // nazov
+    minmax(110px, .8fr)    // proces
+    minmax(140px, .9fr)    // pracovne pozicie
+    92px                   // typ
+    92px                   // velkost
+    392px;                 // akcie
   gap: 12px;
   align-items: center;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
-  min-width: 1040px;
+  min-width: 1180px;
 }
 
 .positions-cell {
@@ -163,6 +170,18 @@ h2 {
   flex-wrap: wrap;
   gap: 4px;
 }
+
+// typ a velkost su uzke stlpce — obsah sa nesmie zalamovat
+.type-cell,
+.size-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.type-cell { font-variant-numeric: tabular-nums; }
 
 .chip {
   display: inline-flex;
@@ -195,6 +214,12 @@ h2 {
   color: var(--muted);
   font-size: 12px;
   text-transform: uppercase;
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .table-row:last-child {

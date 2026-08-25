@@ -73,8 +73,8 @@
             <span class="muted">—</span>
           }
         </span>
-        <span>{{ document.type }}</span>
-        <span>{{ formatSize(document.size) }}</span>
+        <span class="type-cell" [title]="document.type">{{ typeLabel(document) }}</span>
+        <span class="size-cell">{{ formatSize(document.size) }}</span>
         <span class="row-actions">
           @if (editingId === document.id) {
             <button type="button" (click)="saveName(document)">Ulozit</button>

@@ -4,7 +4,7 @@ import { Attachment } from '../../core/models/process.model';
 import { OrgPosition } from '../../core/models/user.model';
 import { DocumentService } from '../../core/services/document.service';
 import { PositionService } from '../../core/services/position.service';
-import { formatBytes, isPreviewable } from '../../core/utils/upload-limits';
+import { fileTypeLabel, formatBytes, isPreviewable } from '../../core/utils/upload-limits';
 import { PdfPreviewComponent } from '../../shared/pdf-preview.component';
 
 @Component({
@@ -114,6 +114,10 @@ export class DocumentsPageComponent implements OnInit {
 
   formatSize(bytes?: number): string {
     return formatBytes(bytes);
+  }
+
+  typeLabel(document: Attachment): string {
+    return fileTypeLabel(document.name, document.type);
   }
 
   startEdit(document: Attachment): void {
