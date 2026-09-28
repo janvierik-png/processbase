@@ -16,6 +16,8 @@ export class AdminsPageComponent implements OnInit {
   readonly error = signal<string | null>(null);
 
   model = { username: '', password: '' };
+  passwordModel = { current: '', next: '', repeat: '' };
+  readonly passwordNotice = signal<string | null>(null);
 
   constructor(
     private readonly api: BackofficeApiService,
@@ -42,6 +44,22 @@ export class AdminsPageComponent implements OnInit {
         this.reload();
       },
       error: (error) => this.error.set(error?.error?.message ?? 'Admina sa nepodarilo vytvorit.')
+    });
+  }
+
+  changePassword(): void {
+    this.passwordNotice.set(null);
+    if (this.passwordModel.next !== this.passwordModel.repeat) {
+      this.error.set('Nové heslá sa nezhodujú.');
+      return;
+    }
+    this.api.changeOwnPassword(this.passwordModel.current, this.passwordModel.next).subscribe({
+      next: () => {
+        this.passwordModel = { current: '', next: '', repeat: '' };
+        this.error.set(null);
+        this.passwordNotice.set('Heslo zmenené.');
+      },
+      error: (error) => this.error.set(error?.error?.message ?? 'Heslo sa nepodarilo zmeniť.')
     });
   }
 

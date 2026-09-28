@@ -149,6 +149,19 @@ Súbory do 100 MB sa ukladajú ako base64 do databázy. Žiadny antivírusový s
 oddelené privátne úložisko. Pri sťahovaní sa `Content-Type` preberá z hodnoty, ktorú
 poslal klient pri nahratí.
 
+### B6 — Backoffice: verejné tajomstvo tokenov a známe heslo admina · **Kritická** · `overené behom` (lokálne)
+
+Tokeny backoffice sa podpisovali tajomstvom so zálohou `dev-backoffice-secret-change-me` v zdrojáku.
+Token podpísaný touto hodnotou lokálne prešiel na `/api/backoffice/admins` (200) — kto pozná
+repozitár, získa plný prístup do backoffice vrátane zakladania adminov. Seed navyše pri každom
+štarte API zakladal admina `jano` s heslom zo zdrojáku a login backoffice nemal limit pokusov.
+Na produkcii to **nebolo overované** (bez súhlasu sa na produkčný systém nesiaha); ak tam
+`BACKOFFICE_JWT_SECRET` nie je nastavené, platí to isté.
+
+**Oprava (#19):** tajomstvá bez záložných hodnôt (premenná prostredia alebo náhodne vygenerované
+do `storage/secrets.json`), seed zakladá admina len ak žiadny neexistuje a bez hesla v kóde,
+zmena vlastného hesla v backoffice, limit pokusov aj pre backoffice a pozvánky.
+
 ### Realistické tvrdenie o prístupe prevádzkovateľa
 
 > **Prevádzkovateľ má dnes technicky plný prístup k obsahu procesov aj k osobným údajom.**
@@ -223,15 +236,16 @@ Každá zmena je overená na lokálnom Dockeri a naviazaná na GitHub issue (`Fi
 | 2 — Súborové úložisko príloh | `aa44f2f` | #10 | `scripts/file-storage-test.mjs` 17/17, prerušený upload nezanechá súbor ani záznam |
 | — Odkazované ID z cudzej firmy | `d3775b9` | #2 | firma A si mohla pripojiť proces/pozíciu/zložku firmy B a API vrátilo jej názov; pôvodný kód 17/26, oprava 26/26 |
 | — Autor zmeny z relácie | `d3775b9` | B1 | audit log bral autora z hlavičky `x-user-id` od klienta |
-| 3 — Strom zložiek, nadriadenosť miest | `d3775b9`, *(UI v commite Etapy 3)* | #12 | cyklus → 400, po zmazaní zložky sa podriadené posunú vyššie |
-| 3 — Osoby, obsadenie s platnosťou, vlastník podľa miesta | `48391f0` + UI | #13, #14, #15 | `scripts/org-module-test.mjs` 38/38 — akceptačný scenár „vlastník podľa miesta, po zmene obsadenia nový človek, audit ostáva" overený |
+| 3 — Strom zložiek, nadriadenosť miest | `d3775b9`, `71ba516` | #12 | cyklus → 400, po zmazaní zložky sa podriadené posunú vyššie |
+| 3 — Osoby, obsadenie s platnosťou, vlastník podľa miesta | `48391f0`, `71ba516` | #13, #14, #15 | `scripts/org-module-test.mjs` 38/38 — akceptačný scenár „vlastník podľa miesta, po zmene obsadenia nový človek, audit ostáva" overený |
 | — Pozvánka na existujúci účet | `48391f0` | B1 | prijatie pozvánky nevyžadovalo heslo existujúceho účtu (pôvodný kód: 200); po Etape 1 navyše nevracala token |
-| 3 — Profil práce a verzie popisu | *(commit Etapy 3)* | #16 | návrh → publikovaná (nemenná), platná/plánovaná podľa dátumu účinnosti |
+| 3 — Profil práce a verzie popisu | `71ba516` | #16 | návrh → publikovaná (nemenná), platná/plánovaná podľa dátumu účinnosti |
+| 5 — Tajomstvá bez záložných hodnôt v kóde | *(commit #19)* | #19, B3, B6 | podvrhnutý backoffice token: 200 → 401; kľúč zašifrovaný starým verejným kľúčom sa pri štarte presifruje (starý ho už nedešifruje) |
 
 **Stav nálezov:** B1, B2 — opravené (Etapa 1, doplnené o odkazované ID, autora zmien a pozvánky). B4 — hlavičky a rate limit doplnené, `cors`
 zostáva otvorený (rieši sa pri produkčných nastaveniach). B5 — oddelené úložisko hotové,
 inline zobrazenie len pre PDF; antivírus (#11) zatiaľ odložený rozhodnutím zadávateľa.
-B3 — otvorené (#19).
+B3, B6 — opravené (#19).
 
 **Prevádzkové dôsledky #10:**
 - Súbory ležia v `UPLOAD_DIR` (predvolene `process-platform-angular/storage/uploads`, v `.gitignore`).
@@ -241,6 +255,15 @@ B3 — otvorené (#19).
   zázname; existujúce dokumenty neboli presunuté.
 - Mazanie firmy (zatiaľ len ručne v DB) nezmaže jej adresár `UPLOAD_DIR/<organizationId>`.
 
+
+**Pred nasadením na produkciu (po revízii):**
+1. Zálohovať databázu. Nastaviť `SETTINGS_ENCRYPTION_KEY` a `BACKOFFICE_JWT_SECRET` (min. 32 znakov),
+   alebo nechať vygenerovať — potom zálohovať `storage/secrets.json`.
+2. **Zmeniť heslo backoffice admina `jano`**, ak ho na produkcii vytvoril starý seed (heslo je verejne v gite).
+3. Po nasadení sa odhlásia všetci používatelia aj backoffice admini (nové relácie/tajomstvo).
+4. Migrácie: `prisma migrate deploy`; prílohy z DB presunúť `scripts/migrate-attachments-to-files.ts`
+   (najprv suchý beh), potom zálohovať aj `storage/uploads`.
+5. Ak je pred API reverzná proxy, overiť `TRUST_PROXY` (IP klienta pre limit prihlásení).
 **Etapa 3 — poznámky:**
 - Každý člen firmy má osobu v adresári (migrácia ich doplní aj existujúcim členom); osoby bez účtu
   sa nepočítajú ako používatelia. Migrácia prenesie `UserPosition` na obsadenia od dátumu priradenia

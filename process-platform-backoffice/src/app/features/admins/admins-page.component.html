@@ -11,8 +11,19 @@
   <form class="panel" (ngSubmit)="create()">
     <h3>Novy admin</h3>
     <label>Pouzivatelske meno <input name="username" [(ngModel)]="model.username" required></label>
-    <label>Heslo <input name="password" type="password" [(ngModel)]="model.password" required></label>
+    <label>Heslo (min. 12 znakov) <input name="password" type="password" [(ngModel)]="model.password" required minlength="12" autocomplete="new-password"></label>
     <button class="primary" type="submit">Vytvorit admina</button>
+  </form>
+
+  <form class="panel" (ngSubmit)="changePassword()">
+    <h3>Zmena môjho hesla</h3>
+    <label>Súčasné heslo <input name="currentPassword" type="password" [(ngModel)]="passwordModel.current" required autocomplete="current-password"></label>
+    <label>Nové heslo (min. 12 znakov) <input name="newPassword" type="password" [(ngModel)]="passwordModel.next" required minlength="12" autocomplete="new-password"></label>
+    <label>Nové heslo znova <input name="repeatPassword" type="password" [(ngModel)]="passwordModel.repeat" required autocomplete="new-password"></label>
+    <button class="primary" type="submit">Zmeniť heslo</button>
+    @if (passwordNotice()) {
+      <p class="muted">{{ passwordNotice() }}</p>
+    }
   </form>
 
   <section class="panel">

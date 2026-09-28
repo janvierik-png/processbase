@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { randomBytes, scryptSync } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient, OrganizationRole, ProcessNodeType, ProcessStatus } from '../generated/prisma/client';
 
@@ -145,15 +147,24 @@ async function main() {
     ['en', 'nav.backoffice', 'Backoffice']
   ] as const;
 
-  // R9: prvy backoffice admin (jano / Test123)
-  await prisma.backofficeAdmin.upsert({
-    where: { username: 'jano' },
-    update: {},
-    create: {
-      username: 'jano',
-      passwordHash: hashPassword('Test123')
+  // R9, #19: prvy backoffice admin — LEN ak ziadny neexistuje. Heslo nie je
+  // v zdrojaku (repozitar je verejny): berie sa z BACKOFFICE_ADMIN_PASSWORD,
+  // inak sa vygeneruje do suboru citatelneho len vlastnikom (nie do logu —
+  // logy sa kopiruju dalej). Existujucich adminov seed nemeni.
+  if ((await prisma.backofficeAdmin.count()) === 0) {
+    const username = process.env['BACKOFFICE_ADMIN_USERNAME'] || 'admin';
+    const fromEnv = process.env['BACKOFFICE_ADMIN_PASSWORD'];
+    const password = fromEnv || randomBytes(12).toString('base64url');
+    await prisma.backofficeAdmin.create({ data: { username, passwordHash: hashPassword(password) } });
+    if (fromEnv) {
+      console.log(`Backoffice admin "${username}" vytvoreny s heslom z BACKOFFICE_ADMIN_PASSWORD.`);
+    } else {
+      const file = path.resolve('storage/initial-backoffice-password.txt');
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, `${username}\n${password}\n`, { mode: 0o600 });
+      console.log(`Backoffice admin "${username}" vytvoreny. Docasne heslo je v ${file} — po prihlaseni ho zmente a subor zmazte.`);
     }
-  });
+  }
 
   for (const [locale, key, value] of translations) {
     await prisma.translation.upsert({

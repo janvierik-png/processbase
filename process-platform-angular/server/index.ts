@@ -12,6 +12,7 @@ import {
   ResponsibilityRole
 } from '../generated/prisma/client';
 import { prisma } from './prisma';
+import { secret } from './secrets';
 import {
   fileKey,
   isFileKey,
@@ -24,6 +25,9 @@ import {
 } from './file-storage';
 
 const app = express();
+// za reverznou proxy (nginx, Angular dev proxy) ber IP klienta z X-Forwarded-For,
+// ale len ak prisla z lokalnej alebo sukromnej siete — z internetu by sa dala podvrhnut
+app.set('trust proxy', process.env['TRUST_PROXY'] ?? 'loopback, linklocal, uniquelocal');
 const port = Number(process.env['API_PORT'] ?? 3000);
 const host = process.env['API_HOST'] ?? '0.0.0.0';
 
@@ -58,7 +62,11 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 10;
 
 function rateLimitLogin(request: express.Request, response: express.Response, next: express.NextFunction): void {
-  const key = request.ip ?? 'neznamy';
+  // pocitadlo pre kazdy tok (aplikacia, backoffice, pozvanka) + IP + prihlasovacie meno.
+  // Len IP by za proxy (vsetci maju rovnaku adresu) umoznila jednym utocnikom
+  // zablokovat prihlasenie vsetkym; takto sa brzdi skusanie hesiel ku konkretnemu uctu.
+  const login = String(request.body?.email ?? request.body?.username ?? '').trim().toLowerCase();
+  const key = `${request.path}|${request.ip ?? 'neznamy'}|${login}`;
   const now = Date.now();
   const entry = loginAttempts.get(key);
 
@@ -1500,7 +1508,7 @@ app.get('/api/invitations/:token', async (request, response, next) => {
   }
 });
 
-app.post('/api/invitations/:token/accept', async (request, response, next) => {
+app.post('/api/invitations/:token/accept', rateLimitLogin, async (request, response, next) => {
   try {
     const { name, password } = request.body ?? {};
     if (!name || !password) {
@@ -2310,8 +2318,14 @@ app.delete('/api/job-description-versions/:versionId', async (request, response,
 
 // --- R8: nastavenia automatickeho prekladu (sifrovany API kluc) ---
 
-const ENCRYPTION_SECRET = process.env['SETTINGS_ENCRYPTION_KEY'] ?? 'dev-settings-encryption-key';
-const encryptionKey = scryptSync(ENCRYPTION_SECRET, 'processbase-settings', 32);
+// #19 — kluc z prostredia alebo vygenerovany pri prvom starte (server/secrets.ts)
+const encryptionKey = scryptSync(secret('SETTINGS_ENCRYPTION_KEY'), 'processbase-settings', 32);
+
+/**
+ * Kluc, ktorym sa sifrovalo pred #19 — jeho hodnota je verejna v historii gitu.
+ * Pouziva sa LEN na jednorazove presifrovanie starych hodnot pri starte.
+ */
+const LEGACY_ENCRYPTION_KEY = scryptSync('dev-settings-encryption-key', 'processbase-settings', 32);
 
 function encryptSecret(plain: string): string {
   const iv = randomBytes(12);
@@ -2320,14 +2334,45 @@ function encryptSecret(plain: string): string {
   return `${iv.toString('hex')}.${cipher.getAuthTag().toString('hex')}.${encrypted.toString('hex')}`;
 }
 
-function decryptSecret(stored: string): string | null {
+function decryptWith(key: Buffer, stored: string): string | null {
   try {
     const [ivHex, tagHex, dataHex] = stored.split('.');
-    const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(ivHex, 'hex'));
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
     decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
     return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
   } catch {
     return null;
+  }
+}
+
+function decryptSecret(stored: string): string | null {
+  return decryptWith(encryptionKey, stored);
+}
+
+/**
+ * Presifruje API kluce zasifrovane starym verejnym klucom na novy (#19).
+ * Po prebehnuti uz v databaze nic zasifrovane verejnym klucom nezostane.
+ */
+async function reencryptLegacySecrets(): Promise<void> {
+  const organizations = await prisma.organization.findMany({
+    where: { translationApiKeyEnc: { not: null } },
+    select: { id: true, translationApiKeyEnc: true }
+  });
+  let migrated = 0;
+  let unreadable = 0;
+  for (const organization of organizations) {
+    const stored = organization.translationApiKeyEnc!;
+    if (decryptWith(encryptionKey, stored) !== null) continue;
+    const plain = decryptWith(LEGACY_ENCRYPTION_KEY, stored);
+    if (plain === null) {
+      unreadable++;
+      continue;
+    }
+    await prisma.organization.update({ where: { id: organization.id }, data: { translationApiKeyEnc: encryptSecret(plain) } });
+    migrated++;
+  }
+  if (migrated || unreadable) {
+    console.warn(`[secrets] presifrovane API kluce: ${migrated}, nedesifrovatelne (treba zadat znova): ${unreadable}`);
   }
 }
 
@@ -2530,7 +2575,8 @@ app.get('/api/translations', async (_request, response, next) => {
 
 // --- R9: Backoffice autentifikacia (HMAC token) ---
 
-const BACKOFFICE_SECRET = process.env['BACKOFFICE_JWT_SECRET'] ?? 'dev-backoffice-secret-change-me';
+// #19 — bez zaloznej hodnoty v kode: verejnou hodnotou by sa dal podpisat platny token
+const BACKOFFICE_SECRET = secret('BACKOFFICE_JWT_SECRET');
 const BACKOFFICE_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 
 function signBackofficeToken(adminId: string, username: string): string {
@@ -2559,7 +2605,7 @@ function verifyBackofficeToken(token: string): { sub: string; username: string }
   }
 }
 
-app.post('/api/backoffice/auth/login', async (request, response, next) => {
+app.post('/api/backoffice/auth/login', rateLimitLogin, async (request, response, next) => {
   try {
     const { username, password } = request.body ?? {};
     if (!username || !password) throw new HttpError(400, 'username a password su povinne');
@@ -2605,10 +2651,34 @@ app.get('/api/backoffice/admins', async (_request, response, next) => {
   }
 });
 
+const MIN_ADMIN_PASSWORD = 12;
+
+/** Zmena vlastneho hesla (#19) — napr. docasneho hesla z prveho spustenia. */
+app.post('/api/backoffice/admins/me/password', async (request, response, next) => {
+  try {
+    const session = (request as any).backofficeAdmin as { sub: string };
+    const { currentPassword, newPassword } = request.body ?? {};
+    if (typeof newPassword !== 'string' || newPassword.length < MIN_ADMIN_PASSWORD) {
+      throw new HttpError(400, `Nove heslo musi mat aspon ${MIN_ADMIN_PASSWORD} znakov.`);
+    }
+    const admin = await prisma.backofficeAdmin.findUnique({ where: { id: session.sub } });
+    if (!admin || !verifyPassword(String(currentPassword ?? ''), admin.passwordHash)) {
+      throw new HttpError(401, 'Sucasne heslo nie je spravne.');
+    }
+    await prisma.backofficeAdmin.update({ where: { id: admin.id }, data: { passwordHash: hashPassword(newPassword) } });
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/backoffice/admins', async (request, response, next) => {
   try {
     const { username, password } = request.body ?? {};
     if (!username || !password) throw new HttpError(400, 'username a password su povinne');
+    if (String(password).length < MIN_ADMIN_PASSWORD) {
+      throw new HttpError(400, `Heslo admina musi mat aspon ${MIN_ADMIN_PASSWORD} znakov.`);
+    }
     const existing = await prisma.backofficeAdmin.findUnique({ where: { username: String(username) } });
     if (existing) throw new HttpError(409, 'Admin s tymto menom uz existuje.');
     const admin = await prisma.backofficeAdmin.create({
@@ -2905,4 +2975,5 @@ class HttpError extends Error {
 
 app.listen(port, host, () => {
   console.log(`API listening on http://${host}:${port}`);
+  reencryptLegacySecrets().catch((error) => console.error('[secrets] presifrovanie zlyhalo:', error));
 });

@@ -61,6 +61,11 @@ export class BackofficeApiService {
     return this.http.post<BackofficeAdmin>(`${API_BASE_URL}/admins`, { username, password });
   }
 
+  /** #19 — zmena vlastneho hesla (napr. docasneho z prveho spustenia). */
+  changeOwnPassword(currentPassword: string, newPassword: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${API_BASE_URL}/admins/me/password`, { currentPassword, newPassword });
+  }
+
   deleteAdmin(id: string): Observable<void> {
     return this.http.delete<void>(`${API_BASE_URL}/admins/${id}`);
   }
