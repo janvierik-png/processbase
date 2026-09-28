@@ -7,7 +7,8 @@ import {
   InvitationStatus,
   OrganizationRole,
   ProcessNodeType,
-  ProcessStatus
+  ProcessStatus,
+  ResponsibilityRole
 } from '../generated/prisma/client';
 import { prisma } from './prisma';
 import {
@@ -126,6 +127,8 @@ app.use('/api', async (request, response, next) => {
   }
 });
 
+type Responsibility = { id: string; name: string; role: string; holders: string[]; vacant: boolean };
+
 type ProcessTreeNode = {
   id: string;
   name: string;
@@ -133,6 +136,8 @@ type ProcessTreeNode = {
   parentId?: string | null;
   children?: ProcessTreeNode[];
   owner?: string;
+  ownerPosition?: Responsibility | null;
+  vacantResponsibilities?: Responsibility[];
   status?: string;
   revision?: string;
   purpose?: string;
@@ -140,7 +145,7 @@ type ProcessTreeNode = {
   descriptionText?: string;
   relatedProcessIds?: string[];
   positionIds?: string[];
-  positions?: Array<{ id: string; name: string }>;
+  positions?: Responsibility[];
   isoSuggestions?: unknown;
   translations?: unknown;
   bpmnXml?: string;
@@ -231,21 +236,59 @@ async function ensureOrganization(organizationId: string) {
   });
 }
 
+/**
+ * Popis miest pre audit log: "Veduci kvality (Jan Novak)". Zapisuje sa, kto
+ * miesto zastaval V CASE ZMENY — historia tak neskor neukaze noveho cloveka.
+ */
+async function describePositions(ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const positions = await prisma.orgPosition.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true, assignments: { where: activeOn(today()), select: { person: { select: { name: true } } } } }
+  });
+  const byId = new Map(positions.map((position) => [position.id, position]));
+  return ids.map((id) => {
+    const position = byId.get(id);
+    if (!position) return id;
+    const holders = position.assignments.map((assignment) => assignment.person.name);
+    return `${position.name} (${holders.length ? holders.join(', ') : 'neobsadene'})`;
+  });
+}
+
+/** Zodpovedne miesto procesu s aktualnymi drzitelmi (#15). */
+function mapResponsibility(link: any) {
+  const holders = (link.position?.assignments ?? []).map((assignment: any) => assignment.person?.name).filter(Boolean);
+  return {
+    id: link.position?.id ?? link.positionId,
+    name: link.position?.name ?? '',
+    role: link.role ?? ResponsibilityRole.PERFORMER,
+    holders,
+    vacant: holders.length === 0
+  };
+}
+
 function mapNode(node: any): ProcessTreeNode {
+  const responsibilities = (node.positions ?? []).map(mapResponsibility);
+  const ownerPosition = responsibilities.find((item: any) => item.role === ResponsibilityRole.OWNER) ?? null;
+  const performers = responsibilities.filter((item: any) => item.role === ResponsibilityRole.PERFORMER);
   return {
     id: node.id,
     name: node.name,
     type: node.type === ProcessNodeType.GROUP ? 'folder' : 'process',
     parentId: node.parentId ?? null,
-    owner: node.owner?.name ?? '',
+    // vlastnik = kto DNES zastava miesto vlastnika; bez miesta povodny vlastnik-ucet
+    owner: ownerPosition ? ownerPosition.holders.join(', ') : (node.owner?.name ?? ''),
+    ownerPosition,
+    // neobsadena zodpovednost musi byt vidiet (#14, #15)
+    vacantResponsibilities: responsibilities.filter((item: any) => item.vacant),
     status: mapStatusFromDb(node.status),
     revision: node.revisions?.[0]?.createdAt?.toISOString().slice(0, 10) ?? node.updatedAt?.toISOString().slice(0, 10),
     purpose: node.description ?? '',
     risks: '',
     descriptionText: node.descriptionText ?? '',
     relatedProcessIds: node.relatedProcessIds ?? [],
-    positionIds: (node.positions ?? []).map((item: any) => item.positionId),
-    positions: (node.positions ?? []).map((item: any) => ({ id: item.position?.id ?? item.positionId, name: item.position?.name ?? '' })),
+    positionIds: performers.map((item: any) => item.id),
+    positions: performers,
     isoSuggestions: node.isoSuggestions ?? [],
     translations: node.translations ?? null,
     bpmnXml: node.bpmnXml ?? undefined,
@@ -320,9 +363,9 @@ app.get('/api/organizations/:organizationId/processes', async (request, response
       where: { organizationId: organization.id },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
       include: {
-        owner: true,
+        owner: { select: { name: true } },
         revisions: { orderBy: { createdAt: 'desc' } },
-        positions: { include: { position: true } }
+        positions: responsibilityInclude()
       }
     });
     response.json(buildProcessTree(nodes));
@@ -359,12 +402,32 @@ app.post('/api/organizations/:organizationId/processes', async (request, respons
 });
 
 
-const PROCESS_INCLUDE = {
-  owner: true,
-  revisions: { orderBy: { createdAt: 'desc' as const } },
-  children: true,
-  positions: { include: { position: true } }
-};
+/**
+ * Zodpovedne miesta procesu (#15) aj s tym, kto ich DNES zastava — vlastnik
+ * procesu sa zobrazuje podla obsadenia miesta, nie podla pevne zapisaneho cloveka.
+ */
+function responsibilityInclude() {
+  return {
+    include: {
+      position: {
+        select: {
+          id: true,
+          name: true,
+          assignments: { where: activeOn(today()), select: { person: { select: { name: true } } } }
+        }
+      }
+    }
+  };
+}
+
+function processInclude() {
+  return {
+    owner: { select: { name: true } },
+    revisions: { orderBy: { createdAt: 'desc' as const } },
+    children: true,
+    positions: responsibilityInclude()
+  };
+}
 
 app.patch('/api/processes/:processId', async (request, response, next) => {
   try {
@@ -412,8 +475,9 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     };
 
     // R7: diff zmenenych poli pre audit log
-    const changedFields: Record<string, { from: unknown; to: unknown }> = {};
-    const track = (field: string, from: unknown, to: unknown) => {
+    // hodnoty su JSON (retazce, polia, null) — ukladaju sa do stlpca Json
+    const changedFields: Record<string, { from: any; to: any }> = {};
+    const track = (field: string, from: any, to: any) => {
       if (to === undefined) return;
       // null a prazdny retazec povazuj za rovnake (ziadna realna zmena)
       if (JSON.stringify(from ?? '') === JSON.stringify(to ?? '')) return;
@@ -438,16 +502,38 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
 
     await prisma.processNode.update({ where: { id: processId }, data });
 
-    // R1/R3: nastavenie priradenych pozicii
+    // R1/R3, #15: vykonavatelia (positionIds) a vlastnik (ownerPositionId) podla miest
+    const performerIds = current.positions
+      .filter((item) => item.role === ResponsibilityRole.PERFORMER)
+      .map((item) => item.positionId)
+      .sort();
     if (Array.isArray(body.positionIds)) {
-      const currentIds = current.positions.map((item) => item.positionId).sort();
       const nextIds = [...new Set(body.positionIds as string[])].sort();
-      if (JSON.stringify(currentIds) !== JSON.stringify(nextIds)) {
-        changedFields['positions'] = { from: currentIds, to: nextIds };
-        await prisma.processPosition.deleteMany({ where: { processNodeId: processId } });
+      if (JSON.stringify(performerIds) !== JSON.stringify(nextIds)) {
+        changedFields['positions'] = { from: await describePositions(performerIds), to: await describePositions(nextIds) };
+        await prisma.processPosition.deleteMany({ where: { processNodeId: processId, role: ResponsibilityRole.PERFORMER } });
         if (nextIds.length > 0) {
           await prisma.processPosition.createMany({
-            data: nextIds.map((positionId) => ({ processNodeId: processId, positionId }))
+            data: nextIds.map((positionId) => ({ processNodeId: processId, positionId, role: ResponsibilityRole.PERFORMER }))
+          });
+        }
+      }
+    }
+
+    if (body.ownerPositionId !== undefined) {
+      const [nextOwner = null] = await assertOwnedIds('orgPosition', current.organizationId, [body.ownerPositionId]);
+      const currentOwner = current.positions.find((item) => item.role === ResponsibilityRole.OWNER)?.positionId ?? null;
+      if (nextOwner !== currentOwner) {
+        // do auditu aj meno cloveka, ktory miesto v tej chvili zastaval —
+        // po zmene obsadenia zostane v historii povodny vlastnik
+        changedFields['ownerPosition'] = {
+          from: (await describePositions(currentOwner ? [currentOwner] : []))[0] ?? null,
+          to: (await describePositions(nextOwner ? [nextOwner] : []))[0] ?? null
+        };
+        await prisma.processPosition.deleteMany({ where: { processNodeId: processId, role: ResponsibilityRole.OWNER } });
+        if (nextOwner) {
+          await prisma.processPosition.create({
+            data: { processNodeId: processId, positionId: nextOwner, role: ResponsibilityRole.OWNER }
           });
         }
       }
@@ -472,7 +558,7 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       void autoTranslateProcess(current.organizationId, processId);
     }
 
-    const fresh = await prisma.processNode.findUnique({ where: { id: processId }, include: PROCESS_INCLUDE });
+    const fresh = await prisma.processNode.findUnique({ where: { id: processId }, include: processInclude() });
     response.json(mapNode(fresh));
   } catch (error) {
     next(error);
@@ -484,7 +570,7 @@ app.get('/api/processes/:processId', async (request, response, next) => {
   try {
     const node = await prisma.processNode.findFirst({
       where: { id: request.params.processId, organizationId: orgScope(request) },
-      include: { ...PROCESS_INCLUDE, parent: true }
+      include: { ...processInclude(), parent: true }
     });
     if (!node) {
       response.status(404).json({ message: 'Process not found' });
@@ -1120,15 +1206,6 @@ async function assertStorageAvailable(organizationId: string, incomingBytes: num
   }
 }
 
-/** Pouzivatel musi byt clenom organizacie z relacie. */
-async function requireOrgMember(request: express.Request, userId: string) {
-  const membership = await prisma.organizationUser.findFirst({
-    where: { userId, organizationId: orgScope(request) }
-  });
-  if (!membership) throw new HttpError(404, 'Pouzivatel sa nenasiel.');
-  return membership;
-}
-
 // Frontend roly (RoleId) <-> Prisma OrganizationRole
 const ROLE_TO_DB: Record<string, OrganizationRole> = {
   owner: OrganizationRole.OWNER,
@@ -1151,6 +1228,21 @@ function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'organizacia';
 }
 
+/**
+ * Kazdy clen firmy ma osobu v adresari (#13). Ak uz v adresari je osoba s tym
+ * istym emailom bez uctu (zaevidovana skor), ucet sa prepoji s nou — jej
+ * obsadenia miest a historia ostanu.
+ */
+async function linkPerson(tx: any, organizationId: string, user: { id: string; name: string; email: string }) {
+  const linked = await tx.person.findFirst({ where: { organizationId, userId: user.id } });
+  if (linked) return linked;
+  const byEmail = await tx.person.findFirst({
+    where: { organizationId, userId: null, email: { equals: user.email, mode: 'insensitive' } }
+  });
+  if (byEmail) return tx.person.update({ where: { id: byEmail.id }, data: { userId: user.id, active: true } });
+  return tx.person.create({ data: { organizationId, userId: user.id, name: user.name, email: user.email } });
+}
+
 function mapMember(membership: any) {
   return {
     id: membership.user.id,
@@ -1160,9 +1252,10 @@ function mapMember(membership: any) {
     roleId: ROLE_FROM_DB[membership.role as OrganizationRole] ?? 'approver',
     active: true,
     status: 'active',
-    positions: (membership.user.positions ?? []).map((item: any) => ({
-      id: item.position.id,
-      name: item.position.name
+    // pozicie = aktivne obsadenia osoby prepojenej s uctom (#13, #14)
+    positions: (membership.user.persons?.[0]?.assignments ?? []).map((assignment: any) => ({
+      id: assignment.position.id,
+      name: assignment.position.name
     }))
   };
 }
@@ -1224,6 +1317,7 @@ app.post('/api/register', async (request, response, next) => {
           isOwner: true
         }
       });
+      await linkPerson(tx, organization.id, user);
       return { user, organization };
     });
 
@@ -1322,7 +1416,16 @@ app.get('/api/organizations/:organizationId/users', async (request, response, ne
     const memberships = await prisma.organizationUser.findMany({
       where: { organizationId: orgScope(request) },
       orderBy: { createdAt: 'asc' },
-      include: { user: { include: { positions: { include: { position: true } } } } }
+      include: {
+        user: {
+          include: {
+            persons: {
+              where: { organizationId: orgScope(request) },
+              include: { assignments: { where: activeOn(today()), include: { position: { select: { id: true, name: true } } } } }
+            }
+          }
+        }
+      }
     });
     response.json(memberships.map(mapMember));
   } catch (error) {
@@ -1414,17 +1517,21 @@ app.post('/api/invitations/:token/accept', async (request, response, next) => {
       throw new HttpError(410, 'Pozvanka expirovala.');
     }
 
+    // existujuci ucet sa pripaja LEN so svojim heslom — inak by drzitel odkazu
+    // na pozvanku ziskal relaciu cudzieho uctu bez hesla
+    const existingUser = await prisma.user.findUnique({ where: { email: invitation.email } });
+    if (existingUser && !verifyPassword(String(password), existingUser.passwordHash)) {
+      throw new HttpError(401, 'Ucet s tymto emailom uz existuje. Zadajte jeho heslo.');
+    }
+
     const result = await prisma.$transaction(async (tx) => {
-      let user = await tx.user.findUnique({ where: { email: invitation.email } });
-      if (!user) {
-        user = await tx.user.create({
-          data: {
-            email: invitation.email,
-            name,
-            passwordHash: hashPassword(password)
-          }
-        });
-      }
+      const user = existingUser ?? await tx.user.create({
+        data: {
+          email: invitation.email,
+          name,
+          passwordHash: hashPassword(password)
+        }
+      });
       const membership = await tx.organizationUser.upsert({
         where: { organizationId_userId: { organizationId: invitation.organizationId, userId: user.id } },
         update: { role: invitation.role },
@@ -1434,6 +1541,7 @@ app.post('/api/invitations/:token/accept', async (request, response, next) => {
           role: invitation.role
         }
       });
+      await linkPerson(tx, invitation.organizationId, user);
       await tx.invitation.update({ where: { id: invitation.id }, data: { status: InvitationStatus.ACCEPTED } });
       return { user, membership };
     });
@@ -1441,7 +1549,10 @@ app.post('/api/invitations/:token/accept', async (request, response, next) => {
     const owner = await prisma.organizationUser.findFirst({
       where: { organizationId: invitation.organizationId, isOwner: true }
     });
+    // #1 — bez tokenu by novy kolega po prijati pozvanky dostal hned 401
+    const token = await createSession(result.user.id, invitation.organizationId);
     response.json({
+      token,
       user: {
         id: result.user.id,
         organizationId: invitation.organizationId,
@@ -1503,7 +1614,15 @@ function mapOrgPosition(position: any) {
     name: position.name,
     description: position.description ?? '',
     createdAt: position.createdAt.toISOString().slice(0, 10),
-    assignedUsers: (position.users ?? []).map((item: any) => ({ id: item.user.id, name: item.user.name }))
+    // #14 — kto miesto dnes zastava; prazdne = neobsadene miesto
+    holders: (position.assignments ?? []).map((assignment: any) => ({
+      assignmentId: assignment.id,
+      personId: assignment.personId,
+      name: assignment.person?.name ?? '',
+      validFrom: day(assignment.validFrom),
+      validTo: day(assignment.validTo)
+    })),
+    vacant: (position.assignments ?? []).length === 0
   };
 }
 
@@ -1519,11 +1638,14 @@ function mapOrgUnit(unit: any) {
   };
 }
 
-const POSITION_INCLUDE = {
-  users: { include: { user: { select: { id: true, name: true } } } },
-  unit: { select: { name: true } },
-  reportsTo: { select: { name: true } }
-};
+// funkcia, nie konstanta — "dnes" sa musi vyhodnotit pri kazdej poziadavke
+function positionInclude() {
+  return {
+    assignments: { where: activeOn(today()), include: { person: { select: { name: true } } } },
+    unit: { select: { name: true } },
+    reportsTo: { select: { name: true } }
+  };
+}
 
 const UNIT_INCLUDE = { _count: { select: { positions: true } } };
 
@@ -1642,7 +1764,7 @@ app.get('/api/organizations/:organizationId/positions', async (request, response
     const positions = await prisma.orgPosition.findMany({
       where: { organizationId: orgScope(request) },
       orderBy: { name: 'asc' },
-      include: POSITION_INCLUDE
+      include: positionInclude()
     });
     response.json(positions.map(mapOrgPosition));
   } catch (error) {
@@ -1667,7 +1789,7 @@ app.post('/api/organizations/:organizationId/positions', async (request, respons
         unitId: (await resolvePositionUnit(organizationId, unitId)) ?? null,
         reportsToId: (await resolveReportsTo(organizationId, null, reportsToId)) ?? null
       },
-      include: POSITION_INCLUDE
+      include: positionInclude()
     });
     response.status(201).json(mapOrgPosition(position));
   } catch (error) {
@@ -1686,7 +1808,7 @@ app.patch('/api/positions/:positionId', async (request, response, next) => {
         unitId: await resolvePositionUnit(current.organizationId, request.body.unitId),
         reportsToId: await resolveReportsTo(current.organizationId, current.id, request.body.reportsToId)
       },
-      include: POSITION_INCLUDE
+      include: positionInclude()
     });
     response.json(mapOrgPosition(position));
   } catch (error) {
@@ -1708,30 +1830,254 @@ app.delete('/api/positions/:positionId', async (request, response, next) => {
   }
 });
 
-app.post('/api/users/:userId/positions', async (request, response, next) => {
+// --- #13 adresar osob a #14 obsadenie miest s obdobim platnosti ---
+
+/** Dnesny den ako datum bez casu (UTC polnoc) — obsadenia su po dnoch. */
+function today(): Date {
+  return new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+}
+
+/** 'YYYY-MM-DD' -> Date; prazdna hodnota -> fallback. */
+function parseDay(value: unknown, fallback: Date | null, field: string): Date | null {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new HttpError(400, `${field} musi byt datum v tvare RRRR-MM-DD.`);
+  }
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) throw new HttpError(400, `${field} nie je platny datum.`);
+  return date;
+}
+
+const day = (date: Date | null | undefined) => (date ? date.toISOString().slice(0, 10) : null);
+
+/** Obsadenie platne v dany den: zacalo najneskor v ten den a neskoncilo skor. */
+function activeOn(date: Date) {
+  return { validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] };
+}
+
+function isActive(assignment: { validFrom: Date; validTo: Date | null }, date = today()): boolean {
+  return assignment.validFrom <= date && (!assignment.validTo || assignment.validTo >= date);
+}
+
+async function requirePerson(request: express.Request, personId: string) {
+  const person = await prisma.person.findFirst({ where: { id: personId, organizationId: orgScope(request) } });
+  if (!person) throw new HttpError(404, 'Osoba sa nenasla.');
+  return person;
+}
+
+async function requireAssignment(request: express.Request, assignmentId: string) {
+  const assignment = await prisma.positionAssignment.findFirst({
+    where: { id: assignmentId, organizationId: orgScope(request) }
+  });
+  if (!assignment) throw new HttpError(404, 'Obsadenie sa nenaslo.');
+  return assignment;
+}
+
+const PERSON_INCLUDE = {
+  assignments: {
+    orderBy: { validFrom: 'desc' as const },
+    include: { position: { select: { id: true, name: true, unit: { select: { name: true } } } } }
+  }
+};
+
+function mapPerson(person: any) {
+  const now = today();
+  return {
+    id: person.id,
+    name: person.name,
+    email: person.email ?? '',
+    phone: person.phone ?? '',
+    note: person.note ?? '',
+    active: person.active,
+    // osoba bez uctu je len v adresari — neprihlasuje sa a nepocita sa ako plateny pouzivatel
+    hasAccount: Boolean(person.userId),
+    userId: person.userId ?? null,
+    assignments: (person.assignments ?? []).map((assignment: any) => ({
+      id: assignment.id,
+      positionId: assignment.positionId,
+      positionName: assignment.position?.name ?? '',
+      unitName: assignment.position?.unit?.name ?? null,
+      validFrom: day(assignment.validFrom),
+      validTo: day(assignment.validTo),
+      current: isActive(assignment, now)
+    }))
+  };
+}
+
+function cleanText(value: unknown, max = 200): string | null {
+  const text = typeof value === 'string' ? value.trim().slice(0, max) : '';
+  return text || null;
+}
+
+app.get('/api/organizations/:organizationId/people', async (request, response, next) => {
   try {
-    const { positionId } = request.body ?? {};
-    if (!positionId) throw new HttpError(400, 'positionId je povinny');
-    await requireOrgMember(request, request.params.userId);
-    await requirePosition(request, positionId);
-    await prisma.userPosition.upsert({
-      where: { userId_positionId: { userId: request.params.userId, positionId } },
-      update: {},
-      create: { userId: request.params.userId, positionId }
+    const people = await prisma.person.findMany({
+      where: { organizationId: orgScope(request) },
+      orderBy: [{ active: 'desc' }, { name: 'asc' }],
+      include: PERSON_INCLUDE
     });
-    response.status(201).json({ ok: true });
+    response.json(people.map(mapPerson));
   } catch (error) {
     next(error);
   }
 });
 
-app.delete('/api/users/:userId/positions/:positionId', async (request, response, next) => {
+app.post('/api/organizations/:organizationId/people', async (request, response, next) => {
   try {
-    await requireOrgMember(request, request.params.userId);
-    await requirePosition(request, request.params.positionId);
-    await prisma.userPosition.deleteMany({
-      where: { userId: request.params.userId, positionId: request.params.positionId }
+    const name = cleanText(request.body?.name);
+    if (!name) throw new HttpError(400, 'Meno osoby je povinne.');
+    const person = await prisma.person.create({
+      data: {
+        organizationId: orgScope(request),
+        name,
+        email: cleanText(request.body?.email)?.toLowerCase() ?? null,
+        phone: cleanText(request.body?.phone, 50),
+        note: cleanText(request.body?.note, 1000)
+      },
+      include: PERSON_INCLUDE
     });
+    response.status(201).json(mapPerson(person));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/people/:personId', async (request, response, next) => {
+  try {
+    const current = await requirePerson(request, request.params.personId);
+    const body = request.body ?? {};
+    if (body.name !== undefined && !cleanText(body.name)) throw new HttpError(400, 'Meno osoby je povinne.');
+    const person = await prisma.person.update({
+      where: { id: current.id },
+      data: {
+        name: body.name === undefined ? undefined : cleanText(body.name)!,
+        email: body.email === undefined ? undefined : (cleanText(body.email)?.toLowerCase() ?? null),
+        phone: body.phone === undefined ? undefined : cleanText(body.phone, 50),
+        note: body.note === undefined ? undefined : cleanText(body.note, 1000),
+        active: typeof body.active === 'boolean' ? body.active : undefined
+      },
+      include: PERSON_INCLUDE
+    });
+    response.json(mapPerson(person));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/people/:personId', async (request, response, next) => {
+  try {
+    const person = await requirePerson(request, request.params.personId);
+    if (person.userId) {
+      throw new HttpError(409, 'Osoba ma pouzivatelsky ucet — najprv ju odoberte z pouzivatelov firmy.');
+    }
+    const history = await prisma.positionAssignment.count({ where: { personId: person.id } });
+    if (history > 0) {
+      // mazanie by zmazalo aj historiu, kto miesto zastaval
+      throw new HttpError(409, 'Osoba ma historiu obsadeni. Namiesto zmazania zaznamenajte jej odchod.');
+    }
+    await prisma.person.delete({ where: { id: person.id } });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Odchod osoby (#14): ukonci jej obsadenia k datumu (posledny den), planovane
+ * obsadenia po tomto dni zrusi a osobu oznaci ako neaktivnu. Historia ostava.
+ * Vrati miesta, ktore tym ostali neobsadene — tie treba riesit.
+ */
+app.post('/api/people/:personId/leave', async (request, response, next) => {
+  try {
+    const person = await requirePerson(request, request.params.personId);
+    const lastDay = parseDay(request.body?.date, today(), 'date')!;
+
+    const open = await prisma.positionAssignment.findMany({
+      where: { personId: person.id, OR: [{ validTo: null }, { validTo: { gt: lastDay } }] }
+    });
+    const planned = open.filter((assignment) => assignment.validFrom > lastDay).map((assignment) => assignment.id);
+    const ending = open.filter((assignment) => assignment.validFrom <= lastDay).map((assignment) => assignment.id);
+
+    await prisma.$transaction([
+      prisma.positionAssignment.deleteMany({ where: { id: { in: planned } } }),
+      prisma.positionAssignment.updateMany({ where: { id: { in: ending } }, data: { validTo: lastDay } }),
+      prisma.person.update({ where: { id: person.id }, data: { active: false } })
+    ]);
+
+    // miesta, ktore po odchode nema kto zastavat
+    const dayAfter = new Date(lastDay.getTime() + 24 * 60 * 60 * 1000);
+    const positionIds = [...new Set(open.map((assignment) => assignment.positionId))];
+    const stillHeld = await prisma.positionAssignment.findMany({
+      where: { positionId: { in: positionIds }, ...activeOn(dayAfter) },
+      select: { positionId: true }
+    });
+    const held = new Set(stillHeld.map((item) => item.positionId));
+    const vacated = await prisma.orgPosition.findMany({
+      where: { id: { in: positionIds.filter((id) => !held.has(id)) } },
+      select: { id: true, name: true }
+    });
+
+    const fresh = await prisma.person.findUnique({ where: { id: person.id }, include: PERSON_INCLUDE });
+    response.json({ person: mapPerson(fresh), endedAssignments: ending.length, vacatedPositions: vacated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/positions/:positionId/assignments', async (request, response, next) => {
+  try {
+    const position = await requirePosition(request, request.params.positionId);
+    const person = await requirePerson(request, String(request.body?.personId ?? ''));
+    if (!person.active) throw new HttpError(409, 'Osoba je oznacena ako neaktivna (odisla z firmy).');
+
+    const validFrom = parseDay(request.body?.validFrom, today(), 'validFrom')!;
+    const validTo = parseDay(request.body?.validTo, null, 'validTo');
+    if (validTo && validTo < validFrom) throw new HttpError(400, 'Koniec obsadenia nemoze byt pred zaciatkom.');
+
+    // ta ista osoba na tom istom mieste v prekryvajucom sa obdobi
+    const overlap = await prisma.positionAssignment.findFirst({
+      where: {
+        positionId: position.id,
+        personId: person.id,
+        ...(validTo ? { validFrom: { lte: validTo } } : {}),
+        OR: [{ validTo: null }, { validTo: { gte: validFrom } }]
+      }
+    });
+    if (overlap) throw new HttpError(409, 'Osoba uz toto miesto v danom obdobi zastava.');
+
+    const assignment = await prisma.positionAssignment.create({
+      data: { organizationId: position.organizationId, positionId: position.id, personId: person.id, validFrom, validTo }
+    });
+    response.status(201).json({ id: assignment.id, validFrom: day(assignment.validFrom), validTo: day(assignment.validTo) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Zmena obdobia — typicky ukoncenie (validTo), alebo oprava zaciatku. */
+app.patch('/api/assignments/:assignmentId', async (request, response, next) => {
+  try {
+    const current = await requireAssignment(request, request.params.assignmentId);
+    const validFrom = parseDay(request.body?.validFrom, current.validFrom, 'validFrom')!;
+    const validTo = request.body?.validTo === undefined
+      ? current.validTo
+      : parseDay(request.body.validTo, null, 'validTo');
+    if (validTo && validTo < validFrom) throw new HttpError(400, 'Koniec obsadenia nemoze byt pred zaciatkom.');
+    const assignment = await prisma.positionAssignment.update({
+      where: { id: current.id },
+      data: { validFrom, validTo }
+    });
+    response.json({ id: assignment.id, validFrom: day(assignment.validFrom), validTo: day(assignment.validTo) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Zmazanie len pre omylom zadane obsadenie — bezny odchod je ukoncenie. */
+app.delete('/api/assignments/:assignmentId', async (request, response, next) => {
+  try {
+    const assignment = await requireAssignment(request, request.params.assignmentId);
+    await prisma.positionAssignment.delete({ where: { id: assignment.id } });
     response.status(204).end();
   } catch (error) {
     next(error);
@@ -1845,7 +2191,7 @@ async function autoTranslateProcess(organizationId: string, processId: string): 
     const texts = [node.name, node.descriptionText ?? ''];
     const translated = await translateTexts(organization.translationProvider ?? 'deepl', apiKey, organization.translationTargetLocale, texts);
     if (!translated) return;
-    const existing = (node.translations as Record<string, unknown> | null) ?? {};
+    const existing = (node.translations as Record<string, any> | null) ?? {};
     await prisma.processNode.update({
       where: { id: processId },
       data: {

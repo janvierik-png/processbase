@@ -168,6 +168,28 @@ async function main() {
       method: 'POST', body: { name: `Zlozka A ${STAMP}`, parentId: unitB?.id }, auth: token.a
     })).status);
 
+    // #13/#14 — osoby a obsadenia firmy B
+    const { payload: personB } = await call(`/organizations/${b.orgId}/people`, {
+      method: 'POST', body: { name: 'Tajna osoba B' }, auth: token.b
+    });
+    const { payload: assignmentB } = await call(`/positions/${posBId}/assignments`, {
+      method: 'POST', body: { personId: personB?.id }, auth: token.b
+    });
+    record('A vypíše osoby B', [403, 404], (await call(`/organizations/${b.orgId}/people`, { auth: token.a })).status);
+    record('A mení osobu B', 404, (await call(`/people/${personB?.id}`, {
+      method: 'PATCH', body: { name: 'PREPISANE' }, auth: token.a
+    })).status);
+    record('A zaznamená odchod osoby B', 404, (await call(`/people/${personB?.id}/leave`, {
+      method: 'POST', body: {}, auth: token.a
+    })).status);
+    record('A: osoba B na miesto A', 404, (await call(`/positions/${posA?.id}/assignments`, {
+      method: 'POST', body: { personId: personB?.id }, auth: token.a
+    })).status);
+    record('A ukončí obsadenie B', 404, (await call(`/assignments/${assignmentB?.id}`, {
+      method: 'PATCH', body: { validTo: '2020-01-01' }, auth: token.a
+    })).status);
+    record('A: vlastník = miesto B', 404, (await patchA({ ownerPositionId: posBId })).status);
+
     const { payload: detailA } = await call(`/processes/${procA?.id}`, { auth: token.a });
     const leaked = JSON.stringify(detailA ?? {}).includes('Tajn');
     results.push({

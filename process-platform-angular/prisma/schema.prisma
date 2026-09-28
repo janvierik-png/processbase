@@ -41,6 +41,16 @@ enum ApprovalStatus {
   REJECTED
 }
 
+/// Rola pracovneho miesta v zodpovednosti za proces (#15).
+/// Zodpovednost je naviazana na MIESTO, nie na cloveka — po zmene obsadenia
+/// sa automaticky zobrazi novy clovek.
+enum ResponsibilityRole {
+  /// vlastnik procesu — zodpoveda za jeho obsah a zmeny
+  OWNER
+  /// vykonavatel — proces realizuje
+  PERFORMER
+}
+
 enum AttachmentKind {
   DOCUMENT
   IMAGE
@@ -76,6 +86,8 @@ model Organization {
   positions          OrgPosition[]
   units              OrgUnit[]
   sessions           Session[]
+  persons            Person[]
+  assignments        PositionAssignment[]
 }
 
 /// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
@@ -111,7 +123,7 @@ model User {
   approvals      ApprovalRequest[]  @relation("ApprovalRequestedBy")
   approvalSteps  ApprovalStep[]     @relation("ApprovalStepAssignee")
   attachments    Attachment[]       @relation("AttachmentUploader")
-  positions      UserPosition[]
+  persons        Person[]
   sessions       Session[]
   processChanges ProcessChangeLog[]
 }
@@ -335,7 +347,7 @@ model OrgPosition {
   unit           OrgUnit?             @relation(fields: [unitId], references: [id], onDelete: SetNull)
   reportsTo      OrgPosition?         @relation("PositionReports", fields: [reportsToId], references: [id], onDelete: SetNull)
   subordinates   OrgPosition[]        @relation("PositionReports")
-  users          UserPosition[]
+  assignments    PositionAssignment[]
   processes      ProcessPosition[]
   documents      AttachmentPosition[]
 
@@ -353,27 +365,60 @@ model AttachmentPosition {
   @@unique([attachmentId, positionId])
 }
 
-model UserPosition {
-  id         String      @id @default(uuid())
-  userId     String
-  positionId String
-  assignedAt DateTime    @default(now())
+/// Osoba v pracovnom adresari (#13). Nemusi mat pouzivatelsky ucet — taka sa
+/// nepocita ako plateny pouzivatel. Ak ucet ma, je prepojena cez userId.
+model Person {
+  id             String               @id @default(uuid())
+  organizationId String
+  userId         String?
+  name           String
+  email          String?
+  phone          String?
+  note           String?
+  /// false = osoba z firmy odisla; zaznam ostava kvoli historii obsadeni
+  active         Boolean              @default(true)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  position   OrgPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  assignments    PositionAssignment[]
 
-  @@unique([userId, positionId])
+  @@unique([organizationId, userId])
+  @@index([organizationId, active])
 }
+
+/// Obsadenie pracovneho miesta osobou na obdobie (#14). validTo = null znamena
+/// aktivne obsadenie, validTo je posledny den (vratane). Ukoncenie zaznam
+/// nemaze — historia, kto miesto kedy zastaval, ostava.
+model PositionAssignment {
+  id             String       @id @default(uuid())
+  organizationId String
+  positionId     String
+  personId       String
+  validFrom      DateTime     @db.Date
+  validTo        DateTime?    @db.Date
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  position       OrgPosition  @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  person         Person       @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([positionId, validTo])
+  @@index([personId])
+}
+
 
 model ProcessPosition {
   id            String      @id @default(uuid())
   processNodeId String
   positionId    String
+  role          ResponsibilityRole @default(PERFORMER)
 
   processNode   ProcessNode @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
   position      OrgPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
 
-  @@unique([processNodeId, positionId])
+  @@unique([processNodeId, positionId, role])
 }
 
 model ProcessChangeLog {
