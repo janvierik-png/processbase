@@ -1,0 +1,28 @@
+<header class="page-header">
+  <p class="eyebrow">Audit</p>
+  <h2>Zásahy operátorov</h2>
+  <p class="muted">Každý zapisujúci zásah v backoffice a každé prihlásenie. Heslá ani obsah zákazníkov sa nezapisujú.</p>
+</header>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+<section class="panel">
+  <table>
+    <thead><tr><th>Čas</th><th>Operátor</th><th>Zásah</th><th>Cieľ</th><th>Detail</th></tr></thead>
+    <tbody>
+      @for (entry of entries(); track entry.id) {
+        <tr [class.failed]="entry.action === 'prihlasenie.neuspesne'">
+          <td>{{ formatDateTime(entry.at) }}</td>
+          <td>{{ entry.admin }}</td>
+          <td>{{ actionLabel(entry.action) }}</td>
+          <td>{{ entry.targetType ? entry.targetType + ' ' + (entry.targetId ?? '') : '—' }}</td>
+          <td>{{ describe(entry) }}</td>
+        </tr>
+      } @empty {
+        <tr><td colspan="5" class="muted">Zatiaľ žiadne záznamy.</td></tr>
+      }
+    </tbody>
+  </table>
+</section>

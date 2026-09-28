@@ -486,6 +486,21 @@ model ProcessChangeLog {
   @@index([processNodeId, createdAt])
 }
 
+/// Audit zasahov operatora v backoffice (#18). Zapisuje sa kto, co a na com —
+/// nikdy nie obsah zakaznika (procesy, dokumenty, osoby).
+model BackofficeAuditLog {
+  id            String   @id @default(uuid())
+  adminId       String?
+  adminUsername String
+  action        String
+  targetType    String?
+  targetId      String?
+  detail        Json?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model BackofficeAdmin {
   id           String   @id @default(uuid())
   username     String   @unique

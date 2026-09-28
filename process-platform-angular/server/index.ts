@@ -54,6 +54,46 @@ app.use((_request, response, next) => {
 });
 
 /**
+ * Technicke metriky sluzby (#18) — v pamati procesu, od posledneho startu.
+ * Incident = odpoved 5xx; zapisuje sa len metoda, routa, stav a typ chyby,
+ * nikdy obsah poziadavky ani odpovede (moze obsahovat udaje zakaznika).
+ */
+const serviceMetrics = { startedAt: new Date(), requests: 0, clientErrors: 0, serverErrors: 0 };
+type Incident = { at: string; method: string; route: string; status: number; error: string | null };
+const incidents: Incident[] = [];
+const MAX_INCIDENTS = 50;
+
+function routeLabel(request: express.Request): string {
+  if (request.route?.path) return `${request.baseUrl ?? ''}${request.route.path}`;
+  // bez zhody na routu — ID v ceste nahradit, aby sa do metrik nedostali identifikatory
+  return request.path.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id');
+}
+
+app.use((request, response, next) => {
+  if (!request.path.startsWith('/api/')) {
+    next();
+    return;
+  }
+  serviceMetrics.requests++;
+  response.on('finish', () => {
+    if (response.statusCode >= 500) {
+      serviceMetrics.serverErrors++;
+      incidents.unshift({
+        at: new Date().toISOString(),
+        method: request.method,
+        route: routeLabel(request),
+        status: response.statusCode,
+        error: (response.locals['errorName'] as string | undefined) ?? null
+      });
+      incidents.length = Math.min(incidents.length, MAX_INCIDENTS);
+    } else if (response.statusCode >= 400) {
+      serviceMetrics.clientErrors++;
+    }
+  });
+  next();
+});
+
+/**
  * Jednoduchy limit pokusov (#6). Drzi sa v pamati procesu — pre viac instancii
  * by bolo treba zdielane uloziste (Redis a pod.).
  */
@@ -1005,15 +1045,18 @@ async function deployToCamunda7(options: {
     headers.Authorization = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
   }
 
+  // 502 — chyba vzdialeneho systemu zakaznika; sprava je pre neho uzitocna
   const response = await fetch(`${options.baseUrl.replace(/\/$/, '')}/deployment/create`, {
     method: 'POST',
     headers,
     body: formData
+  }).catch((error) => {
+    throw new HttpError(502, `Camunda 7 nie je dostupna: ${error instanceof Error ? error.message : error}`);
   });
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(`Camunda 7 deploy failed: ${response.status} ${JSON.stringify(body)}`);
+    throw new HttpError(502, `Camunda 7 odmietla nasadenie: ${response.status} ${JSON.stringify(body).slice(0, 500)}`);
   }
   return body;
 }
@@ -1515,7 +1558,7 @@ app.post('/api/invitations/:token/accept', rateLimitLogin, async (request, respo
       throw new HttpError(400, 'name a password su povinne');
     }
     const invitation = await prisma.invitation.findUnique({
-      where: { token: request.params.token },
+      where: { token: String(request.params.token) },
       include: { organization: true }
     });
     if (!invitation || invitation.status !== InvitationStatus.PENDING) {
@@ -2611,8 +2654,11 @@ app.post('/api/backoffice/auth/login', rateLimitLogin, async (request, response,
     if (!username || !password) throw new HttpError(400, 'username a password su povinne');
     const admin = await prisma.backofficeAdmin.findUnique({ where: { username: String(username) } });
     if (!admin || !verifyPassword(String(password), admin.passwordHash)) {
+      // #18 — neuspesne pokusy su signal utoku; heslo sa samozrejme nezapisuje
+      await writeBackofficeAudit({ adminUsername: String(username).slice(0, 80), action: 'prihlasenie.neuspesne' });
       throw new HttpError(401, 'Nespravne prihlasovacie udaje.');
     }
+    await writeBackofficeAudit({ adminId: admin.id, adminUsername: admin.username, action: 'prihlasenie' });
     response.json({ token: signBackofficeToken(admin.id, admin.username), username: admin.username });
   } catch (error) {
     next(error);
@@ -2635,6 +2681,88 @@ app.use('/api/backoffice', (request, response, next) => {
   }
   (request as any).backofficeAdmin = session;
   next();
+});
+
+// --- #18 audit zasahov operatora ---
+
+/** Citatelny nazov zasahu podla metody a routy; neznamy zasah sa zapise ako "METODA /cesta". */
+const BACKOFFICE_ACTIONS: Record<string, string> = {
+  'POST /api/backoffice/admins': 'admin.vytvorenie',
+  'DELETE /api/backoffice/admins/:adminId': 'admin.zmazanie',
+  'POST /api/backoffice/admins/me/password': 'admin.zmena-hesla',
+  'PATCH /api/backoffice/organizations/:organizationId': 'firma.zmena-planu',
+  'POST /api/backoffice/iso': 'iso.vytvorenie',
+  'PATCH /api/backoffice/iso/:normId': 'iso.uprava',
+  'DELETE /api/backoffice/iso/:normId': 'iso.zmazanie',
+  'PUT /api/backoffice/translations': 'preklad.uprava',
+  'POST /api/backoffice/translations/import': 'preklad.import',
+  'DELETE /api/backoffice/translations/:translationId': 'preklad.zmazanie'
+};
+
+async function writeBackofficeAudit(entry: {
+  adminId?: string | null;
+  adminUsername: string;
+  action: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  detail?: Record<string, unknown> | null;
+}): Promise<void> {
+  await prisma.backofficeAuditLog.create({
+    data: {
+      adminId: entry.adminId ?? null,
+      adminUsername: entry.adminUsername,
+      action: entry.action,
+      targetType: entry.targetType ?? null,
+      targetId: entry.targetId ?? null,
+      detail: (entry.detail ?? undefined) as any
+    }
+  }).catch((error) => console.error('[audit] zapis zlyhal:', error));
+}
+
+/**
+ * Kazdy uspesny zapisujuci zasah operatora sa zapise do auditu. Telo poziadavky
+ * sa NEUKLADA (moze obsahovat hesla) — len to, co handler vlozi do
+ * response.locals.auditDetail (napr. stara a nova kvota).
+ */
+app.use('/api/backoffice', (request, response, next) => {
+  if (request.method === 'GET') {
+    next();
+    return;
+  }
+  response.on('finish', () => {
+    if (response.statusCode >= 400) return;
+    const admin = (request as any).backofficeAdmin as { sub: string; username: string } | undefined;
+    const route = request.route?.path ? `${request.method} ${request.route.path}` : `${request.method} ${request.originalUrl}`;
+    const params = (request.params ?? {}) as Record<string, string>;
+    const [targetType, targetId] = Object.entries(params)[0] ?? [null, null];
+    void writeBackofficeAudit({
+      adminId: admin?.sub,
+      adminUsername: admin?.username ?? 'neznamy',
+      action: BACKOFFICE_ACTIONS[route] ?? route,
+      targetType: targetType ? targetType.replace(/Id$/, '') : null,
+      targetId,
+      detail: response.locals['auditDetail'] ?? null
+    });
+  });
+  next();
+});
+
+app.get('/api/backoffice/audit', async (request, response, next) => {
+  try {
+    const limit = Math.min(500, Math.max(1, Number(request.query['limit'] ?? 100) || 100));
+    const entries = await prisma.backofficeAuditLog.findMany({ orderBy: { createdAt: 'desc' }, take: limit });
+    response.json(entries.map((entry) => ({
+      id: entry.id,
+      at: entry.createdAt.toISOString(),
+      admin: entry.adminUsername,
+      action: entry.action,
+      targetType: entry.targetType,
+      targetId: entry.targetId,
+      detail: entry.detail
+    })));
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Sprava backoffice adminov
@@ -2837,15 +2965,35 @@ app.delete('/api/backoffice/iso/:normId', async (request, response, next) => {
 
 // --- Backoffice API (samostatna admin aplikacia process-platform-backoffice) ---
 
+// --- #17 spotreba planu a stav uctov — len agregaty, ziadny obsah zakaznika ---
+
+/**
+ * Pouzivatelia = clenovia firmy s prihlasenim (plateni). Osoby len v adresari
+ * (bez uctu) sa pocitaju zvlast a do planu nevstupuju (#13).
+ */
 app.get('/api/backoffice/stats', async (_request, response, next) => {
   try {
-    const [organizations, users, processes, translations] = await Promise.all([
+    const [organizations, users, directoryOnly, processes, storage, quota, activeSessions, translations] = await Promise.all([
       prisma.organization.count(),
-      prisma.user.count(),
+      prisma.organizationUser.count(),
+      prisma.person.count({ where: { userId: null } }),
       prisma.processNode.count({ where: { type: ProcessNodeType.PROCESS } }),
+      prisma.attachment.aggregate({ _sum: { sizeBytes: true }, _count: true }),
+      prisma.organization.aggregate({ _sum: { storageQuotaMb: true } }),
+      prisma.session.count({ where: { expiresAt: { gt: new Date() } } }),
       prisma.translation.count({ where: { organizationId: null } })
     ]);
-    response.json({ organizations, users, processes, translations });
+    response.json({
+      organizations,
+      users,
+      directoryOnly,
+      processes,
+      documents: storage._count,
+      storageUsedBytes: storage._sum.sizeBytes ?? 0,
+      storageQuotaBytes: (quota._sum.storageQuotaMb ?? 0) * 1024 * 1024,
+      activeSessions,
+      translations
+    });
   } catch (error) {
     next(error);
   }
@@ -2853,22 +3001,109 @@ app.get('/api/backoffice/stats', async (_request, response, next) => {
 
 app.get('/api/backoffice/organizations', async (_request, response, next) => {
   try {
-    const organizations = await prisma.organization.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: { select: { users: true, processNodes: true } }
-      }
+    const [organizations, storage, directoryOnly, processes, lastSeen] = await Promise.all([
+      prisma.organization.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: { _count: { select: { users: true } } }
+      }),
+      prisma.attachment.groupBy({ by: ['organizationId'], _sum: { sizeBytes: true }, _count: true }),
+      prisma.person.groupBy({ by: ['organizationId'], where: { userId: null }, _count: true }),
+      prisma.processNode.groupBy({ by: ['organizationId'], where: { type: ProcessNodeType.PROCESS }, _count: true }),
+      prisma.session.groupBy({ by: ['organizationId'], _max: { lastSeenAt: true } })
+    ]);
+    const byOrg = <T extends { organizationId: string }>(rows: T[]) => new Map(rows.map((row) => [row.organizationId, row]));
+    const storageBy = byOrg(storage);
+    const directoryBy = byOrg(directoryOnly);
+    const processBy = byOrg(processes);
+    const seenBy = byOrg(lastSeen);
+
+    response.json(organizations.map((organization) => {
+      const usedBytes = storageBy.get(organization.id)?._sum.sizeBytes ?? 0;
+      const quotaBytes = organization.storageQuotaMb * 1024 * 1024;
+      return {
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        defaultLocale: organization.defaultLocale,
+        camundaBaseUrl: organization.camundaBaseUrl,
+        createdAt: organization.createdAt.toISOString().slice(0, 10),
+        userCount: organization._count.users,
+        directoryOnlyCount: directoryBy.get(organization.id)?._count ?? 0,
+        processCount: processBy.get(organization.id)?._count ?? 0,
+        documentCount: storageBy.get(organization.id)?._count ?? 0,
+        storageUsedBytes: usedBytes,
+        storageQuotaMb: organization.storageQuotaMb,
+        storagePercent: quotaBytes > 0 ? Math.round((usedBytes / quotaBytes) * 1000) / 10 : 0,
+        lastActivityAt: seenBy.get(organization.id)?._max.lastSeenAt?.toISOString() ?? null
+      };
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Zmena planu firmy (#17) — zatial kapacita uloziska. Zasah ide do auditu (#18). */
+app.patch('/api/backoffice/organizations/:organizationId', async (request, response, next) => {
+  try {
+    const organization = await prisma.organization.findUnique({ where: { id: request.params.organizationId } });
+    if (!organization) throw new HttpError(404, 'Firma sa nenasla.');
+    const quota = Number(request.body?.storageQuotaMb);
+    if (!Number.isInteger(quota) || quota < 1 || quota > 1_000_000) {
+      throw new HttpError(400, 'storageQuotaMb musi byt cele cislo 1 – 1 000 000 (MB).');
+    }
+    await prisma.organization.update({ where: { id: organization.id }, data: { storageQuotaMb: quota } });
+    response.locals['auditDetail'] = { storageQuotaMb: { from: organization.storageQuotaMb, to: quota } };
+    response.json({ id: organization.id, storageQuotaMb: quota });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- #18 stav sluzby: technicke metriky bez pristupu k obsahu zakaznika ---
+
+app.get('/api/backoffice/health', async (_request, response, next) => {
+  try {
+    const started = Date.now();
+    let database: { ok: boolean; latencyMs: number | null; sizeBytes: number | null } = { ok: false, latencyMs: null, sizeBytes: null };
+    try {
+      const rows = await prisma.$queryRaw<Array<{ size: bigint }>>`SELECT pg_database_size(current_database()) AS size`;
+      database = { ok: true, latencyMs: Date.now() - started, sizeBytes: Number(rows[0]?.size ?? 0) };
+    } catch {
+      database = { ok: false, latencyMs: null, sizeBytes: null };
+    }
+
+    const [onDisk, inDatabase, activeSessions] = await Promise.all([
+      prisma.attachment.aggregate({ where: { NOT: { storagePath: { startsWith: 'data:' } } }, _sum: { sizeBytes: true }, _count: true }),
+      prisma.attachment.aggregate({ where: { storagePath: { startsWith: 'data:' } }, _sum: { sizeBytes: true }, _count: true }),
+      prisma.session.count({ where: { expiresAt: { gt: new Date() } } })
+    ]);
+
+    const memory = process.memoryUsage();
+    const recentServerErrors = incidents.filter((incident) => Date.now() - Date.parse(incident.at) < 60 * 60 * 1000).length;
+    response.json({
+      status: !database.ok ? 'down' : recentServerErrors > 0 ? 'degraded' : 'ok',
+      checkedAt: new Date().toISOString(),
+      startedAt: serviceMetrics.startedAt.toISOString(),
+      uptimeSeconds: Math.round(process.uptime()),
+      node: process.version,
+      memoryRssMb: Math.round(memory.rss / 1024 / 1024),
+      database,
+      storage: {
+        filesOnDisk: { count: onDisk._count, bytes: onDisk._sum.sizeBytes ?? 0 },
+        // #10 — stare prilohy este v DB; po migracii ma byt 0
+        legacyInDatabase: { count: inDatabase._count, bytes: inDatabase._sum.sizeBytes ?? 0 }
+      },
+      activeSessions,
+      requests: {
+        total: serviceMetrics.requests,
+        clientErrors: serviceMetrics.clientErrors,
+        serverErrors: serviceMetrics.serverErrors,
+        serverErrorsLastHour: recentServerErrors
+      },
+      incidents: incidents.slice(0, 20),
+      // #20 — doručovanie emailov zatial neexistuje (chyba SMTP poskytovatel)
+      email: { configured: false, note: 'Odosielanie emailov nie je nakonfigurovane (#20).' }
     });
-    response.json(organizations.map((organization) => ({
-      id: organization.id,
-      name: organization.name,
-      slug: organization.slug,
-      defaultLocale: organization.defaultLocale,
-      camundaBaseUrl: organization.camundaBaseUrl,
-      createdAt: organization.createdAt.toISOString().slice(0, 10),
-      userCount: organization._count.users,
-      processCount: organization._count.processNodes
-    })));
   } catch (error) {
     next(error);
   }
@@ -2949,6 +3184,7 @@ app.delete('/api/backoffice/translations/:translationId', async (request, respon
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   console.error(error);
   if (error instanceof HttpError) {
+    if (error.status >= 500) response.locals['errorName'] = `HttpError ${error.status}`;
     response.status(error.status).json({ message: error.message });
     return;
   }
@@ -2959,9 +3195,10 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
     });
     return;
   }
-  response.status(500).json({
-    message: error instanceof Error ? error.message : 'Unexpected server error'
-  });
+  // detail len do logu servera — sprava chyby (napr. z Prismy) moze prezradit
+  // strukturu databazy alebo casti dotazu
+  response.locals['errorName'] = error instanceof Error ? error.name : typeof error;
+  response.status(500).json({ message: 'Nastala chyba servera. Skuste to znova.' });
 });
 
 class HttpError extends Error {

@@ -31,3 +31,63 @@ th {
 .error {
   color: var(--warn);
 }
+
+.page-header p { margin: 4px 0 0; }
+
+.notice { color: var(--accent-strong); }
+
+td strong { display: block; }
+td small { font-size: 12px; }
+
+// #17 — obsadenost uloziska firmy
+.usage {
+  min-width: 200px;
+
+  --bar: var(--accent);
+  &.warn { --bar: #d98a1c; }
+  &.full { --bar: #c9423a; }
+}
+
+.usage-text {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+
+  span { font-weight: 600; }
+}
+
+.bar {
+  height: 6px;
+  margin: 4px 0;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--bar);
+  }
+}
+
+.quota-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+
+  input { width: 100px; }
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font-size: 12.5px;
+  cursor: pointer;
+
+  &:hover { text-decoration: underline; }
+}

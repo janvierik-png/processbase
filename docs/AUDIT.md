@@ -240,7 +240,8 @@ Každá zmena je overená na lokálnom Dockeri a naviazaná na GitHub issue (`Fi
 | 3 — Osoby, obsadenie s platnosťou, vlastník podľa miesta | `48391f0`, `71ba516` | #13, #14, #15 | `scripts/org-module-test.mjs` 38/38 — akceptačný scenár „vlastník podľa miesta, po zmene obsadenia nový človek, audit ostáva" overený |
 | — Pozvánka na existujúci účet | `48391f0` | B1 | prijatie pozvánky nevyžadovalo heslo existujúceho účtu (pôvodný kód: 200); po Etape 1 navyše nevracala token |
 | 3 — Profil práce a verzie popisu | `71ba516` | #16 | návrh → publikovaná (nemenná), platná/plánovaná podľa dátumu účinnosti |
-| 5 — Tajomstvá bez záložných hodnôt v kóde | *(commit #19)* | #19, B3, B6 | podvrhnutý backoffice token: 200 → 401; kľúč zašifrovaný starým verejným kľúčom sa pri štarte presifruje (starý ho už nedešifruje) |
+| 5 — Tajomstvá bez záložných hodnôt v kóde | `821b449` | #19, B3, B6 | podvrhnutý backoffice token: 200 → 401; kľúč zašifrovaný starým verejným kľúčom sa pri štarte presifruje (starý ho už nedešifruje) |
+| 4 — Backoffice: spotreba plánu, stav služby, audit zásahov | *(commit Etapy 4)* | #17, #18 | `scripts/backoffice-test.mjs` 19/19 — agregáty bez obsahu zákazníka (test hľadá názvy procesu/osoby/dokumentu v odpovediach), zmena plánu a prihlásenia v audite, bez hesiel |
 
 **Stav nálezov:** B1, B2 — opravené (Etapa 1, doplnené o odkazované ID, autora zmien a pozvánky). B4 — hlavičky a rate limit doplnené, `cors`
 zostáva otvorený (rieši sa pri produkčných nastaveniach). B5 — oddelené úložisko hotové,
@@ -274,6 +275,15 @@ B3, B6 — opravené (#19).
 - Známe obmedzenie: Prisma 7 s `@prisma/adapter-pg` pri zápise s `include` posiela v transakcii
   paralelné dotazy → `pg` hlási DeprecationWarning (prestane fungovať v `pg@9`). Nie je to v našom
   kóde; rieši sa aktualizáciou Prismy pred prechodom na `pg@9`.
+
+**Etapa 4 — poznámky:**
+- Operátor vidí na firmu: počet používateľov s prihlásením (platení), osôb len v adresári,
+  procesov, dokumentov, spotrebu a kapacitu úložiska, poslednú aktivitu. Nevidí názvy procesov,
+  dokumentov ani mená ľudí. Kapacitu môže zmeniť — zásah ide do auditu so starou a novou hodnotou.
+- Stav služby: dostupnosť a veľkosť DB, súbory na disku vs. prílohy ešte v DB, požiadavky a 5xx od
+  štartu, posledných 20 incidentov (metóda, routa, stav, typ chyby — bez obsahu). E-maily: nenakonfigurované (#20).
+- Odpoveď 500 už neposiela klientovi text chyby (mohol prezradiť štruktúru DB); detail je len v logu servera.
+- Metriky sú v pamäti procesu (od posledného štartu); audit je v DB (`BackofficeAuditLog`).
 
 ### Poznámky k rozporom medzi zadaním a skutočnosťou
 

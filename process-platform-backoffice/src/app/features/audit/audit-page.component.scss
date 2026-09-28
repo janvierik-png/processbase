@@ -1,0 +1,27 @@
+.page-header {
+  margin-bottom: 16px;
+
+  h2 { margin: 0; }
+  p { margin: 4px 0 0; }
+}
+
+.muted { color: var(--muted); }
+.error { color: var(--warn); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+
+  th,
+  td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th { color: var(--muted); font-size: 12.5px; text-transform: uppercase; }
+  td:nth-child(4) { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+  tr.failed td { color: var(--warn); }
+}

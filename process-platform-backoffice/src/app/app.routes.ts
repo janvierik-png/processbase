@@ -33,6 +33,10 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/admins/admins-page.component').then((m) => m.AdminsPageComponent)
       },
       {
+        path: 'audit',
+        loadComponent: () => import('./features/audit/audit-page.component').then((m) => m.AuditPageComponent)
+      },
+      {
         path: 'integrations',
         loadComponent: () => import('./features/integrations/integrations-page.component').then((m) => m.IntegrationsPageComponent)
       }

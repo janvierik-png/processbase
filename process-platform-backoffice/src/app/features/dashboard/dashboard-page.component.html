@@ -1,6 +1,7 @@
 <header class="page-header">
   <p class="eyebrow">Dashboard</p>
-  <h2>Prehlad platformy</h2>
+  <h2>Prehľad platformy</h2>
+  <p class="muted">Len agregáty a technický stav — obsah procesov ani osobné údaje zákazníkov backoffice nezobrazuje.</p>
 </header>
 
 @if (error()) {
@@ -10,20 +11,74 @@
 @if (stats(); as s) {
   <section class="stats-grid">
     <article class="panel stat">
-      <p>Organizacie</p>
+      <p>Firmy</p>
       <strong>{{ s.organizations }}</strong>
     </article>
     <article class="panel stat">
-      <p>Pouzivatelia</p>
+      <p>Používatelia (s prihlásením)</p>
       <strong>{{ s.users }}</strong>
+      <small class="muted">+ {{ s.directoryOnly }} osôb len v adresári</small>
     </article>
     <article class="panel stat">
       <p>Procesy</p>
       <strong>{{ s.processes }}</strong>
+      <small class="muted">{{ s.documents }} dokumentov</small>
     </article>
     <article class="panel stat">
-      <p>Globalne preklady</p>
-      <strong>{{ s.translations }}</strong>
+      <p>Úložisko</p>
+      <strong>{{ formatBytes(s.storageUsedBytes) }}</strong>
+      <small class="muted">z {{ formatBytes(s.storageQuotaBytes) }} pridelených ({{ storagePercent() }} %)</small>
     </article>
+    <article class="panel stat">
+      <p>Aktívne relácie</p>
+      <strong>{{ s.activeSessions }}</strong>
+    </article>
+  </section>
+}
+
+@if (health(); as h) {
+  <section class="panel health">
+    <header class="health-head">
+      <h3>Stav služby</h3>
+      <span class="status" [class]="'status status-' + h.status">{{ statusLabel(h.status) }}</span>
+      <button type="button" (click)="load()">Obnoviť</button>
+    </header>
+
+    <dl class="health-grid">
+      <div><dt>Beží od</dt><dd>{{ formatDateTime(h.startedAt) }} ({{ formatDuration(h.uptimeSeconds) }})</dd></div>
+      <div><dt>Databáza</dt><dd>{{ h.database.ok ? 'dostupná · ' + h.database.latencyMs + ' ms' : 'NEDOSTUPNÁ' }} · {{ formatBytes(h.database.sizeBytes) }}</dd></div>
+      <div><dt>Súbory príloh</dt><dd>{{ h.storage.filesOnDisk.count }} na disku · {{ formatBytes(h.storage.filesOnDisk.bytes) }}</dd></div>
+      <div>
+        <dt>Prílohy ešte v DB</dt>
+        <dd [class.warn]="h.storage.legacyInDatabase.count > 0">
+          {{ h.storage.legacyInDatabase.count }} · {{ formatBytes(h.storage.legacyInDatabase.bytes) }}
+          @if (h.storage.legacyInDatabase.count > 0) {
+            <small>— presunúť skriptom migrate-attachments-to-files</small>
+          }
+        </dd>
+      </div>
+      <div><dt>Požiadavky od štartu</dt><dd>{{ h.requests.total }} · 4xx {{ h.requests.clientErrors }} · 5xx {{ h.requests.serverErrors }}</dd></div>
+      <div><dt>Pamäť API</dt><dd>{{ h.memoryRssMb }} MB · Node {{ h.node }}</dd></div>
+      <div><dt>E-maily</dt><dd [class.warn]="!h.email.configured">{{ h.email.note }}</dd></div>
+    </dl>
+
+    <h4>Incidenty (odpovede 5xx od štartu)</h4>
+    @if (h.incidents.length === 0) {
+      <p class="muted">Žiadne.</p>
+    } @else {
+      <table>
+        <thead><tr><th>Čas</th><th>Požiadavka</th><th>Stav</th><th>Typ chyby</th></tr></thead>
+        <tbody>
+          @for (incident of h.incidents; track $index) {
+            <tr>
+              <td>{{ formatDateTime(incident.at) }}</td>
+              <td><code>{{ incident.method }} {{ incident.route }}</code></td>
+              <td>{{ incident.status }}</td>
+              <td>{{ incident.error ?? '—' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
   </section>
 }

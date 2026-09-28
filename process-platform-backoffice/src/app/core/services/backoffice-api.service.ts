@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
-import { BackofficeAdmin, IsoClause, IsoNorm, OrganizationOverview, PlatformStats, TranslationEntry } from '../models/backoffice.model';
+import { AuditEntry, BackofficeAdmin, IsoClause, IsoNorm, OrganizationOverview, PlatformStats, ServiceHealth, TranslationEntry } from '../models/backoffice.model';
 
 // Relativna cesta — dev server proxuje /api na backend platformy (proxy.conf.json).
 const API_BASE_URL = '/api/backoffice';
@@ -16,6 +16,21 @@ export class BackofficeApiService {
 
   organizations(): Observable<OrganizationOverview[]> {
     return this.http.get<OrganizationOverview[]>(`${API_BASE_URL}/organizations`);
+  }
+
+  /** #17 — zmena planu firmy (kapacita uloziska v MB); zapise sa do auditu. */
+  updateOrganizationQuota(id: string, storageQuotaMb: number): Observable<{ id: string; storageQuotaMb: number }> {
+    return this.http.patch<{ id: string; storageQuotaMb: number }>(`${API_BASE_URL}/organizations/${id}`, { storageQuotaMb });
+  }
+
+  /** #18 — stav sluzby a incidenty. */
+  health(): Observable<ServiceHealth> {
+    return this.http.get<ServiceHealth>(`${API_BASE_URL}/health`);
+  }
+
+  /** #18 — audit zasahov operatora. */
+  audit(limit = 100): Observable<AuditEntry[]> {
+    return this.http.get<AuditEntry[]>(`${API_BASE_URL}/audit?limit=${limit}`);
   }
 
   translations(locale?: string): Observable<TranslationEntry[]> {

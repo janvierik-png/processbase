@@ -1,39 +1,63 @@
 <header class="page-header">
-  <p class="eyebrow">Organizacie</p>
-  <h2>Registrovane firmy</h2>
+  <p class="eyebrow">Firmy</p>
+  <h2>Firmy a spotreba plánu</h2>
+  <p class="muted">Počty a veľkosti — bez obsahu procesov, dokumentov či mien z adresára.</p>
 </header>
 
 @if (error()) {
   <p class="error">{{ error() }}</p>
 }
+@if (notice()) {
+  <p class="notice">{{ notice() }}</p>
+}
 
 @if (loading()) {
-  <p class="muted">Nacitavam...</p>
+  <p class="muted">Načítavam...</p>
 } @else if (organizations().length === 0) {
-  <p class="muted">Zatial nie su registrovane ziadne organizacie.</p>
+  <p class="muted">Zatiaľ nie sú registrované žiadne firmy.</p>
 } @else {
   <section class="panel">
     <table>
       <thead>
         <tr>
-          <th>Nazov</th>
-          <th>Slug</th>
-          <th>Jazyk</th>
-          <th>Pouzivatelia</th>
+          <th>Firma</th>
+          <th title="Členovia s prihlásením — platení používatelia">Používatelia</th>
+          <th title="Osoby len v adresári — nepočítajú sa do plánu">Len adresár</th>
           <th>Procesy</th>
-          <th>Camunda</th>
-          <th>Vytvorena</th>
+          <th>Dokumenty</th>
+          <th>Úložisko</th>
+          <th>Posledná aktivita</th>
+          <th>Vytvorená</th>
         </tr>
       </thead>
       <tbody>
         @for (org of organizations(); track org.id) {
           <tr>
-            <td><strong>{{ org.name }}</strong></td>
-            <td>{{ org.slug }}</td>
-            <td>{{ org.defaultLocale }}</td>
+            <td>
+              <strong>{{ org.name }}</strong>
+              <small class="muted">{{ org.slug }} · {{ org.defaultLocale }}</small>
+            </td>
             <td>{{ org.userCount }}</td>
+            <td>{{ org.directoryOnlyCount }}</td>
             <td>{{ org.processCount }}</td>
-            <td>{{ org.camundaBaseUrl ?? '—' }}</td>
+            <td>{{ org.documentCount }}</td>
+            <td class="usage" [class]="'usage ' + usageClass(org)">
+              <div class="usage-text">
+                {{ formatBytes(org.storageUsedBytes) }} z {{ org.storageQuotaMb }} MB
+                <span>{{ org.storagePercent }} %</span>
+              </div>
+              <div class="bar"><span [style.width.%]="org.storagePercent > 100 ? 100 : org.storagePercent"></span></div>
+              @if (editingId === org.id) {
+                <div class="quota-edit">
+                  <input type="number" min="1" step="256" [(ngModel)]="quotaDraft" [name]="'quota-' + org.id"> MB
+                  <button type="button" class="primary" (click)="saveQuota(org)">Uložiť</button>
+                  <button type="button" (click)="editingId = null">Zrušiť</button>
+                </div>
+              } @else {
+                <button type="button" class="link" (click)="startEdit(org)">zmeniť kapacitu</button>
+              }
+            </td>
+            <td>{{ formatDateTime(org.lastActivityAt) }}</td>
             <td>{{ org.createdAt }}</td>
           </tr>
         }
