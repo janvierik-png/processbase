@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable, signal } from '@angular/core';
+import { Injectable, effect, signal, untracked } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   IsoNorm,
@@ -14,6 +14,8 @@ import { API_BASE_URL } from './api-url';
 
 export type ProcessPatch = Partial<ProcessNode> & {
   positionIds?: string[];
+  /** #15 — miesto vlastnika; null = bez vlastnika podla miesta */
+  ownerPositionId?: string | null;
   changeDescription?: string;
 };
 
@@ -30,7 +32,19 @@ export class ProcessStoreService {
     private readonly storage: StorageService,
     private readonly http: HttpClient,
     private readonly auth: AuthService
-  ) {}
+  ) {
+    // odhlasenie alebo ina firma: strom v pamati patri predchadzajucej relacii
+    let organizationId = this.auth.currentOrganizationId();
+    effect(() => {
+      const next = this.auth.currentOrganizationSignal()?.id ?? null;
+      if (next === organizationId) return;
+      organizationId = next;
+      untracked(() => {
+        this.tree.set([]);
+        this.activeProcessId.set(null);
+      });
+    });
+  }
 
   activeProcess(): ProcessNode | null {
     return this.flatten(this.tree()).find((node) => node.id === this.activeProcessId() && node.type === 'process') ?? null;
@@ -83,7 +97,7 @@ export class ProcessStoreService {
   }
 
   updateProcess(id: string, patch: ProcessPatch, onDone?: (updated: ProcessNode) => void): void {
-    const { positionIds, changeDescription, ...nodePatch } = patch;
+    const { positionIds, ownerPositionId, changeDescription, ...nodePatch } = patch;
     this.tree.set(this.walk(this.tree(), (node) => node.id === id ? { ...node, ...nodePatch } : node));
     this.persist();
     this.http.patch<ProcessNode>(`${API_BASE_URL}/processes/${id}`, patch).subscribe({

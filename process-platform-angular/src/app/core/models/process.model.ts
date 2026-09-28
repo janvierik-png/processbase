@@ -13,6 +13,10 @@ export interface ProcessNode {
   relatedProcessIds?: string[];
   positionIds?: string[];
   positions?: ProcessPositionRef[];
+  /** #15 — miesto vlastnika procesu; owner je jeho dnesny drzitel */
+  ownerPosition?: ProcessPositionRef | null;
+  /** zodpovednosti, ktore dnes nikto nezastava */
+  vacantResponsibilities?: ProcessPositionRef[];
   isoSuggestions?: IsoSuggestion[];
   translations?: Record<string, { name: string; descriptionText: string }> | null;
   bpmnXml?: string;
@@ -29,6 +33,11 @@ export interface ProcessNode {
 export interface ProcessPositionRef {
   id: string;
   name: string;
+  /** #15 — rola miesta v zodpovednosti za proces */
+  role?: 'OWNER' | 'PERFORMER';
+  /** kto miesto dnes zastava */
+  holders?: string[];
+  vacant?: boolean;
 }
 
 export interface ProcessDetail extends ProcessNode {

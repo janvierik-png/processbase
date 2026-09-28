@@ -5,6 +5,14 @@ import { OrgPosition, OrgUnit } from '../models/user.model';
 import { AuthService } from './auth.service';
 import { API_BASE_URL } from './api-url';
 
+export interface PositionPatch {
+  name?: string;
+  description?: string;
+  unitId?: string | null;
+  reportsToId?: string | null;
+  jobProfileId?: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class PositionService {
   constructor(
@@ -12,29 +20,37 @@ export class PositionService {
     private readonly auth: AuthService
   ) {}
 
+  private org(path: string): string {
+    return `${API_BASE_URL}/organizations/${this.auth.currentOrganizationId()}${path}`;
+  }
+
   list(): Observable<OrgPosition[]> {
-    return this.http.get<OrgPosition[]>(`${API_BASE_URL}/organizations/${this.auth.currentOrganizationId()}/positions`);
+    return this.http.get<OrgPosition[]>(this.org('/positions'));
   }
 
-  create(name: string, description: string, unitId?: string | null): Observable<OrgPosition> {
-    return this.http.post<OrgPosition>(`${API_BASE_URL}/organizations/${this.auth.currentOrganizationId()}/positions`, { name, description, unitId: unitId || null });
+  create(payload: PositionPatch & { name: string }): Observable<OrgPosition> {
+    return this.http.post<OrgPosition>(this.org('/positions'), payload);
   }
 
-  update(positionId: string, patch: { name?: string; description?: string; unitId?: string | null }): Observable<OrgPosition> {
+  update(positionId: string, patch: PositionPatch): Observable<OrgPosition> {
     return this.http.patch<OrgPosition>(`${API_BASE_URL}/positions/${positionId}`, patch);
   }
 
-  // --- organizacne zlozky ---
+  remove(positionId: string): Observable<void> {
+    return this.http.delete<void>(`${API_BASE_URL}/positions/${positionId}`);
+  }
+
+  // --- organizacne zlozky (#12 strom) ---
 
   listUnits(): Observable<OrgUnit[]> {
-    return this.http.get<OrgUnit[]>(`${API_BASE_URL}/organizations/${this.auth.currentOrganizationId()}/units`);
+    return this.http.get<OrgUnit[]>(this.org('/units'));
   }
 
-  createUnit(name: string, description: string): Observable<OrgUnit> {
-    return this.http.post<OrgUnit>(`${API_BASE_URL}/organizations/${this.auth.currentOrganizationId()}/units`, { name, description });
+  createUnit(payload: { name: string; description: string; parentId: string | null }): Observable<OrgUnit> {
+    return this.http.post<OrgUnit>(this.org('/units'), payload);
   }
 
-  updateUnit(unitId: string, patch: { name?: string; description?: string }): Observable<OrgUnit> {
+  updateUnit(unitId: string, patch: { name?: string; description?: string; parentId?: string | null }): Observable<OrgUnit> {
     return this.http.patch<OrgUnit>(`${API_BASE_URL}/units/${unitId}`, patch);
   }
 
@@ -42,15 +58,19 @@ export class PositionService {
     return this.http.delete<void>(`${API_BASE_URL}/units/${unitId}`);
   }
 
-  remove(positionId: string): Observable<void> {
-    return this.http.delete<void>(`${API_BASE_URL}/positions/${positionId}`);
+  // --- obsadenie miest (#14) ---
+
+  assign(positionId: string, personId: string, validFrom?: string): Observable<{ id: string }> {
+    return this.http.post<{ id: string }>(`${API_BASE_URL}/positions/${positionId}/assignments`, { personId, validFrom });
   }
 
-  assign(userId: string, positionId: string): Observable<{ ok: boolean }> {
-    return this.http.post<{ ok: boolean }>(`${API_BASE_URL}/users/${userId}/positions`, { positionId });
+  /** Ukoncenie obsadenia — validTo je posledny den; zaznam ostava v historii. */
+  endAssignment(assignmentId: string, validTo: string): Observable<unknown> {
+    return this.http.patch(`${API_BASE_URL}/assignments/${assignmentId}`, { validTo });
   }
 
-  unassign(userId: string, positionId: string): Observable<void> {
-    return this.http.delete<void>(`${API_BASE_URL}/users/${userId}/positions/${positionId}`);
+  /** Len pre omylom zadane obsadenie. */
+  deleteAssignment(assignmentId: string): Observable<void> {
+    return this.http.delete<void>(`${API_BASE_URL}/assignments/${assignmentId}`);
   }
 }

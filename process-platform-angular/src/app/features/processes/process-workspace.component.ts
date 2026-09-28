@@ -203,7 +203,10 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.editingDocumentId = null;
     this.changeDescription = '';
     this.store.detail(id).subscribe({
-      next: (detail) => this.detail.set(detail),
+      next: (detail) => {
+        this.detail.set(detail);
+        this.ownerPositionDraft = detail.ownerPosition?.id ?? '';
+      },
       error: () => this.detail.set(null)
     });
     this.store.history(id).subscribe({
@@ -248,6 +251,13 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   onRelatedBlur(): void {
     setTimeout(() => { this.relatedOpen = false; }, 150);
+  }
+
+  /** #15 — vybrane miesto vlastnika v rezime upravy ('' = ziadne). */
+  ownerPositionDraft = '';
+
+  holderNames(position: OrgPosition): string {
+    return position.holders.map((holder) => holder.name).join(', ');
   }
 
   togglePosition(positionId: string): void {
@@ -335,6 +345,7 @@ export class ProcessWorkspaceComponent implements OnInit {
       parentId: detail.parentId ?? null,
       relatedProcessIds: detail.relatedProcessIds ?? [],
       positionIds: detail.positionIds ?? [],
+      ownerPositionId: this.ownerPositionDraft || null,
       iso: detail.iso ?? [],
       changeDescription: this.changeDescription
     }, () => {

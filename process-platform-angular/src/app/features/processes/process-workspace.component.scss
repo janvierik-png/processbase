@@ -900,3 +900,25 @@ button.small {
   text-align: center;
   color: var(--muted);
 }
+
+// #15 — neobsadena zodpovednost (vlastnik/vykonavatel bez drzitela miesta)
+.owner-cell.vacant {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.chip.warn {
+  background: var(--warn-soft);
+  border-color: #f1c9b1;
+  color: var(--warn);
+}
+
+.responsibility {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13.5px;
+
+  span { color: var(--ink-soft); }
+}

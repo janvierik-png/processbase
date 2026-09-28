@@ -8,6 +8,7 @@ import {
   OrganizationRole,
   ProcessNodeType,
   ProcessStatus,
+  JobDescriptionStatus,
   ResponsibilityRole
 } from '../generated/prisma/client';
 import { prisma } from './prisma';
@@ -1127,7 +1128,7 @@ async function requirePosition(request: express.Request, positionId: string) {
  * suvisiaci proces, pozicia, zlozka) a jeho nazov by sa potom vratil vo vypise.
  */
 async function assertOwnedIds(
-  model: 'processNode' | 'orgPosition' | 'orgUnit',
+  model: 'processNode' | 'orgPosition' | 'orgUnit' | 'jobProfile',
   organizationId: string,
   ids: unknown[]
 ): Promise<string[]> {
@@ -1611,6 +1612,8 @@ function mapOrgPosition(position: any) {
     unitName: position.unit?.name ?? null,
     reportsToId: position.reportsToId ?? null,
     reportsToName: position.reportsTo?.name ?? null,
+    jobProfileId: position.jobProfileId ?? null,
+    jobProfileName: position.jobProfile?.name ?? null,
     name: position.name,
     description: position.description ?? '',
     createdAt: position.createdAt.toISOString().slice(0, 10),
@@ -1643,7 +1646,8 @@ function positionInclude() {
   return {
     assignments: { where: activeOn(today()), include: { person: { select: { name: true } } } },
     unit: { select: { name: true } },
-    reportsTo: { select: { name: true } }
+    reportsTo: { select: { name: true } },
+    jobProfile: { select: { name: true } }
   };
 }
 
@@ -1749,10 +1753,12 @@ app.delete('/api/units/:unitId', async (request, response, next) => {
     const unit = await requireUnit(request, request.params.unitId);
     // podriadene zlozky sa posunu o uroven vyssie, strom sa nerozpadne;
     // pozicie ostavaju, len stratia zaradenie (onDelete: SetNull)
-    await prisma.$transaction([
-      prisma.orgUnit.updateMany({ where: { parentId: unit.id }, data: { parentId: unit.parentId } }),
-      prisma.orgUnit.delete({ where: { id: unit.id } })
-    ]);
+    // interaktivna transakcia: dotazy idu po jednom na jednom spojeni
+    // (davkova forma posiela cez driver adapter viac dotazov naraz)
+    await prisma.$transaction(async (tx) => {
+      await tx.orgUnit.updateMany({ where: { parentId: unit.id }, data: { parentId: unit.parentId } });
+      await tx.orgUnit.delete({ where: { id: unit.id } });
+    });
     response.status(204).end();
   } catch (error) {
     next(error);
@@ -1787,7 +1793,8 @@ app.post('/api/organizations/:organizationId/positions', async (request, respons
         name,
         description: description || null,
         unitId: (await resolvePositionUnit(organizationId, unitId)) ?? null,
-        reportsToId: (await resolveReportsTo(organizationId, null, reportsToId)) ?? null
+        reportsToId: (await resolveReportsTo(organizationId, null, reportsToId)) ?? null,
+        jobProfileId: (await assertOwnedIds('jobProfile', organizationId, [request.body?.jobProfileId]))[0] ?? null
       },
       include: positionInclude()
     });
@@ -1806,7 +1813,10 @@ app.patch('/api/positions/:positionId', async (request, response, next) => {
         name: request.body.name ?? undefined,
         description: request.body.description === undefined ? undefined : (request.body.description || null),
         unitId: await resolvePositionUnit(current.organizationId, request.body.unitId),
-        reportsToId: await resolveReportsTo(current.organizationId, current.id, request.body.reportsToId)
+        reportsToId: await resolveReportsTo(current.organizationId, current.id, request.body.reportsToId),
+        jobProfileId: request.body.jobProfileId === undefined
+          ? undefined
+          : ((await assertOwnedIds('jobProfile', current.organizationId, [request.body.jobProfileId]))[0] ?? null)
       },
       include: positionInclude()
     });
@@ -1820,10 +1830,10 @@ app.delete('/api/positions/:positionId', async (request, response, next) => {
   try {
     const position = await requirePosition(request, request.params.positionId);
     // podriadene miesta prejdu pod nadriadeneho mazaneho miesta
-    await prisma.$transaction([
-      prisma.orgPosition.updateMany({ where: { reportsToId: position.id }, data: { reportsToId: position.reportsToId } }),
-      prisma.orgPosition.delete({ where: { id: position.id } })
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await tx.orgPosition.updateMany({ where: { reportsToId: position.id }, data: { reportsToId: position.reportsToId } });
+      await tx.orgPosition.delete({ where: { id: position.id } });
+    });
     response.status(204).end();
   } catch (error) {
     next(error);
@@ -1832,9 +1842,16 @@ app.delete('/api/positions/:positionId', async (request, response, next) => {
 
 // --- #13 adresar osob a #14 obsadenie miest s obdobim platnosti ---
 
-/** Dnesny den ako datum bez casu (UTC polnoc) — obsadenia su po dnoch. */
+/**
+ * Dnesny den ako datum bez casu — obsadenia su po dnoch. Den sa urcuje podla
+ * casoveho pasma firmy, nie servera (kontajner bezi v UTC: medzi polnocou
+ * a 2:00 by v Bratislave bol este vcerajsok).
+ */
+const BUSINESS_TIMEZONE = process.env['APP_TIMEZONE'] ?? 'Europe/Bratislava';
+const businessDay = new Intl.DateTimeFormat('sv-SE', { timeZone: BUSINESS_TIMEZONE });
+
 function today(): Date {
-  return new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  return new Date(`${businessDay.format(new Date())}T00:00:00Z`);
 }
 
 /** 'YYYY-MM-DD' -> Date; prazdna hodnota -> fallback. */
@@ -1998,11 +2015,11 @@ app.post('/api/people/:personId/leave', async (request, response, next) => {
     const planned = open.filter((assignment) => assignment.validFrom > lastDay).map((assignment) => assignment.id);
     const ending = open.filter((assignment) => assignment.validFrom <= lastDay).map((assignment) => assignment.id);
 
-    await prisma.$transaction([
-      prisma.positionAssignment.deleteMany({ where: { id: { in: planned } } }),
-      prisma.positionAssignment.updateMany({ where: { id: { in: ending } }, data: { validTo: lastDay } }),
-      prisma.person.update({ where: { id: person.id }, data: { active: false } })
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await tx.positionAssignment.deleteMany({ where: { id: { in: planned } } });
+      await tx.positionAssignment.updateMany({ where: { id: { in: ending } }, data: { validTo: lastDay } });
+      await tx.person.update({ where: { id: person.id }, data: { active: false } });
+    });
 
     // miesta, ktore po odchode nema kto zastavat
     const dayAfter = new Date(lastDay.getTime() + 24 * 60 * 60 * 1000);
@@ -2078,6 +2095,213 @@ app.delete('/api/assignments/:assignmentId', async (request, response, next) => 
   try {
     const assignment = await requireAssignment(request, request.params.assignmentId);
     await prisma.positionAssignment.delete({ where: { id: assignment.id } });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- #16 profil prace a verzie popisu prace ---
+
+async function requireJobProfile(request: express.Request, jobProfileId: string) {
+  const profile = await prisma.jobProfile.findFirst({ where: { id: jobProfileId, organizationId: orgScope(request) } });
+  if (!profile) throw new HttpError(404, 'Profil prace sa nenasiel.');
+  return profile;
+}
+
+async function requireJobVersion(request: express.Request, versionId: string) {
+  const version = await prisma.jobDescriptionVersion.findFirst({ where: { id: versionId, organizationId: orgScope(request) } });
+  if (!version) throw new HttpError(404, 'Verzia popisu prace sa nenasla.');
+  return version;
+}
+
+/**
+ * Stav verzie pre zobrazenie. Ulozene su len DRAFT/PUBLISHED — ci je publikovana
+ * verzia platna, planovana alebo nahradena, zavisi od datumu ucinnosti.
+ */
+function describeVersions(versions: any[]) {
+  const now = today();
+  const published = versions
+    .filter((version) => version.status === JobDescriptionStatus.PUBLISHED && version.effectiveFrom)
+    .sort((a, b) => (b.effectiveFrom - a.effectiveFrom) || (b.version - a.version));
+  const current = published.find((version) => version.effectiveFrom <= now) ?? null;
+
+  return versions
+    .slice()
+    .sort((a, b) => b.version - a.version)
+    .map((version) => ({
+      id: version.id,
+      version: version.version,
+      status: version.status === JobDescriptionStatus.DRAFT
+        ? 'draft'
+        : version === current ? 'current' : version.effectiveFrom > now ? 'planned' : 'superseded',
+      content: version.content,
+      authorName: version.author?.name ?? null,
+      effectiveFrom: day(version.effectiveFrom),
+      publishedAt: version.publishedAt ? version.publishedAt.toISOString() : null,
+      updatedAt: version.updatedAt.toISOString()
+    }));
+}
+
+function mapJobProfile(profile: any, withContent = false) {
+  const versions = describeVersions(profile.versions ?? []);
+  const current = versions.find((version) => version.status === 'current') ?? null;
+  const draft = versions.find((version) => version.status === 'draft') ?? null;
+  const strip = (version: any) => (version && !withContent ? { ...version, content: undefined } : version);
+  return {
+    id: profile.id,
+    name: profile.name,
+    summary: profile.summary ?? '',
+    positionCount: profile._count?.positions ?? 0,
+    currentVersion: strip(current),
+    draftVersion: strip(draft),
+    versions: versions.map(strip)
+  };
+}
+
+const JOB_PROFILE_INCLUDE = {
+  _count: { select: { positions: true } },
+  versions: { include: { author: { select: { name: true } } } }
+};
+
+app.get('/api/organizations/:organizationId/job-profiles', async (request, response, next) => {
+  try {
+    const profiles = await prisma.jobProfile.findMany({
+      where: { organizationId: orgScope(request) },
+      orderBy: { name: 'asc' },
+      include: JOB_PROFILE_INCLUDE
+    });
+    response.json(profiles.map((profile) => mapJobProfile(profile)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/organizations/:organizationId/job-profiles', async (request, response, next) => {
+  try {
+    const organizationId = orgScope(request);
+    const name = cleanText(request.body?.name);
+    if (!name) throw new HttpError(400, 'Nazov profilu je povinny.');
+    const existing = await prisma.jobProfile.findFirst({
+      where: { organizationId, name: { equals: name, mode: 'insensitive' } }
+    });
+    if (existing) throw new HttpError(409, 'Profil s tymto nazvom uz existuje.');
+    const profile = await prisma.jobProfile.create({
+      data: { organizationId, name, summary: cleanText(request.body?.summary, 1000) },
+      include: JOB_PROFILE_INCLUDE
+    });
+    response.status(201).json(mapJobProfile(profile, true));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/job-profiles/:jobProfileId', async (request, response, next) => {
+  try {
+    const profile = await requireJobProfile(request, request.params.jobProfileId);
+    const full = await prisma.jobProfile.findUnique({ where: { id: profile.id }, include: JOB_PROFILE_INCLUDE });
+    response.json(mapJobProfile(full, true));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/job-profiles/:jobProfileId', async (request, response, next) => {
+  try {
+    const current = await requireJobProfile(request, request.params.jobProfileId);
+    if (request.body?.name !== undefined && !cleanText(request.body.name)) throw new HttpError(400, 'Nazov profilu je povinny.');
+    const profile = await prisma.jobProfile.update({
+      where: { id: current.id },
+      data: {
+        name: request.body?.name === undefined ? undefined : cleanText(request.body.name)!,
+        summary: request.body?.summary === undefined ? undefined : cleanText(request.body.summary, 1000)
+      },
+      include: JOB_PROFILE_INCLUDE
+    });
+    response.json(mapJobProfile(profile, true));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/job-profiles/:jobProfileId', async (request, response, next) => {
+  try {
+    const profile = await requireJobProfile(request, request.params.jobProfileId);
+    const published = await prisma.jobDescriptionVersion.count({
+      where: { jobProfileId: profile.id, status: JobDescriptionStatus.PUBLISHED }
+    });
+    // publikovany popis prace je zaznam, na ktory sa ludia mohli odvolavat
+    if (published > 0) throw new HttpError(409, 'Profil ma publikovany popis prace — nemozno ho zmazat.');
+    await prisma.jobProfile.delete({ where: { id: profile.id } });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Novy navrh popisu. Naraz moze byt len jeden navrh; obsah sa da predvyplnit. */
+app.post('/api/job-profiles/:jobProfileId/versions', async (request, response, next) => {
+  try {
+    const profile = await requireJobProfile(request, request.params.jobProfileId);
+    const draft = await prisma.jobDescriptionVersion.findFirst({
+      where: { jobProfileId: profile.id, status: JobDescriptionStatus.DRAFT }
+    });
+    if (draft) throw new HttpError(409, 'Profil uz ma rozpracovany navrh — upravte ho.');
+    const last = await prisma.jobDescriptionVersion.aggregate({ where: { jobProfileId: profile.id }, _max: { version: true } });
+    const version = await prisma.jobDescriptionVersion.create({
+      data: {
+        organizationId: profile.organizationId,
+        jobProfileId: profile.id,
+        version: (last._max.version ?? 0) + 1,
+        content: typeof request.body?.content === 'string' ? request.body.content : '',
+        authorId: auth(request).userId
+      }
+    });
+    response.status(201).json({ id: version.id, version: version.version });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/job-description-versions/:versionId', async (request, response, next) => {
+  try {
+    const version = await requireJobVersion(request, request.params.versionId);
+    if (version.status !== JobDescriptionStatus.DRAFT) {
+      throw new HttpError(409, 'Publikovanu verziu nemozno menit — vytvorte novu verziu.');
+    }
+    if (typeof request.body?.content !== 'string') throw new HttpError(400, 'content je povinny');
+    await prisma.jobDescriptionVersion.update({
+      where: { id: version.id },
+      // kto navrh naposledy upravil, je jeho autor
+      data: { content: request.body.content, authorId: auth(request).userId }
+    });
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/job-description-versions/:versionId/publish', async (request, response, next) => {
+  try {
+    const version = await requireJobVersion(request, request.params.versionId);
+    if (version.status !== JobDescriptionStatus.DRAFT) throw new HttpError(409, 'Verzia uz je publikovana.');
+    if (!version.content.trim()) throw new HttpError(400, 'Prazdny popis prace nemozno publikovat.');
+    const effectiveFrom = parseDay(request.body?.effectiveFrom, today(), 'effectiveFrom')!;
+    await prisma.jobDescriptionVersion.update({
+      where: { id: version.id },
+      data: { status: JobDescriptionStatus.PUBLISHED, publishedAt: new Date(), effectiveFrom, authorId: auth(request).userId }
+    });
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/job-description-versions/:versionId', async (request, response, next) => {
+  try {
+    const version = await requireJobVersion(request, request.params.versionId);
+    if (version.status !== JobDescriptionStatus.DRAFT) throw new HttpError(409, 'Publikovanu verziu nemozno zmazat.');
+    await prisma.jobDescriptionVersion.delete({ where: { id: version.id } });
     response.status(204).end();
   } catch (error) {
     next(error);

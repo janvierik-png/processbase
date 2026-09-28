@@ -30,7 +30,8 @@ async function call(path, { method = 'GET', body, auth = token } = {}) {
   return { status: response.status, payload };
 }
 
-const dayOffset = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+// rovnaky den ako server (casove pasmo firmy), nie UTC
+const dayOffset = (days) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava' }).format(new Date(Date.now() + days * 86400000));
 
 async function main() {
   const ownerEmail = `orgtest-${STAMP}@example.test`;
@@ -127,6 +128,28 @@ async function main() {
 
   const deleteWithHistory = await call(`/people/${jana.id}`, { method: 'DELETE' });
   check('#14 osobu s historiou nemozno zmazat', deleteWithHistory.status === 409, `status ${deleteWithHistory.status}`);
+
+  // --- #16 profil prace a verzie popisu ---
+  const profile = (await call(org('/job-profiles'), { method: 'POST', body: { name: 'Manazer kvality', summary: 'Riadi system kvality' } })).payload;
+  const linkProfile = await call(`/positions/${qm.id}`, { method: 'PATCH', body: { jobProfileId: profile?.id } });
+  check('#16 miesto napla profil prace', linkProfile.payload?.jobProfileName === 'Manazer kvality');
+
+  const v1 = (await call(`/job-profiles/${profile.id}/versions`, { method: 'POST', body: { content: 'Popis v1' } })).payload;
+  const secondDraft = await call(`/job-profiles/${profile.id}/versions`, { method: 'POST', body: {} });
+  check('#16 len jeden rozpracovany navrh', secondDraft.status === 409, `status ${secondDraft.status}`);
+  await call(`/job-description-versions/${v1.id}/publish`, { method: 'POST', body: {} });
+  const editPublished = await call(`/job-description-versions/${v1.id}`, { method: 'PATCH', body: { content: 'prepis' } });
+  check('#16 publikovanu verziu nemozno menit', editPublished.status === 409, `status ${editPublished.status}`);
+
+  const v2 = (await call(`/job-profiles/${profile.id}/versions`, { method: 'POST', body: { content: 'Popis v2' } })).payload;
+  await call(`/job-description-versions/${v2.id}/publish`, { method: 'POST', body: { effectiveFrom: dayOffset(14) } });
+  const detail = (await call(`/job-profiles/${profile.id}`)).payload;
+  const byVersion = Object.fromEntries((detail?.versions ?? []).map((version) => [version.version, version]));
+  check('#16 platna je v1, v2 je planovana', byVersion[1]?.status === 'current' && byVersion[2]?.status === 'planned',
+    `${byVersion[1]?.status} / ${byVersion[2]?.status}`);
+  check('#16 autor a datum ucinnosti', byVersion[2]?.authorName === 'Majitel Firmy' && byVersion[2]?.effectiveFrom === dayOffset(14));
+  const deleteProfile = await call(`/job-profiles/${profile.id}`, { method: 'DELETE' });
+  check('#16 profil s publikovanym popisom nemozno zmazat', deleteProfile.status === 409, `status ${deleteProfile.status}`);
 
   // --- pozvanka: prepojenie s osobou v adresari a ochrana existujuceho uctu ---
   const invitation = (await call(org('/invitations'), { method: 'POST', body: { email: 'kolega@example.test', roleId: 'approver' } })).payload;

@@ -190,6 +190,18 @@ async function main() {
     })).status);
     record('A: vlastník = miesto B', 404, (await patchA({ ownerPositionId: posBId })).status);
 
+    // #16 — profil prace firmy B
+    const { payload: profileB } = await call(`/organizations/${b.orgId}/job-profiles`, {
+      method: 'POST', body: { name: 'Tajny profil B' }, auth: token.b
+    });
+    record('A číta profil práce B', 404, (await call(`/job-profiles/${profileB?.id}`, { auth: token.a })).status);
+    record('A pridá verziu do profilu B', 404, (await call(`/job-profiles/${profileB?.id}/versions`, {
+      method: 'POST', body: { content: 'x' }, auth: token.a
+    })).status);
+    record('A: miesto A napĺňa profil B', 404, (await call(`/positions/${posA?.id}`, {
+      method: 'PATCH', body: { jobProfileId: profileB?.id }, auth: token.a
+    })).status);
+
     const { payload: detailA } = await call(`/processes/${procA?.id}`, { auth: token.a });
     const leaked = JSON.stringify(detailA ?? {}).includes('Tajn');
     results.push({

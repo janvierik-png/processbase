@@ -51,6 +51,12 @@ enum ResponsibilityRole {
   PERFORMER
 }
 
+/// Stav verzie popisu prace (#16).
+enum JobDescriptionStatus {
+  DRAFT
+  PUBLISHED
+}
+
 enum AttachmentKind {
   DOCUMENT
   IMAGE
@@ -88,6 +94,8 @@ model Organization {
   sessions           Session[]
   persons            Person[]
   assignments        PositionAssignment[]
+  jobProfiles        JobProfile[]
+  jobDescriptions    JobDescriptionVersion[]
 }
 
 /// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
@@ -124,6 +132,7 @@ model User {
   approvalSteps  ApprovalStep[]     @relation("ApprovalStepAssignee")
   attachments    Attachment[]       @relation("AttachmentUploader")
   persons        Person[]
+  jobDescriptions JobDescriptionVersion[]
   sessions       Session[]
   processChanges ProcessChangeLog[]
 }
@@ -341,12 +350,15 @@ model OrgPosition {
   description    String?
   /// Nadriadene pracovne miesto (#12) — komu miesto podlieha.
   reportsToId    String?
+  /// Profil prace, ktory miesto napla (#16)
+  jobProfileId   String?
   createdAt      DateTime     @default(now())
 
   organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   unit           OrgUnit?             @relation(fields: [unitId], references: [id], onDelete: SetNull)
   reportsTo      OrgPosition?         @relation("PositionReports", fields: [reportsToId], references: [id], onDelete: SetNull)
   subordinates   OrgPosition[]        @relation("PositionReports")
+  jobProfile     JobProfile?          @relation(fields: [jobProfileId], references: [id], onDelete: SetNull)
   assignments    PositionAssignment[]
   processes      ProcessPosition[]
   documents      AttachmentPosition[]
@@ -363,6 +375,45 @@ model AttachmentPosition {
   position     OrgPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
 
   @@unique([attachmentId, positionId])
+}
+
+/// Profil prace (#16) — znovupouzitelny opis typu prace (napr. uctovnik),
+/// na ktory sa odkazuje viac konkretnych pracovnych miest.
+model JobProfile {
+  id             String                  @id @default(uuid())
+  organizationId String
+  name           String
+  summary        String?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  positions      OrgPosition[]
+  versions       JobDescriptionVersion[]
+
+  @@unique([organizationId, name])
+}
+
+/// Verzia popisu prace (#16). Publikovana verzia sa uz nemeni — zmena je nova
+/// verzia. Platna je publikovana verzia s najneskorsim effectiveFrom <= dnes.
+model JobDescriptionVersion {
+  id             String               @id @default(uuid())
+  organizationId String
+  jobProfileId   String
+  version        Int
+  status         JobDescriptionStatus @default(DRAFT)
+  content        String               @default("")
+  authorId       String?
+  effectiveFrom  DateTime?            @db.Date
+  publishedAt    DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  jobProfile     JobProfile           @relation(fields: [jobProfileId], references: [id], onDelete: Cascade)
+  author         User?                @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@unique([jobProfileId, version])
 }
 
 /// Osoba v pracovnom adresari (#13). Nemusi mat pouzivatelsky ucet — taka sa

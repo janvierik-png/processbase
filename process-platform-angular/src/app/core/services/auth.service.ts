@@ -25,6 +25,8 @@ export class AuthService {
   private readonly currentUserKey = 'ngCurrentUser';
   private readonly currentOrgKey = 'ngCurrentOrganization';
   private readonly tokenKey = 'ngSessionToken';
+  /** Kluce s obsahom firmy (strom procesov, aktivny proces) — mazu sa pri zmene relacie. */
+  private readonly orgDataKeys = ['ngProcessTree', 'ngActiveProcessId'];
 
   readonly currentUserSignal = signal<User | null>(this.storage.read<User | null>(this.currentUserKey, null));
   readonly currentOrganizationSignal = signal<Organization | null>(this.storage.read<Organization | null>(this.currentOrgKey, null));
@@ -161,6 +163,10 @@ export class AuthService {
   }
 
   private setSession(response: AuthResponse): void {
+    // iny ucet alebo firma — neukazat ani na chvilu procesy predchadzajucej
+    if (this.currentOrganizationId() !== response.organization.id) {
+      for (const key of this.orgDataKeys) this.storage.remove(key);
+    }
     this.currentUserSignal.set(response.user);
     this.currentOrganizationSignal.set(response.organization);
     this.storage.write(this.currentUserKey, response.user);
@@ -180,5 +186,7 @@ export class AuthService {
     this.storage.remove(this.currentUserKey);
     this.storage.remove(this.currentOrgKey);
     this.storage.remove(this.tokenKey);
+    // obsah firmy nesmie zostat v prehliadaci po odhlaseni (zdielany pocitac)
+    for (const key of this.orgDataKeys) this.storage.remove(key);
   }
 }

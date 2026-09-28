@@ -173,10 +173,17 @@
               </div>
               <div class="info-item">
                 <span>Vlastnik</span>
-                <strong class="owner-cell">
-                  <span class="avatar">{{ initials(process.owner) }}</span>
-                  {{ process.owner || '—' }}
-                </strong>
+                @if (process.ownerPosition?.vacant) {
+                  <!-- #15 — neobsadena zodpovednost musi byt vidiet -->
+                  <strong class="owner-cell vacant" [title]="'Miesto ' + process.ownerPosition?.name + ' nikto nezastáva'">
+                    {{ process.ownerPosition?.name }} — neobsadené
+                  </strong>
+                } @else {
+                  <strong class="owner-cell" [title]="process.ownerPosition ? 'Miesto: ' + process.ownerPosition.name : ''">
+                    <span class="avatar">{{ initials(process.owner) }}</span>
+                    {{ process.owner || '—' }}
+                  </strong>
+                }
               </div>
               <div class="info-item">
                 <span>Nadradeny proces</span>
@@ -287,7 +294,36 @@
             </div>
 
             <div class="relation-box">
-              <h4>Pracovne pozicie</h4>
+              <h4>Vlastník procesu</h4>
+              @if (editSection() === 'relations') {
+                <select [(ngModel)]="ownerPositionDraft" name="ownerPosition">
+                  <option value="">— bez vlastníka podľa miesta</option>
+                  @for (position of positions(); track position.id) {
+                    <option [value]="position.id">
+                      {{ position.unitName ? position.unitName + ' — ' + position.name : position.name }}
+                      ({{ position.vacant ? 'neobsadené' : holderNames(position) }})
+                    </option>
+                  }
+                </select>
+                <p class="muted-small">Zodpovednosť je naviazaná na miesto — po zmene obsadenia sa zobrazí nový človek.</p>
+              } @else {
+                @if (process.ownerPosition; as owner) {
+                  <div class="responsibility" [class.vacant]="owner.vacant">
+                    <strong>{{ owner.name }}</strong>
+                    @if (owner.vacant) {
+                      <span class="chip warn">Neobsadené — proces nemá vlastníka</span>
+                    } @else {
+                      <span>{{ (owner.holders ?? []).join(', ') }}</span>
+                    }
+                  </div>
+                } @else {
+                  <span class="muted-small">{{ process.owner || 'Vlastník nie je určený.' }}</span>
+                }
+              }
+            </div>
+
+            <div class="relation-box">
+              <h4>Vykonávatelia (pracovné miesta)</h4>
               @if (editSection() === 'relations') {
                 @for (position of positions(); track position.id) {
                   <label class="check-row">
@@ -297,14 +333,16 @@
                     {{ position.unitName ? position.unitName + ' — ' + position.name : position.name }}
                   </label>
                 } @empty {
-                  <p class="muted-small">Organizacia nema definovane pozicie. Vytvor ich v Nastaveniach.</p>
+                  <p class="muted-small">Organizácia nemá pracovné miesta. Vytvorte ich v časti Organizácia.</p>
                 }
               } @else {
                 <div class="chip-list">
                   @for (position of process.positions ?? []; track position.id) {
-                    <span class="chip">{{ position.name }}</span>
+                    <span class="chip" [class.warn]="position.vacant" [title]="position.vacant ? 'Miesto nikto nezastáva' : (position.holders ?? []).join(', ')">
+                      {{ position.name }}{{ position.vacant ? ' — neobsadené' : '' }}
+                    </span>
                   } @empty {
-                    <span class="muted-small">Ziadne priradene pozicie.</span>
+                    <span class="muted-small">Žiadni vykonávatelia.</span>
                   }
                 </div>
               }

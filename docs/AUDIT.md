@@ -220,9 +220,15 @@ Každá zmena je overená na lokálnom Dockeri a naviazaná na GitHub issue (`Fi
 | 1 — Autentifikácia a izolácia firiem | `b9c170f` | #1–#6 | test izolácie 15/15 (pred opravou 0/8), odhlásenie zneplatní token, 429 po 10 pokusoch o prihlásenie |
 | 2 — Meranie a kvóta úložiska | `edbebeb` | #8, #9 | nahratie nad kvótu → 413 bez zápisu; spotreba = súčet skutočných veľkostí |
 | 2 — Oprava sťahovania po Etape 1 | `edbebeb` | — | `<a href>`/`<iframe>` neposielali token (401) → sťahovanie cez HttpClient + blob URL |
-| 2 — Súborové úložisko príloh | *(tento commit)* | #10 | `scripts/file-storage-test.mjs` 17/17, prerušený upload nezanechá súbor ani záznam |
+| 2 — Súborové úložisko príloh | `aa44f2f` | #10 | `scripts/file-storage-test.mjs` 17/17, prerušený upload nezanechá súbor ani záznam |
+| — Odkazované ID z cudzej firmy | `d3775b9` | #2 | firma A si mohla pripojiť proces/pozíciu/zložku firmy B a API vrátilo jej názov; pôvodný kód 17/26, oprava 26/26 |
+| — Autor zmeny z relácie | `d3775b9` | B1 | audit log bral autora z hlavičky `x-user-id` od klienta |
+| 3 — Strom zložiek, nadriadenosť miest | `d3775b9`, *(UI v commite Etapy 3)* | #12 | cyklus → 400, po zmazaní zložky sa podriadené posunú vyššie |
+| 3 — Osoby, obsadenie s platnosťou, vlastník podľa miesta | `48391f0` + UI | #13, #14, #15 | `scripts/org-module-test.mjs` 38/38 — akceptačný scenár „vlastník podľa miesta, po zmene obsadenia nový človek, audit ostáva" overený |
+| — Pozvánka na existujúci účet | `48391f0` | B1 | prijatie pozvánky nevyžadovalo heslo existujúceho účtu (pôvodný kód: 200); po Etape 1 navyše nevracala token |
+| 3 — Profil práce a verzie popisu | *(commit Etapy 3)* | #16 | návrh → publikovaná (nemenná), platná/plánovaná podľa dátumu účinnosti |
 
-**Stav nálezov:** B1, B2 — opravené (Etapa 1). B4 — hlavičky a rate limit doplnené, `cors`
+**Stav nálezov:** B1, B2 — opravené (Etapa 1, doplnené o odkazované ID, autora zmien a pozvánky). B4 — hlavičky a rate limit doplnené, `cors`
 zostáva otvorený (rieši sa pri produkčných nastaveniach). B5 — oddelené úložisko hotové,
 inline zobrazenie len pre PDF; antivírus (#11) zatiaľ odložený rozhodnutím zadávateľa.
 B3 — otvorené (#19).
@@ -235,6 +241,17 @@ B3 — otvorené (#19).
   zázname; existujúce dokumenty neboli presunuté.
 - Mazanie firmy (zatiaľ len ručne v DB) nezmaže jej adresár `UPLOAD_DIR/<organizationId>`.
 
+**Etapa 3 — poznámky:**
+- Každý člen firmy má osobu v adresári (migrácia ich doplní aj existujúcim členom); osoby bez účtu
+  sa nepočítajú ako používatelia. Migrácia prenesie `UserPosition` na obsadenia od dátumu priradenia
+  a až potom tabuľku zmaže — overené na syntetickom priradení.
+- „Dnes" pre obsadenia a účinnosť popisov sa určuje v časovom pásme firmy (`APP_TIMEZONE`,
+  predvolene `Europe/Bratislava`), nie v UTC servera.
+- Posledný deň obsadenia je vrátane — kto odchádza k dnešku, miesto ešte dnes zastáva.
+- Známe obmedzenie: Prisma 7 s `@prisma/adapter-pg` pri zápise s `include` posiela v transakcii
+  paralelné dotazy → `pg` hlási DeprecationWarning (prestane fungovať v `pg@9`). Nie je to v našom
+  kóde; rieši sa aktualizáciou Prismy pred prechodom na `pg@9`.
+
 ### Poznámky k rozporom medzi zadaním a skutočnosťou
 
 - Zadanie predpokladá, že môže existovať tvrdenie „prevádzkovateľ nevidí procesy". V tejto
@@ -242,5 +259,5 @@ B3 — otvorené (#19).
 - Zadanie uvádza úložisko ako hlavný kapacitný parameter. V čase auditu sa **nemeralo vôbec**
   a prílohy boli base64 v databáze (1 GB príloh = 1,33 GB v DB). Od #8/#10 sa meria skutočná
   veľkosť súboru a nové prílohy idú na disk.
-- Zadanie žiada, aby zamestnanci v adresári neboli platení používatelia. Dnes **neexistuje
-  entita Osoba** — každý človek v systéme je `User` s prihlásením.
+- Zadanie žiada, aby zamestnanci v adresári neboli platení používatelia. V čase auditu **neexistovala
+  entita Osoba** — každý človek bol `User` s prihlásením. Od #13 je osoba oddelená od účtu.

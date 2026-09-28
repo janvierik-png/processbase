@@ -1,123 +1,374 @@
 <header class="page-header">
   <div>
-    <p class="eyebrow"><a routerLink="/app/settings">Nastavenia</a> / Organizacna struktura</p>
-    <h2>Organizacne zlozky a pracovne pozicie</h2>
+    <p class="eyebrow"><a routerLink="/app/settings">Nastavenia</a> / Organizácia</p>
+    <h2>Organizácia</h2>
+    <p class="lead">Nepovinné — procesy sa dajú zakladať aj bez vyplnenej schémy.</p>
   </div>
 </header>
 
+<nav class="tabs" role="tablist">
+  <button type="button" role="tab" [class.active]="tab() === 'structure'" [attr.aria-selected]="tab() === 'structure'" (click)="setTab('structure')">
+    Štruktúra
+    @if (vacantCount() > 0) {
+      <span class="tab-badge warn" [title]="vacantCount() + ' neobsadených miest'">{{ vacantCount() }}</span>
+    }
+  </button>
+  <button type="button" role="tab" [class.active]="tab() === 'people'" [attr.aria-selected]="tab() === 'people'" (click)="setTab('people')">
+    Ľudia <span class="tab-badge">{{ people().length }}</span>
+  </button>
+  <button type="button" role="tab" [class.active]="tab() === 'profiles'" [attr.aria-selected]="tab() === 'profiles'" (click)="setTab('profiles')">
+    Profily práce <span class="tab-badge">{{ profiles().length }}</span>
+  </button>
+</nav>
+
 @if (error()) {
-  <p class="error">{{ error() }}</p>
+  <p class="message error">{{ error() }}</p>
+}
+@if (notice()) {
+  <p class="message notice">{{ notice() }}</p>
 }
 
-<section class="positions-grid">
-  <form class="panel" (ngSubmit)="saveUnit()">
-    <h3>{{ editingUnitId ? 'Upravit zlozku' : 'Nova organizacna zlozka' }}</h3>
-    <label>Nazov zlozky
-      <input name="unitName" [(ngModel)]="unitModel.name" required placeholder="napr. Bookmaking, Frontend, Ekonomika">
-    </label>
-    <label>Popis <textarea name="unitDescription" [(ngModel)]="unitModel.description" rows="2"></textarea></label>
-    <div class="form-actions">
-      <button class="primary" type="submit">{{ editingUnitId ? 'Ulozit zmeny' : 'Vytvorit zlozku' }}</button>
-      @if (editingUnitId) {
-        <button type="button" (click)="cancelUnitEdit()">Zrusit</button>
-      }
-    </div>
-  </form>
-
-  <section class="panel">
-    <h3>Organizacne zlozky</h3>
-    @for (unit of units(); track unit.id) {
-      <article class="position-row">
-        <div>
-          <strong>{{ unit.name }}</strong>
-          <span>{{ unit.description || '—' }}</span>
-          <small>Pozicie: {{ unit.positionCount }}</small>
+<!-- ============ ŠTRUKTÚRA ============ -->
+@if (tab() === 'structure') {
+  <section class="org-grid">
+    <div class="side">
+      <form class="panel" (ngSubmit)="saveUnit()">
+        <h3>{{ editingUnitId ? 'Upraviť zložku' : 'Nová zložka' }}</h3>
+        <label>Názov
+          <input name="unitName" [(ngModel)]="unitModel.name" required placeholder="napr. Ekonomika, Výroba">
+        </label>
+        <label>Nadradená zložka
+          <select name="unitParent" [(ngModel)]="unitModel.parentId">
+            <option value="">— najvyššia úroveň</option>
+            @for (row of unitParentOptions(); track row.item.id) {
+              <option [value]="row.item.id">{{ '· '.repeat(row.depth) }}{{ row.item.name }}</option>
+            }
+          </select>
+        </label>
+        <label>Popis <textarea name="unitDescription" [(ngModel)]="unitModel.description" rows="2"></textarea></label>
+        <div class="form-actions">
+          <button class="primary" type="submit">{{ editingUnitId ? 'Uložiť' : 'Vytvoriť zložku' }}</button>
+          @if (editingUnitId) {
+            <button type="button" (click)="cancelUnitEdit()">Zrušiť</button>
+          }
         </div>
-        <div class="row-actions">
-          <button type="button" (click)="editUnit(unit)">Upravit</button>
-          <button type="button" (click)="removeUnit(unit)">Vymazat</button>
+      </form>
+
+      <form class="panel" (ngSubmit)="savePosition()">
+        <h3>{{ editingPositionId ? 'Upraviť pracovné miesto' : 'Nové pracovné miesto' }}</h3>
+        <label>Názov <input name="posName" [(ngModel)]="positionModel.name" required placeholder="napr. Vedúci kvality"></label>
+        <label>Zložka
+          <select name="posUnit" [(ngModel)]="positionModel.unitId">
+            <option value="">— bez zaradenia</option>
+            @for (row of unitRows(); track row.item.id) {
+              <option [value]="row.item.id">{{ '· '.repeat(row.depth) }}{{ row.item.name }}</option>
+            }
+          </select>
+        </label>
+        <label>Nadriadené miesto
+          <select name="posReports" [(ngModel)]="positionModel.reportsToId">
+            <option value="">— nikomu nepodlieha</option>
+            @for (position of reportsToOptions(); track position.id) {
+              <option [value]="position.id">{{ position.name }}</option>
+            }
+          </select>
+        </label>
+        <label>Profil práce
+          <select name="posProfile" [(ngModel)]="positionModel.jobProfileId">
+            <option value="">— bez profilu</option>
+            @for (profile of profiles(); track profile.id) {
+              <option [value]="profile.id">{{ profile.name }}</option>
+            }
+          </select>
+        </label>
+        <label>Popis <textarea name="posDescription" [(ngModel)]="positionModel.description" rows="2"></textarea></label>
+        <div class="form-actions">
+          <button class="primary" type="submit">{{ editingPositionId ? 'Uložiť' : 'Vytvoriť miesto' }}</button>
+          @if (editingPositionId) {
+            <button type="button" (click)="cancelPositionEdit()">Zrušiť</button>
+          }
         </div>
-      </article>
-    } @empty {
-      <p class="muted">Zatial ziadne zlozky. Vytvor prvu — napr. Bookmaking alebo Frontend.</p>
-    }
-  </section>
-
-  <form class="panel" (ngSubmit)="save()">
-    <h3>{{ editingId ? 'Upravit poziciu' : 'Nova pozicia' }}</h3>
-    <label>Nazov pozicie <input name="name" [(ngModel)]="model.name" required></label>
-    <label>Organizacna zlozka
-      <select name="unitId" [(ngModel)]="model.unitId">
-        <option value="">— bez zaradenia</option>
-        @for (unit of units(); track unit.id) {
-          <option [value]="unit.id">{{ unit.name }}</option>
-        }
-      </select>
-    </label>
-    <label>Popis <textarea name="description" [(ngModel)]="model.description" rows="3"></textarea></label>
-    <div class="form-actions">
-      <button class="primary" type="submit">{{ editingId ? 'Ulozit zmeny' : 'Vytvorit poziciu' }}</button>
-      @if (editingId) {
-        <button type="button" (click)="cancelEdit()">Zrusit</button>
-      }
+      </form>
     </div>
-  </form>
 
-  <section class="panel">
-    <h3>Pozicie organizacie</h3>
-    @for (group of groupedPositions(); track group.unitId) {
-      <div class="unit-group">
-        <h4 class="unit-heading">{{ group.unitName }}</h4>
-        @for (position of group.positions; track position.id) {
-          <article class="position-row">
+    <section class="panel tree-panel">
+      <h3>Organizačná štruktúra</h3>
+      @for (row of unitRows(); track row.item.id) {
+        <div class="unit-node" [style.--depth]="row.depth">
+          <div class="unit-head">
             <div>
-              <strong>{{ position.name }}</strong>
-              <span>{{ position.description || '—' }}</span>
-              @if (position.assignedUsers.length > 0) {
-                <small>Priradeni: {{ position.assignedUsers.length }}</small>
+              <strong>{{ row.item.name }}</strong>
+              @if (row.item.description) {
+                <span class="muted">{{ row.item.description }}</span>
               }
             </div>
             <div class="row-actions">
-              <button type="button" (click)="edit(position)">Upravit</button>
-              <button type="button" (click)="remove(position)">Vymazat</button>
+              <button type="button" class="ghost small" (click)="editUnit(row.item)">Upraviť</button>
+              <button type="button" class="ghost small" (click)="removeUnit(row.item)">Vymazať</button>
             </div>
-          </article>
-        } @empty {
-          <p class="muted">Ziadne pozicie v tejto zlozke.</p>
-        }
-      </div>
-    } @empty {
-      <p class="muted">Zatial ziadne pozicie.</p>
-    }
-  </section>
-
-  <section class="panel span-two">
-    <h3>Priradenie pozicii pouzivatelom</h3>
-    @for (user of users(); track user.id) {
-      <article class="user-row">
-        <div>
-          <strong>{{ user.name }}</strong>
-          <span>{{ user.email }}</span>
-        </div>
-        <div class="chips">
-          @for (position of user.positions ?? []; track position.id) {
-            <span class="chip">{{ position.name }}
-              <button type="button" (click)="unassign(user, position.id)">×</button>
-            </span>
-          } @empty {
-            <span class="muted">Bez pozicie</span>
+          </div>
+          @for (position of positionsOf(row.item.id); track position.id) {
+            <ng-container *ngTemplateOutlet="positionCard; context: { $implicit: position }" />
           }
         </div>
-        <div class="assign">
-          <select [(ngModel)]="assignModel[user.id]" [name]="'assign-' + user.id">
-            <option value="">Vyber poziciu...</option>
-            @for (position of availablePositions(user); track position.id) {
-              <option [value]="position.id">{{ positionLabel(position) }}</option>
+      }
+
+      @if (unassignedPositions().length > 0) {
+        <div class="unit-node" style="--depth: 0">
+          <div class="unit-head"><strong class="muted">Bez zaradenia do zložky</strong></div>
+          @for (position of unassignedPositions(); track position.id) {
+            <ng-container *ngTemplateOutlet="positionCard; context: { $implicit: position }" />
+          }
+        </div>
+      }
+
+      @if (units().length === 0 && positions().length === 0) {
+        <p class="muted">Zatiaľ žiadna štruktúra. Začnite zložkou (napr. Vedenie) alebo rovno pracovným miestom.</p>
+      }
+    </section>
+  </section>
+}
+
+<ng-template #positionCard let-position>
+  <article class="position-card" [class.vacant]="position.vacant">
+    <div class="position-main">
+      <div class="position-title">
+        <strong>{{ position.name }}</strong>
+        @if (position.jobProfileName) {
+          <span class="chip subtle" title="Profil práce">{{ position.jobProfileName }}</span>
+        }
+        @if (position.vacant) {
+          <span class="chip warn">Neobsadené</span>
+        }
+      </div>
+      @if (position.reportsToName) {
+        <small class="muted">Podlieha: {{ position.reportsToName }}</small>
+      }
+      <div class="holders">
+        @for (holder of position.holders; track holder.assignmentId) {
+          <span class="holder">
+            <span class="avatar">{{ holder.name.charAt(0) }}</span>
+            {{ holder.name }} <small class="muted">od {{ holder.validFrom }}</small>
+            @if (endingAssignmentId === holder.assignmentId) {
+              <span class="inline-form">
+                posledný deň <input type="date" [(ngModel)]="endDate" [name]="'end-' + holder.assignmentId">
+                <button type="button" class="small primary" (click)="endAssignment(position, holder)">Ukončiť</button>
+                <button type="button" class="small" (click)="endingAssignmentId = null">Zrušiť</button>
+              </span>
+            } @else {
+              <button type="button" class="link-btn" (click)="startEnd(holder)" title="Ukončiť obsadenie">ukončiť</button>
+            }
+          </span>
+        }
+      </div>
+      @if (assigningPositionId === position.id) {
+        <div class="inline-form">
+          <select [(ngModel)]="assignModel.personId" [name]="'assign-' + position.id">
+            <option value="">Vyber osobu...</option>
+            @for (person of activePeople(); track person.id) {
+              <option [value]="person.id">{{ person.name }}</option>
             }
           </select>
-          <button type="button" (click)="assign(user)">Priradit</button>
+          od <input type="date" [(ngModel)]="assignModel.validFrom" [name]="'from-' + position.id">
+          <button type="button" class="small primary" (click)="assign(position)" [disabled]="!assignModel.personId">Obsadiť</button>
+          <button type="button" class="small" (click)="assigningPositionId = null">Zrušiť</button>
         </div>
-      </article>
-    }
+      }
+    </div>
+    <div class="row-actions">
+      <button type="button" class="small" (click)="startAssign(position)">Obsadiť</button>
+      <button type="button" class="ghost small" (click)="editPosition(position)">Upraviť</button>
+      <button type="button" class="ghost small" (click)="removePosition(position)">Vymazať</button>
+    </div>
+  </article>
+</ng-template>
+
+<!-- ============ ĽUDIA ============ -->
+@if (tab() === 'people') {
+  <section class="org-grid">
+    <div class="side">
+      <form class="panel" (ngSubmit)="savePerson()">
+        <h3>{{ editingPersonId ? 'Upraviť osobu' : 'Nová osoba' }}</h3>
+        <p class="hint">Osoba v adresári nemusí mať prihlásenie a nepočíta sa medzi platených používateľov.
+          Používateľov s prihlásením pozývate v <a routerLink="/app/settings">nastaveniach firmy</a>.</p>
+        <label>Meno <input name="personName" [(ngModel)]="personModel.name" required></label>
+        <label>E-mail <input name="personEmail" type="email" [(ngModel)]="personModel.email"></label>
+        <label>Telefón <input name="personPhone" [(ngModel)]="personModel.phone"></label>
+        <label>Poznámka <textarea name="personNote" [(ngModel)]="personModel.note" rows="2"></textarea></label>
+        <div class="form-actions">
+          <button class="primary" type="submit">{{ editingPersonId ? 'Uložiť' : 'Pridať osobu' }}</button>
+          @if (editingPersonId) {
+            <button type="button" (click)="cancelPersonEdit()">Zrušiť</button>
+          }
+        </div>
+      </form>
+    </div>
+
+    <section class="panel">
+      <h3>Adresár <small class="muted">{{ people().length }} osôb, z toho {{ accountCount() }} s prihlásením</small></h3>
+      @for (person of people(); track person.id) {
+        <article class="person-row" [class.inactive]="!person.active">
+          <div class="person-main">
+            <div class="position-title">
+              <strong>{{ person.name }}</strong>
+              @if (person.hasAccount) {
+                <span class="chip subtle" title="Má prihlásenie do aplikácie">Používateľ</span>
+              } @else {
+                <span class="chip neutral" title="Len v adresári — bez prihlásenia">Len adresár</span>
+              }
+              @if (!person.active) {
+                <span class="chip neutral">Odišla / odišiel</span>
+              }
+            </div>
+            @if (person.email || person.phone) {
+              <small class="muted">{{ person.email }}{{ person.email && person.phone ? ' · ' : '' }}{{ person.phone }}</small>
+            }
+            <div class="holders">
+              @for (assignment of currentAssignments(person); track assignment.id) {
+                <span class="chip">{{ assignment.unitName ? assignment.unitName + ' — ' : '' }}{{ assignment.positionName }}</span>
+              } @empty {
+                <span class="muted small-text">Bez aktuálneho miesta</span>
+              }
+            </div>
+            @if (person.assignments.length > 0) {
+              <button type="button" class="link-btn" (click)="toggleHistory(person)">
+                {{ expandedPersonId() === person.id ? 'Skryť históriu' : 'História obsadenia (' + person.assignments.length + ')' }}
+              </button>
+            }
+            @if (expandedPersonId() === person.id) {
+              <table class="history">
+                <thead><tr><th>Miesto</th><th>Od</th><th>Do</th></tr></thead>
+                <tbody>
+                  @for (assignment of person.assignments; track assignment.id) {
+                    <tr [class.current]="assignment.current">
+                      <td>{{ assignment.positionName }}</td>
+                      <td>{{ assignment.validFrom }}</td>
+                      <td>{{ assignment.validTo ?? (assignment.current ? 'trvá' : '—') }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+            @if (leavingPersonId === person.id) {
+              <div class="inline-form">
+                posledný pracovný deň <input type="date" [(ngModel)]="leaveDate" [name]="'leave-' + person.id">
+                <button type="button" class="small primary" (click)="confirmLeave(person)">Zaznamenať odchod</button>
+                <button type="button" class="small" (click)="leavingPersonId = null">Zrušiť</button>
+              </div>
+            }
+          </div>
+          <div class="row-actions">
+            <button type="button" class="ghost small" (click)="editPerson(person)">Upraviť</button>
+            @if (person.active) {
+              <button type="button" class="ghost small" (click)="startLeave(person)" title="Ukončí obsadenia, história ostane">Odchod</button>
+            } @else {
+              <button type="button" class="ghost small" (click)="reactivate(person)">Znovu aktívna</button>
+            }
+            @if (!person.hasAccount && person.assignments.length === 0) {
+              <button type="button" class="ghost small" (click)="removePerson(person)">Vymazať</button>
+            }
+          </div>
+        </article>
+      } @empty {
+        <p class="muted">Adresár je prázdny.</p>
+      }
+    </section>
   </section>
-</section>
+}
+
+<!-- ============ PROFILY PRÁCE ============ -->
+@if (tab() === 'profiles') {
+  <section class="org-grid">
+    <div class="side">
+      <form class="panel" (ngSubmit)="saveProfile()">
+        <h3>{{ editingProfileId ? 'Upraviť profil' : 'Nový profil práce' }}</h3>
+        <p class="hint">Znovupoužiteľný opis typu práce (napr. Účtovník), ktorý môže napĺňať viac miest.</p>
+        <label>Názov <input name="profileName" [(ngModel)]="profileModel.name" required></label>
+        <label>Stručne <textarea name="profileSummary" [(ngModel)]="profileModel.summary" rows="2"></textarea></label>
+        <div class="form-actions">
+          <button class="primary" type="submit">{{ editingProfileId ? 'Uložiť' : 'Vytvoriť profil' }}</button>
+          @if (editingProfileId) {
+            <button type="button" (click)="cancelProfileEdit()">Zrušiť</button>
+          }
+        </div>
+      </form>
+
+      <section class="panel">
+        <h3>Profily</h3>
+        @for (profile of profiles(); track profile.id) {
+          <article class="profile-row" [class.selected]="selectedProfile()?.id === profile.id" (click)="openProfile(profile)">
+            <div>
+              <strong>{{ profile.name }}</strong>
+              <small class="muted">
+                {{ profile.positionCount }} miest ·
+                @if (profile.currentVersion) {
+                  platná v{{ profile.currentVersion.version }} od {{ profile.currentVersion.effectiveFrom }}
+                } @else {
+                  bez platného popisu
+                }
+              </small>
+            </div>
+            @if (profile.draftVersion) {
+              <span class="chip neutral">Návrh</span>
+            }
+          </article>
+        } @empty {
+          <p class="muted">Zatiaľ žiadne profily.</p>
+        }
+      </section>
+    </div>
+
+    <section class="panel">
+      @if (selectedProfile(); as profile) {
+        <div class="unit-head">
+          <div>
+            <h3>{{ profile.name }}</h3>
+            @if (profile.summary) {
+              <span class="muted">{{ profile.summary }}</span>
+            }
+          </div>
+          <div class="row-actions">
+            <button type="button" class="ghost small" (click)="editProfile(profile)">Upraviť</button>
+            <button type="button" class="ghost small" (click)="removeProfile(profile)">Vymazať</button>
+          </div>
+        </div>
+
+        @if (profile.draftVersion; as draft) {
+          <div class="draft-box">
+            <h4>Návrh verzie {{ draft.version }}</h4>
+            <pp-rich-text-editor [value]="draftContent" (valueChange)="draftContent = $event" />
+            <div class="inline-form">
+              <button type="button" class="small" (click)="saveDraft()">Uložiť návrh</button>
+              účinnosť od <input type="date" [(ngModel)]="publishDate" name="publishDate">
+              <button type="button" class="small primary" (click)="publishDraft()" [disabled]="!draftContent.trim()">Publikovať</button>
+              <button type="button" class="ghost small" (click)="deleteDraft()">Zahodiť návrh</button>
+            </div>
+          </div>
+        } @else {
+          <button type="button" class="primary" (click)="newDraft()">
+            {{ profile.versions.length ? 'Nová verzia popisu' : 'Napísať popis práce' }}
+          </button>
+        }
+
+        @for (version of profile.versions; track version.id) {
+          @if (version.status !== 'draft') {
+            <article class="version" [class.current]="version.status === 'current'">
+              <header>
+                <strong>Verzia {{ version.version }}</strong>
+                <span class="chip" [class.subtle]="version.status === 'current'" [class.neutral]="version.status !== 'current'">
+                  {{ versionLabel(version) }}
+                </span>
+                <small class="muted">
+                  účinná od {{ version.effectiveFrom }} · {{ version.authorName ?? 'neznámy autor' }}
+                </small>
+              </header>
+              <div class="rendered-doc" [innerHTML]="renderMarkdown(version.content)"></div>
+            </article>
+          }
+        }
+      } @else {
+        <p class="muted">Vyberte profil vľavo — zobrazia sa verzie popisu práce.</p>
+      }
+    </section>
+  </section>
+}
