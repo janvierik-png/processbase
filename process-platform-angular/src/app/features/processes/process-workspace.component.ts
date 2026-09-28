@@ -424,7 +424,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     const file = input.files?.[0];
     if (!file || !detail) return;
 
-    // kontrola pred citanim suboru — velky subor by zbytocne zabral pamat
+    // kontrola pred odoslanim — velky subor by sa zbytocne posielal
     if (file.size > MAX_UPLOAD_BYTES) {
       this.store.error.set(
         `Súbor „${file.name}" má ${formatBytes(file.size)} a prekračuje limit ${MAX_UPLOAD_LABEL}. Nahrajte menší súbor.`
@@ -436,7 +436,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.store.error.set('');
     this.uploading.set(true);
 
-    // #9 — kapacitu overime skor, nez sa subor nacita a posle; server ju kontroluje aj tak
+    // #9 — kapacitu overime skor, nez sa subor posle; server ju kontroluje aj tak
     this.documentsApi.storage().subscribe({
       next: (usage) => {
         const free = Math.max(0, usage.quotaBytes - usage.usedBytes);
@@ -448,33 +448,24 @@ export class ProcessWorkspaceComponent implements OnInit {
           input.value = '';
           return;
         }
-        this.readAndUpload(detail.id, file, input);
+        this.sendFile(detail.id, file, input);
       },
-      error: () => this.readAndUpload(detail.id, file, input)
+      error: () => this.sendFile(detail.id, file, input)
     });
   }
 
-  private readAndUpload(processId: string, file: File, input: HTMLInputElement): void {
-    const reader = new FileReader();
-    reader.onload = () => {
-      this.documentsApi.upload(processId, file, String(reader.result ?? '')).subscribe({
-        next: (document) => {
-          this.documents.update((items) => [document, ...items]);
-          this.uploading.set(false);
-        },
-        error: (error) => {
-          this.store.error.set(error?.error?.message ?? 'Dokument sa nepodarilo nahrat.');
-          this.uploading.set(false);
-        }
-      });
-      input.value = '';
-    };
-    reader.onerror = () => {
-      this.store.error.set('Súbor sa nepodarilo načítať.');
-      this.uploading.set(false);
-      input.value = '';
-    };
-    reader.readAsDataURL(file);
+  private sendFile(processId: string, file: File, input: HTMLInputElement): void {
+    input.value = '';
+    this.documentsApi.upload(processId, file).subscribe({
+      next: (document) => {
+        this.documents.update((items) => [document, ...items]);
+        this.uploading.set(false);
+      },
+      error: (error) => {
+        this.store.error.set(error?.error?.message ?? 'Dokument sa nepodarilo nahrat.');
+        this.uploading.set(false);
+      }
+    });
   }
 
   // --- nahlad PDF ---

@@ -33,12 +33,19 @@ export class DocumentService {
     return this.http.get<StorageUsage>(`${API_BASE_URL}/organizations/${organizationId}/storage`);
   }
 
-  upload(processId: string, file: File, dataUrl: string) {
-    return this.http.post<Attachment>(`${API_BASE_URL}/processes/${processId}/documents`, {
-      fileName: file.name,
-      mimeType: file.type || 'application/octet-stream',
-      sizeBytes: file.size,
-      dataUrl
+  /**
+   * Nahratie suboru (#10) — telo je priamo subor, nie base64 v JSON, takze
+   * 100 MB subor sa nenacitava do pamate a na sieti nie je o tretinu vacsi.
+   * Content-Type je vzdy octet-stream: napr. .json subor by inak server
+   * rozparsoval ako JSON. Skutocny typ ide v X-File-Type.
+   */
+  upload(processId: string, file: File) {
+    return this.http.post<Attachment>(`${API_BASE_URL}/processes/${processId}/documents`, file, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-File-Name': encodeURIComponent(file.name),
+        'X-File-Type': file.type || 'application/octet-stream'
+      }
     });
   }
 

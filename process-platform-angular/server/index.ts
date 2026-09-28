@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
 import cors from 'cors';
 import express from 'express';
 import {
@@ -9,6 +10,16 @@ import {
   ProcessStatus
 } from '../generated/prisma/client';
 import { prisma } from './prisma';
+import {
+  fileKey,
+  isFileKey,
+  openStored,
+  parseDataUrl,
+  removeStored,
+  storeBuffer,
+  storedSize,
+  storeStream
+} from './file-storage';
 
 const app = express();
 const port = Number(process.env['API_PORT'] ?? 3000);
@@ -16,8 +27,8 @@ const host = process.env['API_HOST'] ?? '0.0.0.0';
 
 app.use(cors({ origin: true }));
 /**
- * Maximalna velkost nahravaneho suboru. Subor sa posiela ako data URL (base64),
- * ktory je o ~33 % vacsi — telo poziadavky preto musi byt vyrazne vyssie.
+ * Maximalna velkost nahravaneho suboru. Subor sa posiela ako binarny stream (#10)
+ * a limit sa strazi pocas zapisu na disk, nie cez express.json.
  * Rovnaka hodnota je aj na klientovi v src/app/core/utils/upload-limits.ts.
  */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -74,7 +85,8 @@ setInterval(() => {
   }
 }, LOGIN_WINDOW_MS).unref();
 
-app.use(express.json({ limit: '150mb' }));
+// subory uz chodia ako binarny stream (#10); JSON nesie len XML diagramov a texty
+app.use(express.json({ limit: '25mb' }));
 
 /**
  * Verejne endpointy platformy (#2). Vsetko ostatne pod /api/ vyzaduje prihlasenie.
@@ -161,10 +173,12 @@ function mapAttachment(attachment: any) {
   };
 }
 
+// len stlpce, ktore mapAttachment potrebuje — plny proces by tahal BPMN XML
+// ku kazdemu dokumentu a plny pouzivatel aj hash hesla
 const ATTACHMENT_INCLUDE = {
-  processNode: true,
-  uploadedBy: true,
-  positions: { include: { position: true } }
+  processNode: { select: { name: true } },
+  uploadedBy: { select: { name: true } },
+  positions: { include: { position: { select: { id: true, name: true } } } }
 };
 
 function emptyBpmnXml(id: string, name: string): string {
@@ -502,8 +516,33 @@ app.get('/api/processes/:processId/history', async (request, response, next) => 
 app.delete('/api/processes/:processId', async (request, response, next) => {
   try {
     const { processId } = request.params;
-    await requireProcess(request, processId);
+    const node = await requireProcess(request, processId);
+
+    // #10 — DB zmaze prilohy kaskadou, subory na disku treba zmazat rucne:
+    // najprv zistit, ktore patria procesu a celemu jeho podstromu
+    const nodes = await prisma.processNode.findMany({
+      where: { organizationId: node.organizationId },
+      select: { id: true, parentId: true }
+    });
+    const subtree = new Set([processId]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const item of nodes) {
+        if (item.parentId && subtree.has(item.parentId) && !subtree.has(item.id)) {
+          subtree.add(item.id);
+          grew = true;
+        }
+      }
+    }
+    const files = await prisma.attachment.findMany({
+      where: { processNodeId: { in: [...subtree] } },
+      select: { storagePath: true }
+    });
+
     await prisma.processNode.delete({ where: { id: processId } });
+    for (const file of files) {
+      if (isFileKey(file.storagePath)) await removeStored(file.storagePath).catch(() => undefined);
+    }
     response.status(204).end();
   } catch (error) {
     next(error);
@@ -525,7 +564,8 @@ app.get('/api/organizations/:organizationId/documents', async (request, response
     const attachments = await prisma.attachment.findMany({
       where: { organizationId: organization.id },
       orderBy: { createdAt: 'desc' },
-      include: ATTACHMENT_INCLUDE
+      include: ATTACHMENT_INCLUDE,
+      omit: { storagePath: true }
     });
     response.json(attachments.map(mapAttachment));
   } catch (error) {
@@ -539,7 +579,8 @@ app.get('/api/processes/:processId/documents', async (request, response, next) =
     const attachments = await prisma.attachment.findMany({
       where: { processNodeId: request.params.processId },
       orderBy: { createdAt: 'desc' },
-      include: ATTACHMENT_INCLUDE
+      include: ATTACHMENT_INCLUDE,
+      omit: { storagePath: true }
     });
     response.json(attachments.map(mapAttachment));
   } catch (error) {
@@ -547,37 +588,92 @@ app.get('/api/processes/:processId/documents', async (request, response, next) =
   }
 });
 
+/**
+ * Nahratie dokumentu (#10). Telo poziadavky je priamo obsah suboru
+ * (application/octet-stream), nazov a typ su v hlavickach X-File-Name
+ * (URI-kodovany) a X-File-Type. Subor tecie rovno na disk — 100 MB subor
+ * sa nedrzi v pamati ani v databaze.
+ *
+ * Starsi format (JSON s data URL) sa este prijima, ale tiez sa uklada na disk.
+ */
 app.post('/api/processes/:processId/documents', async (request, response, next) => {
+  let writtenKey: string | null = null;
   try {
     const processNode = await requireProcess(request, request.params.processId);
-    if (!processNode) {
-      response.status(404).json({ message: 'Process not found' });
-      return;
+    const organizationId = processNode.organizationId;
+    const attachmentId = randomUUID();
+    const key = fileKey(organizationId, attachmentId);
+    const tooLarge = () =>
+      new HttpError(413, `Subor je prilis velky. Maximalna velkost je ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
+
+    let fileName: string;
+    let mimeType: string;
+    let sizeBytes: number;
+
+    if (request.is('application/json')) {
+      const parsed = parseDataUrl(String(request.body?.dataUrl ?? ''));
+      if (!parsed) throw new HttpError(400, 'Chyba obsah suboru.');
+      fileName = cleanFileName(request.body?.fileName);
+      mimeType = cleanMimeType(request.body?.mimeType ?? parsed.mimeType);
+      sizeBytes = parsed.data.length;
+      if (sizeBytes > MAX_UPLOAD_BYTES) throw tooLarge();
+      // #9 — kvota sa overuje PRED zapisom
+      await assertStorageAvailable(organizationId, sizeBytes);
+      await storeBuffer(key, parsed.data);
+    } else {
+      fileName = cleanFileName(decodeHeader(request.get('x-file-name')));
+      mimeType = cleanMimeType(request.get('x-file-type'));
+      // deklarovana velkost sluzi na skore odmietnutie; zavazna je skutocne zapisana
+      const declared = Number(request.get('content-length'));
+      if (declared > MAX_UPLOAD_BYTES) throw tooLarge();
+      await assertStorageAvailable(organizationId, Number.isFinite(declared) ? declared : 0);
+      sizeBytes = await storeStream(key, request, MAX_UPLOAD_BYTES, tooLarge);
     }
-    // kontrola aj na serveri — klientsku kontrolu je mozne obist
-    const sizeBytes = Number(request.body.sizeBytes ?? 0);
-    if (sizeBytes > MAX_UPLOAD_BYTES) {
-      throw new HttpError(413, `Subor je prilis velky. Maximalna velkost je ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
-    }
-    // #9 — kvota sa overuje PRED zapisom, aby nevznikol nekonzistentny stav
-    await assertStorageAvailable(processNode.organizationId, sizeBytes);
+    writtenKey = key;
+
+    // znova so skutocnou velkostou — medzitym mohlo prebehnut ine nahravanie
+    await assertStorageAvailable(organizationId, sizeBytes);
 
     const attachment = await prisma.attachment.create({
       data: {
-        organizationId: processNode.organizationId,
+        id: attachmentId,
+        organizationId,
         processNodeId: processNode.id,
-        fileName: request.body.fileName,
-        mimeType: request.body.mimeType ?? 'application/octet-stream',
+        uploadedById: auth(request).userId,
+        fileName,
+        mimeType,
         sizeBytes,
-        storagePath: request.body.dataUrl ?? ''
+        storagePath: key
       },
       include: ATTACHMENT_INCLUDE
     });
+    writtenKey = null;
     response.status(201).json(mapAttachment(attachment));
   } catch (error) {
+    // subor bez zaznamu v DB by zaberal miesto a nikto by ho nevidel
+    if (writtenKey) await removeStored(writtenKey).catch(() => undefined);
     next(error);
   }
 });
+
+function decodeHeader(value: string | undefined): string {
+  if (!value) return '';
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function cleanFileName(value: unknown): string {
+  const name = String(value ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 255);
+  return name || 'dokument';
+}
+
+function cleanMimeType(value: unknown): string {
+  const mime = String(value ?? '').trim().toLowerCase();
+  return /^[a-z0-9][\w.+-]*\/[\w.+-]+$/.test(mime) ? mime : 'application/octet-stream';
+}
 
 // premenovanie dokumentu + priradenie pracovnym poziciam
 app.patch('/api/documents/:documentId', async (request, response, next) => {
@@ -613,46 +709,64 @@ app.patch('/api/documents/:documentId', async (request, response, next) => {
   }
 });
 
-// stiahnutie dokumentu — obsah je ulozeny ako data URL v storagePath
+// stiahnutie dokumentu — subor z disku, starsie prilohy z data URL v storagePath
 app.get('/api/documents/:documentId/download', async (request, response, next) => {
   try {
     const attachment = await requireDocument(request, request.params.documentId);
-
     const stored = attachment.storagePath ?? '';
-    const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(stored);
-    if (!match) {
-      response.status(409).json({ message: 'Dokument nema ulozeny obsah.' });
-      return;
-    }
 
-    const [, storedMime, base64Flag, payload] = match;
-    const body = base64Flag
-      ? Buffer.from(payload, 'base64')
-      : Buffer.from(decodeURIComponent(payload), 'utf8');
+    let size: number;
+    let legacy: Buffer | null = null;
+    let mimeType = attachment.mimeType;
+
+    if (isFileKey(stored)) {
+      const onDisk = await storedSize(stored);
+      if (onDisk === null) throw new HttpError(409, 'Subor dokumentu chyba v ulozisku.');
+      size = onDisk;
+    } else {
+      const parsed = parseDataUrl(stored);
+      if (!parsed) throw new HttpError(409, 'Dokument nema ulozeny obsah.');
+      legacy = parsed.data;
+      size = legacy.length;
+      mimeType ||= parsed.mimeType;
+    }
 
     // RFC 5987 — aby fungovala aj diakritika v nazve suboru
     const fileName = attachment.fileName || 'dokument';
     const asciiName = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
 
-    // ?inline=1 zobrazi subor priamo v prehliadaci (nahlad PDF), inak sa stiahne
-    const disposition = request.query['inline'] ? 'inline' : 'attachment';
+    // ?inline=1 zobrazi PDF priamo (nahlad); ine typy sa vzdy stiahnu, aby sa
+    // nahraty HTML/SVG nikdy nevykonal v kontexte aplikacie
+    const inline = Boolean(request.query['inline']) && /^application\/pdf\b/.test(mimeType ?? '');
 
-    response.setHeader('Content-Type', attachment.mimeType || storedMime || 'application/octet-stream');
-    response.setHeader('Content-Length', String(body.length));
+    response.setHeader('Content-Type', mimeType || 'application/octet-stream');
+    response.setHeader('Content-Length', String(size));
     response.setHeader(
       'Content-Disposition',
-      `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      `${inline ? 'inline' : 'attachment'}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
     );
-    response.send(body);
+
+    if (legacy) {
+      response.send(legacy);
+      return;
+    }
+    await pipeline(openStored(stored), response);
   } catch (error) {
+    // ak uz tiekli data, chybu nemozno poslat ako JSON — spojenie sa len ukonci
+    if (response.headersSent) {
+      response.destroy();
+      return;
+    }
     next(error);
   }
 });
 
 app.delete('/api/documents/:documentId', async (request, response, next) => {
   try {
-    await requireDocument(request, request.params.documentId);
-    await prisma.attachment.delete({ where: { id: request.params.documentId } });
+    const attachment = await requireDocument(request, request.params.documentId);
+    await prisma.attachment.delete({ where: { id: attachment.id } });
+    // az po zmazani zaznamu — opacne poradie by nechalo zaznam bez suboru
+    if (isFileKey(attachment.storagePath)) await removeStored(attachment.storagePath);
     response.status(204).end();
   } catch (error) {
     next(error);
@@ -918,8 +1032,8 @@ async function requireUnit(request: express.Request, unitId: string) {
 /**
  * Spotreba uloziska organizacie.
  *
- * Pocita sa REALNA velkost nahratych suborov (Attachment.sizeBytes), nie velkost
- * riadku v databaze — prilohy su dnes ulozene ako base64, ktory je o ~33 % vacsi,
+ * Pocita sa REALNA velkost nahratych suborov (Attachment.sizeBytes = zapisane bajty),
+ * nie velkost ulozenia — starsie prilohy v DB su base64, ktory je o ~33 % vacsi,
  * a zakaznik nema platit za sposob ulozenia.
  *
  * Do kvoty sa ZAPOCITAVAJU: vsetky prilohy organizacie (procesne aj volne).
@@ -2096,7 +2210,7 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
   // telo poziadavky prekrocilo limit express.json
   if ((error as any)?.type === 'entity.too.large' || (error as any)?.status === 413) {
     response.status(413).json({
-      message: `Subor je prilis velky. Maximalna velkost je ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`
+      message: 'Poziadavka je prilis velka.'
     });
     return;
   }

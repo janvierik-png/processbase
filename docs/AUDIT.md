@@ -212,21 +212,35 @@ Výstup skriptu sa priloží ako dôkaz.
 
 ## 7. Vykonané zmeny
 
-**Zatiaľ žiadne zmeny v kóde.** Tento dokument je výstupom auditu.
+Každá zmena je overená na lokálnom Dockeri a naviazaná na GitHub issue (`Fixes #N` v commite).
+**Na produkciu (Hetzner) sa nenasadzuje priebežne** — až po kompletnej revízii.
 
-**Blokátor pre implementáciu:** Docker stack v čase auditu nebežal, takže sa nedá overiť
-žiadna zmena ani spustiť test izolácie. Zavedenie autentifikácie naprieč ~50 endpointmi bez
-možnosti overiť beh by bolo neprimerane rizikové.
+| Etapa | Commit | Issues | Overenie |
+|---|---|---|---|
+| 1 — Autentifikácia a izolácia firiem | `b9c170f` | #1–#6 | test izolácie 15/15 (pred opravou 0/8), odhlásenie zneplatní token, 429 po 10 pokusoch o prihlásenie |
+| 2 — Meranie a kvóta úložiska | `edbebeb` | #8, #9 | nahratie nad kvótu → 413 bez zápisu; spotreba = súčet skutočných veľkostí |
+| 2 — Oprava sťahovania po Etape 1 | `edbebeb` | — | `<a href>`/`<iframe>` neposielali token (401) → sťahovanie cez HttpClient + blob URL |
+| 2 — Súborové úložisko príloh | *(tento commit)* | #10 | `scripts/file-storage-test.mjs` 17/17, prerušený upload nezanechá súbor ani záznam |
 
-**Presný ďalší krok:** spustiť `docker compose up -d` v `process-platform-angular/`, potom
-implementovať etapu 1 v poradí podľa tabuľky vyššie, s overením po každom bode.
+**Stav nálezov:** B1, B2 — opravené (Etapa 1). B4 — hlavičky a rate limit doplnené, `cors`
+zostáva otvorený (rieši sa pri produkčných nastaveniach). B5 — oddelené úložisko hotové,
+inline zobrazenie len pre PDF; antivírus (#11) zatiaľ odložený rozhodnutím zadávateľa.
+B3 — otvorené (#19).
+
+**Prevádzkové dôsledky #10:**
+- Súbory ležia v `UPLOAD_DIR` (predvolene `process-platform-angular/storage/uploads`, v `.gitignore`).
+  **Záloha databázy už neobsahuje obsah príloh — zálohovať treba aj tento adresár.**
+- Staršie prílohy (base64 v DB) sa čítajú ďalej. Presun: `scripts/migrate-attachments-to-files.ts`
+  (bez `--apply` len vypíše, `--org <id>` obmedzí na jednu firmu). Lokálne overené na syntetickom
+  zázname; existujúce dokumenty neboli presunuté.
+- Mazanie firmy (zatiaľ len ručne v DB) nezmaže jej adresár `UPLOAD_DIR/<organizationId>`.
 
 ### Poznámky k rozporom medzi zadaním a skutočnosťou
 
 - Zadanie predpokladá, že môže existovať tvrdenie „prevádzkovateľ nevidí procesy". V tejto
   architektúre **neplatí** a bez klientskeho šifrovania platiť nebude.
-- Zadanie uvádza úložisko ako hlavný kapacitný parameter. Dnes sa **nemeria vôbec**;
-  pri terajšom ukladaní do databázy bude navyše 1 GB príloh znamenať 1,33 GB v databáze
-  (base64) — účtovanie treba postaviť na reálnej veľkosti súboru, nie na veľkosti riadku.
+- Zadanie uvádza úložisko ako hlavný kapacitný parameter. V čase auditu sa **nemeralo vôbec**
+  a prílohy boli base64 v databáze (1 GB príloh = 1,33 GB v DB). Od #8/#10 sa meria skutočná
+  veľkosť súboru a nové prílohy idú na disk.
 - Zadanie žiada, aby zamestnanci v adresári neboli platení používatelia. Dnes **neexistuje
   entita Osoba** — každý človek v systéme je `User` s prihlásením.

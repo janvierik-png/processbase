@@ -3,3 +3,6 @@ node_modules
 .env
 
 /generated/prisma
+
+# Nahrate prilohy (#10) — obsah zakaznikov, nie zdrojak
+/storage/
