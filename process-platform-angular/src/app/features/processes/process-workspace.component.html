@@ -384,7 +384,7 @@
                   </div>
                 } @else {
                   <div class="doc-main">
-                    <a class="doc-name" [href]="documentUrl(document)" [attr.download]="document.name" [title]="'Stiahnut ' + document.name">
+                    <a class="doc-name" [href]="documentUrl(document)" (click)="downloadDocument(document, $event)" [title]="'Stiahnut ' + document.name">
                       {{ document.name }}
                     </a>
                     <small>Pridane {{ document.createdAt }} · {{ formatSize(document.size) }}</small>
@@ -393,7 +393,7 @@
                     @if (canPreview(document)) {
                       <button type="button" class="doc-download" (click)="openPreview(document)" title="Zobrazit nahlad">Nahlad</button>
                     }
-                    <a class="doc-download" [href]="documentUrl(document)" [attr.download]="document.name" title="Stiahnut">Stiahnut</a>
+                    <a class="doc-download" [href]="documentUrl(document)" (click)="downloadDocument(document, $event)" title="Stiahnut">Stiahnut</a>
                     <button type="button" class="ghost small" (click)="startDocumentEdit(document)">Premenovat</button>
                     <button type="button" class="ghost small" (click)="deleteDocument(document)">Vymazat</button>
                   </div>
@@ -545,7 +545,6 @@
 @if (previewDocument(); as document) {
   <pp-pdf-preview
     [fileName]="document.name"
-    [downloadUrl]="documentUrl(document)"
-    [previewUrl]="previewUrl(document)"
+    [documentId]="document.id"
     (closed)="previewDocument.set(null)" />
 }

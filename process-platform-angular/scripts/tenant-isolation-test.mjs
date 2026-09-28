@@ -8,6 +8,10 @@
  * Voliteľne:  API_URL=http://localhost:3000 (predvolené)
  *
  * Návratový kód 0 = izolácia drží, 1 = našli sa priechody.
+ *
+ * Firmy „Izolacia A/B <čas>" v DB zostanú (API nemá mazanie firmy). Upratanie:
+ *   delete from "Organization" where name like 'Izolacia _ %';
+ *   delete from "User" where email like 'izolacia-%@example.test';
  */
 
 const API = process.env.API_URL ?? 'http://localhost:3000/api';
@@ -104,6 +108,7 @@ async function main() {
   }
   record('anonym vypíše pozície B', 401, (await call(`/organizations/${b.orgId}/positions`)).status);
   record('anonym vypíše používateľov B', 401, (await call(`/organizations/${b.orgId}/users`)).status);
+  record('anonym číta úložisko B', 401, (await call(`/organizations/${b.orgId}/storage`)).status);
 
   // --- 2. prihlásená firma A siaha na objekty firmy B ---
   if (token.a) {
@@ -117,6 +122,7 @@ async function main() {
       record('A stiahne dokument B', 404, (await call(`/documents/${docBId}/download`, { auth: token.a })).status);
       record('A maže dokument B', 404, (await call(`/documents/${docBId}`, { method: 'DELETE', auth: token.a })).status);
     }
+    record('A číta úložisko B', [403, 404], (await call(`/organizations/${b.orgId}/storage`, { auth: token.a })).status);
     if (posBId) {
       record('A mení pozíciu B', 404, (await call(`/positions/${posBId}`, {
         method: 'PATCH', body: { name: 'PREPISANE' }, auth: token.a

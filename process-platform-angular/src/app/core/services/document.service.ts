@@ -1,8 +1,15 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
+import { Observable, map } from 'rxjs';
 import { Attachment } from '../models/process.model';
 import { AuthService } from './auth.service';
 import { API_BASE_URL } from './api-url';
+
+export interface StorageUsage {
+  usedBytes: number;
+  quotaBytes: number;
+  documentCount: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class DocumentService {
@@ -20,6 +27,12 @@ export class DocumentService {
     return this.http.get<Attachment[]>(`${API_BASE_URL}/processes/${processId}/documents`);
   }
 
+  /** Obsadenost uloziska firmy (#8) — rata sa skutocna velkost suborov. */
+  storage() {
+    const organizationId = this.auth.currentOrganizationId();
+    return this.http.get<StorageUsage>(`${API_BASE_URL}/organizations/${organizationId}/storage`);
+  }
+
   upload(processId: string, file: File, dataUrl: string) {
     return this.http.post<Attachment>(`${API_BASE_URL}/processes/${processId}/documents`, {
       fileName: file.name,
@@ -29,14 +42,23 @@ export class DocumentService {
     });
   }
 
-  /** URL na stiahnutie — obsah sa tahá az na vyziadanie, nie vo vypise. */
+  /** URL suboru — len pre href odkazu; samotne stiahnutie ide cez download(). */
   downloadUrl(id: string): string {
     return `${API_BASE_URL}/documents/${id}/download`;
   }
 
-  /** URL na zobrazenie v prehliadaci (nahlad PDF) namiesto stiahnutia. */
-  previewUrl(id: string): string {
-    return `${API_BASE_URL}/documents/${id}/download?inline=1`;
+  /**
+   * Obsah suboru ako Blob. Ide cez HttpClient, takze nesie Authorization
+   * hlavicku (#1) — obycajny <a href> alebo <iframe src> by token neposlal
+   * a server by vratil 401. Token v URL nechceme (logy, referer).
+   */
+  fetchFile(id: string, inline = false): Observable<Blob> {
+    return this.http.get(`${this.downloadUrl(id)}${inline ? '?inline=1' : ''}`, { responseType: 'blob' });
+  }
+
+  /** Stiahne subor pod jeho nazvom. */
+  download(id: string, fileName: string): Observable<void> {
+    return this.fetchFile(id).pipe(map((blob) => saveBlob(blob, fileName)));
   }
 
   update(id: string, patch: { name?: string; positionIds?: string[] }) {
@@ -46,4 +68,16 @@ export class DocumentService {
   delete(id: string) {
     return this.http.delete<void>(`${API_BASE_URL}/documents/${id}`);
   }
+}
+
+function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // prehliadac si subor prevezme asynchronne — URL uvolnime az po chvili
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

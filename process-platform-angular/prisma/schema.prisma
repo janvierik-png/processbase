@@ -59,6 +59,8 @@ model Organization {
   translationProvider     String?
   translationApiKeyEnc    String?
   translationTargetLocale String?
+  /// Kapacita uloziska v MB (#9). Hlavny kapacitny parameter planu — nie pocet procesov.
+  storageQuotaMb     Int                  @default(1024)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 

@@ -510,6 +510,15 @@ app.delete('/api/processes/:processId', async (request, response, next) => {
   }
 });
 
+// #8 — spotreba uloziska organizacie
+app.get('/api/organizations/:organizationId/storage', async (request, response, next) => {
+  try {
+    response.json(await storageUsage(orgScope(request)));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/organizations/:organizationId/documents', async (request, response, next) => {
   try {
     const organization = await ensureOrganization(orgScope(request));
@@ -550,6 +559,8 @@ app.post('/api/processes/:processId/documents', async (request, response, next) 
     if (sizeBytes > MAX_UPLOAD_BYTES) {
       throw new HttpError(413, `Subor je prilis velky. Maximalna velkost je ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
     }
+    // #9 — kvota sa overuje PRED zapisom, aby nevznikol nekonzistentny stav
+    await assertStorageAvailable(processNode.organizationId, sizeBytes);
 
     const attachment = await prisma.attachment.create({
       data: {
@@ -900,6 +911,54 @@ async function requireUnit(request: express.Request, unitId: string) {
   });
   if (!unit) throw new HttpError(404, 'Zlozka sa nenasla.');
   return unit;
+}
+
+// --- Meranie uloziska a kvoty (#8, #9) ---
+
+/**
+ * Spotreba uloziska organizacie.
+ *
+ * Pocita sa REALNA velkost nahratych suborov (Attachment.sizeBytes), nie velkost
+ * riadku v databaze — prilohy su dnes ulozene ako base64, ktory je o ~33 % vacsi,
+ * a zakaznik nema platit za sposob ulozenia.
+ *
+ * Do kvoty sa ZAPOCITAVAJU: vsetky prilohy organizacie (procesne aj volne).
+ * NEZAPOCITAVAJU sa: BPMN diagramy a ulozene verzie procesov — su to kratke
+ * textove polia radovo v kilobajtoch, ulozene priamo v zazname procesu.
+ * Kos neexistuje: mazanie je okamzite a spotrebu hned znizi.
+ */
+async function storageUsage(organizationId: string): Promise<{
+  usedBytes: number;
+  quotaBytes: number;
+  documentCount: number;
+}> {
+  const [aggregate, organization] = await Promise.all([
+    prisma.attachment.aggregate({
+      where: { organizationId },
+      _sum: { sizeBytes: true },
+      _count: true
+    }),
+    prisma.organization.findUnique({ where: { id: organizationId } })
+  ]);
+
+  return {
+    usedBytes: aggregate._sum.sizeBytes ?? 0,
+    quotaBytes: (organization?.storageQuotaMb ?? 1024) * 1024 * 1024,
+    documentCount: aggregate._count ?? 0
+  };
+}
+
+/** Odmietne ulozenie, ak by subor prekrocil kvotu (#9). Kontrola BEZ zapisu. */
+async function assertStorageAvailable(organizationId: string, incomingBytes: number): Promise<void> {
+  const { usedBytes, quotaBytes } = await storageUsage(organizationId);
+  if (usedBytes + incomingBytes > quotaBytes) {
+    const volne = Math.max(0, quotaBytes - usedBytes);
+    throw new HttpError(
+      413,
+      `Prekrocena kapacita uloziska. Volnych ${(volne / 1024 / 1024).toFixed(1)} MB ` +
+      `z ${(quotaBytes / 1024 / 1024).toFixed(0)} MB, subor ma ${(incomingBytes / 1024 / 1024).toFixed(1)} MB.`
+    );
+  }
 }
 
 /** Pouzivatel musi byt clenom organizacie z relacie. */

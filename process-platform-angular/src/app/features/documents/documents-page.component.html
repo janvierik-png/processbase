@@ -13,6 +13,20 @@
     <p class="error">{{ error() }}</p>
   }
 
+  @if (storage(); as usage) {
+    <section class="storage-card" [class.warn]="storagePercent() >= 80" [class.full]="storagePercent() >= 100">
+      <div class="storage-text">
+        <strong>Úložisko</strong>
+        <span>{{ formatSize(usage.usedBytes) }} z {{ formatSize(usage.quotaBytes) }} · {{ usage.documentCount }} súborov</span>
+      </div>
+      <div class="storage-bar" role="progressbar" aria-label="Obsadenosť úložiska"
+           [attr.aria-valuenow]="storagePercent()" aria-valuemin="0" aria-valuemax="100">
+        <span [style.width.%]="storagePercent()"></span>
+      </div>
+      <span class="storage-percent">{{ storagePercent() }} %</span>
+    </section>
+  }
+
   <section class="filter-bar">
     <div class="search-field">
       <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>
@@ -61,7 +75,7 @@
         @if (editingId === document.id) {
           <input [(ngModel)]="nameDraft" name="docName" (keydown.enter)="saveName(document)">
         } @else {
-          <a class="doc-link" [href]="downloadUrl(document)" [attr.download]="document.name" [title]="'Stiahnut ' + document.name">
+          <a class="doc-link" [href]="downloadUrl(document)" (click)="download(document, $event)" [title]="'Stiahnut ' + document.name">
             {{ document.name }}
           </a>
         }
@@ -86,7 +100,7 @@
                 Nahlad
               </button>
             }
-            <a class="download-btn" [href]="downloadUrl(document)" [attr.download]="document.name" title="Stiahnut">
+            <a class="download-btn" [href]="downloadUrl(document)" (click)="download(document, $event)" title="Stiahnut">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M8 10l4 4 4-4M5 19h14"/></svg>
               Stiahnut
             </a>
@@ -110,7 +124,6 @@
 @if (previewDocument(); as document) {
   <pp-pdf-preview
     [fileName]="document.name"
-    [downloadUrl]="downloadUrl(document)"
-    [previewUrl]="previewUrl(document)"
+    [documentId]="document.id"
     (closed)="previewDocument.set(null)" />
 }

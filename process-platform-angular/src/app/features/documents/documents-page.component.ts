@@ -2,7 +2,7 @@ import { Component, OnInit, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Attachment } from '../../core/models/process.model';
 import { OrgPosition } from '../../core/models/user.model';
-import { DocumentService } from '../../core/services/document.service';
+import { DocumentService, StorageUsage } from '../../core/services/document.service';
 import { PositionService } from '../../core/services/position.service';
 import { fileTypeLabel, formatBytes, isPreviewable } from '../../core/utils/upload-limits';
 import { PdfPreviewComponent } from '../../shared/pdf-preview.component';
@@ -18,6 +18,15 @@ export class DocumentsPageComponent implements OnInit {
   readonly documents = signal<Attachment[]>([]);
   readonly positions = signal<OrgPosition[]>([]);
   readonly error = signal('');
+  readonly storage = signal<StorageUsage | null>(null);
+
+  /** Percento obsadenia, zaokruhlene; pri nenulovom obsahu aspon 1 %, aby bol pruh viditelny. */
+  readonly storagePercent = computed(() => {
+    const usage = this.storage();
+    if (!usage || usage.quotaBytes <= 0) return 0;
+    const percent = Math.round((usage.usedBytes / usage.quotaBytes) * 100);
+    return Math.min(100, usage.usedBytes > 0 ? Math.max(1, percent) : 0);
+  });
 
   // filtre
   readonly search = signal('');
@@ -82,6 +91,14 @@ export class DocumentsPageComponent implements OnInit {
       next: (documents) => this.documents.set(documents),
       error: (error) => this.error.set(error?.error?.message ?? 'Dokumenty sa nepodarilo nacitat.')
     });
+    this.loadStorage();
+  }
+
+  loadStorage(): void {
+    this.documentsApi.storage().subscribe({
+      next: (usage) => this.storage.set(usage),
+      error: () => this.storage.set(null)
+    });
   }
 
   readonly previewDocument = signal<Attachment | null>(null);
@@ -90,8 +107,12 @@ export class DocumentsPageComponent implements OnInit {
     return this.documentsApi.downloadUrl(document.id);
   }
 
-  previewUrl(document: Attachment): string {
-    return this.documentsApi.previewUrl(document.id);
+  /** href zostava kvoli pristupnosti, subor sa vsak taha s tokenom cez API. */
+  download(document: Attachment, event: Event): void {
+    event.preventDefault();
+    this.documentsApi.download(document.id, document.name).subscribe({
+      error: () => this.error.set(`Dokument ${document.name} sa nepodarilo stiahnut.`)
+    });
   }
 
   canPreview(document: Attachment): boolean {
@@ -148,7 +169,10 @@ export class DocumentsPageComponent implements OnInit {
   deleteDocument(document: Attachment): void {
     if (!window.confirm(`Vymazat dokument ${document.name}?`)) return;
     this.documentsApi.delete(document.id).subscribe({
-      next: () => this.documents.update((items) => items.filter((item) => item.id !== document.id)),
+      next: () => {
+        this.documents.update((items) => items.filter((item) => item.id !== document.id));
+        this.loadStorage();
+      },
       error: (error) => this.error.set(error?.error?.message ?? 'Dokument sa nepodarilo vymazat.')
     });
   }

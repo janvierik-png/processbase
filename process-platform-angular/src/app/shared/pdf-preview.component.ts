@@ -1,10 +1,11 @@
-import { Component, EventEmitter, HostListener, Input, Output } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, OnDestroy, OnInit, Output, signal } from '@angular/core';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { DocumentService } from '../core/services/document.service';
 
 /**
  * Náhľad PDF v modálnom okne — používa vstavaný prehliadač PDF v prehliadači.
- * Súbor sa ťahá z `/api/documents/:id/download?inline=1`, takže sa zobrazí
- * priamo namiesto stiahnutia.
+ * Súbor sa načíta cez HttpClient (s prihlasovacím tokenom) a iframe dostane
+ * blob URL — priame `src` na API by token neposlalo a skončilo by 401.
  */
 @Component({
   selector: 'pp-pdf-preview',
@@ -15,11 +16,15 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
         <header class="preview-head">
           <h3>{{ fileName }}</h3>
           <div class="preview-actions">
-            <a class="preview-btn" [href]="downloadUrl" [attr.download]="fileName">Stiahnut</a>
+            <button type="button" class="preview-btn" (click)="download()">Stiahnut</button>
             <button type="button" class="preview-btn" (click)="closed.emit()">Zavriet</button>
           </div>
         </header>
-        <iframe [src]="safeUrl" title="Náhľad dokumentu"></iframe>
+        @if (safeUrl(); as url) {
+          <iframe [src]="url" title="Náhľad dokumentu"></iframe>
+        } @else {
+          <p class="preview-state">{{ error() || 'Načítavam náhľad...' }}</p>
+        }
       </div>
     </div>
   `,
@@ -83,6 +88,15 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 
     .preview-btn:hover { background: var(--surface-alt, #f8fafc); color: var(--ink, #16202e); }
 
+    .preview-state {
+      flex: 1;
+      display: grid;
+      place-items: center;
+      margin: 0;
+      color: var(--muted, #6b7789);
+      background: var(--surface-alt, #f8fafc);
+    }
+
     iframe {
       flex: 1;
       width: 100%;
@@ -91,21 +105,41 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
     }
   `]
 })
-export class PdfPreviewComponent {
+export class PdfPreviewComponent implements OnInit, OnDestroy {
   @Input({ required: true }) fileName = '';
-  @Input({ required: true }) downloadUrl = '';
-
-  /** URL s ?inline=1 — bez neho by prehliadač súbor stiahol namiesto zobrazenia. */
-  @Input({ required: true })
-  set previewUrl(value: string) {
-    this.safeUrl = this.sanitizer.bypassSecurityTrustResourceUrl(value);
-  }
+  @Input({ required: true }) documentId = '';
 
   @Output() closed = new EventEmitter<void>();
 
-  safeUrl: SafeResourceUrl | null = null;
+  readonly safeUrl = signal<SafeResourceUrl | null>(null);
+  readonly error = signal('');
+  private objectUrl: string | null = null;
 
-  constructor(private readonly sanitizer: DomSanitizer) {}
+  constructor(
+    private readonly sanitizer: DomSanitizer,
+    private readonly documents: DocumentService
+  ) {}
+
+  ngOnInit(): void {
+    // ?inline=1 — server posle Content-Disposition inline, typ zostane application/pdf
+    this.documents.fetchFile(this.documentId, true).subscribe({
+      next: (blob) => {
+        this.objectUrl = URL.createObjectURL(blob);
+        this.safeUrl.set(this.sanitizer.bypassSecurityTrustResourceUrl(this.objectUrl));
+      },
+      error: () => this.error.set('Náhľad sa nepodarilo načítať.')
+    });
+  }
+
+  ngOnDestroy(): void {
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+  }
+
+  download(): void {
+    this.documents.download(this.documentId, this.fileName).subscribe({
+      error: () => this.error.set('Súbor sa nepodarilo stiahnuť.')
+    });
+  }
 
   @HostListener('document:keydown.escape')
   onEscape(): void {

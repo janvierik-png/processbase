@@ -436,9 +436,28 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.store.error.set('');
     this.uploading.set(true);
 
+    // #9 — kapacitu overime skor, nez sa subor nacita a posle; server ju kontroluje aj tak
+    this.documentsApi.storage().subscribe({
+      next: (usage) => {
+        const free = Math.max(0, usage.quotaBytes - usage.usedBytes);
+        if (file.size > free) {
+          this.store.error.set(
+            `Nedostatok miesta v úložisku: voľných ${formatBytes(free)} z ${formatBytes(usage.quotaBytes)}, súbor má ${formatBytes(file.size)}.`
+          );
+          this.uploading.set(false);
+          input.value = '';
+          return;
+        }
+        this.readAndUpload(detail.id, file, input);
+      },
+      error: () => this.readAndUpload(detail.id, file, input)
+    });
+  }
+
+  private readAndUpload(processId: string, file: File, input: HTMLInputElement): void {
     const reader = new FileReader();
     reader.onload = () => {
-      this.documentsApi.upload(detail.id, file, String(reader.result ?? '')).subscribe({
+      this.documentsApi.upload(processId, file, String(reader.result ?? '')).subscribe({
         next: (document) => {
           this.documents.update((items) => [document, ...items]);
           this.uploading.set(false);
@@ -468,12 +487,16 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.previewDocument.set(document);
   }
 
-  previewUrl(document: Attachment): string {
-    return this.documentsApi.previewUrl(document.id);
-  }
-
   documentUrl(document: Attachment): string {
     return this.documentsApi.downloadUrl(document.id);
+  }
+
+  /** href zostava kvoli pristupnosti, subor sa vsak taha s tokenom cez API. */
+  downloadDocument(document: Attachment, event: Event): void {
+    event.preventDefault();
+    this.documentsApi.download(document.id, document.name).subscribe({
+      error: () => this.store.error.set(`Dokument ${document.name} sa nepodarilo stiahnut.`)
+    });
   }
 
   formatSize(bytes?: number): string {

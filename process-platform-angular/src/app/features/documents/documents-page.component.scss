@@ -235,3 +235,57 @@ h2 {
 .error {
   color: #a33;
 }
+
+// #8 — obsadenost uloziska firmy
+.storage-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  font-size: 13px;
+
+  --bar: var(--accent);
+
+  &.warn { --bar: #d98a1c; }
+  &.full { --bar: #c9423a; }
+}
+
+.storage-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+
+  span { color: var(--muted); }
+}
+
+.storage-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--bar);
+    border-radius: inherit;
+    transition: width .3s ease;
+  }
+}
+
+.storage-percent {
+  min-width: 44px;
+  text-align: right;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 640px) {
+  .storage-card { flex-wrap: wrap; }
+  .storage-text { min-width: 0; flex-basis: 100%; }
+}
