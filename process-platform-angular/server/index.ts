@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import {
@@ -22,7 +22,97 @@ app.use(cors({ origin: true }));
  */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
+/**
+ * Bezpecnostne hlavicky (#6). Rucne namiesto helmet, aby pribudnutie zavislosti
+ * nevynutilo prestavbu node_modules volume v Dockeri.
+ */
+app.use((_request, response, next) => {
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.setHeader('X-Frame-Options', 'DENY');
+  response.setHeader('Referrer-Policy', 'no-referrer');
+  response.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  response.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  response.removeHeader('X-Powered-By');
+  next();
+});
+
+/**
+ * Jednoduchy limit pokusov (#6). Drzi sa v pamati procesu — pre viac instancii
+ * by bolo treba zdielane uloziste (Redis a pod.).
+ */
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
+
+function rateLimitLogin(request: express.Request, response: express.Response, next: express.NextFunction): void {
+  const key = request.ip ?? 'neznamy';
+  const now = Date.now();
+  const entry = loginAttempts.get(key);
+
+  if (!entry || entry.resetAt < now) {
+    loginAttempts.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    next();
+    return;
+  }
+
+  entry.count += 1;
+  if (entry.count > LOGIN_MAX_ATTEMPTS) {
+    const zostava = Math.ceil((entry.resetAt - now) / 60000);
+    response.status(429).json({
+      message: `Prilis vela pokusov o prihlasenie. Skus znova o ${zostava} min.`
+    });
+    return;
+  }
+  next();
+}
+
+// obcasne upratanie starych zaznamov, nech mapa nerastie donekonecna
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of loginAttempts) {
+    if (entry.resetAt < now) loginAttempts.delete(key);
+  }
+}, LOGIN_WINDOW_MS).unref();
+
 app.use(express.json({ limit: '150mb' }));
+
+/**
+ * Verejne endpointy platformy (#2). Vsetko ostatne pod /api/ vyzaduje prihlasenie.
+ * Backoffice ma vlastny guard nizsie.
+ */
+const PUBLIC_API_ROUTES: Array<{ method: string; pattern: RegExp }> = [
+  { method: 'POST', pattern: /^\/api\/register$/ },
+  { method: 'POST', pattern: /^\/api\/login$/ },
+  { method: 'GET', pattern: /^\/api\/check\/(email|org-name)$/ },
+  { method: 'GET', pattern: /^\/api\/invitations\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/api\/invitations\/[^/]+\/accept$/ },
+  { method: 'GET', pattern: /^\/api\/translations$/ },
+  { method: 'GET', pattern: /^\/api\/iso-norms$/ }
+];
+
+function isPublicRoute(method: string, path: string): boolean {
+  if (path.startsWith('/api/backoffice')) return true; // ma vlastny guard
+  return PUBLIC_API_ROUTES.some((route) => route.method === method && route.pattern.test(path));
+}
+
+app.use('/api', async (request, response, next) => {
+  try {
+    const fullPath = request.baseUrl + request.path;
+    if (isPublicRoute(request.method, fullPath)) {
+      next();
+      return;
+    }
+    const context = await resolveSession(request);
+    if (!context) {
+      response.status(401).json({ message: 'Vyzaduje sa prihlasenie.' });
+      return;
+    }
+    (request as any).auth = context;
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 type ProcessTreeNode = {
   id: string;
@@ -210,7 +300,7 @@ app.get('/api/health', (_request, response) => {
 
 app.get('/api/organizations/:organizationId/processes', async (request, response, next) => {
   try {
-    const { organizationId } = request.params;
+    const organizationId = orgScope(request);
     const organization = await ensureOrganization(organizationId);
     const nodes = await prisma.processNode.findMany({
       where: { organizationId: organization.id },
@@ -229,7 +319,7 @@ app.get('/api/organizations/:organizationId/processes', async (request, response
 
 app.post('/api/organizations/:organizationId/processes', async (request, response, next) => {
   try {
-    const { organizationId } = request.params;
+    const organizationId = orgScope(request);
     const organization = await ensureOrganization(organizationId);
     const type = request.body.type === 'folder' ? ProcessNodeType.GROUP : ProcessNodeType.PROCESS;
     const name = request.body.name ?? (type === ProcessNodeType.GROUP ? 'Nova skupina' : 'Novy proces');
@@ -269,8 +359,8 @@ const PROCESS_INCLUDE = {
 app.patch('/api/processes/:processId', async (request, response, next) => {
   try {
     const { processId } = request.params;
-    const current = await prisma.processNode.findUnique({
-      where: { id: processId },
+    const current = await prisma.processNode.findFirst({
+      where: { id: processId, organizationId: orgScope(request) },
       include: { positions: true }
     });
     if (!current) {
@@ -363,8 +453,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
 // R3: detail procesu s rozsirenymi vazbami
 app.get('/api/processes/:processId', async (request, response, next) => {
   try {
-    const node = await prisma.processNode.findUnique({
-      where: { id: request.params.processId },
+    const node = await prisma.processNode.findFirst({
+      where: { id: request.params.processId, organizationId: orgScope(request) },
       include: { ...PROCESS_INCLUDE, parent: true }
     });
     if (!node) {
@@ -391,6 +481,7 @@ app.get('/api/processes/:processId', async (request, response, next) => {
 // R7: historia zmien procesu
 app.get('/api/processes/:processId/history', async (request, response, next) => {
   try {
+    await requireProcess(request, request.params.processId);
     const logs = await prisma.processChangeLog.findMany({
       where: { processNodeId: request.params.processId },
       orderBy: { createdAt: 'desc' },
@@ -411,6 +502,7 @@ app.get('/api/processes/:processId/history', async (request, response, next) => 
 app.delete('/api/processes/:processId', async (request, response, next) => {
   try {
     const { processId } = request.params;
+    await requireProcess(request, processId);
     await prisma.processNode.delete({ where: { id: processId } });
     response.status(204).end();
   } catch (error) {
@@ -420,7 +512,7 @@ app.delete('/api/processes/:processId', async (request, response, next) => {
 
 app.get('/api/organizations/:organizationId/documents', async (request, response, next) => {
   try {
-    const organization = await ensureOrganization(request.params.organizationId);
+    const organization = await ensureOrganization(orgScope(request));
     const attachments = await prisma.attachment.findMany({
       where: { organizationId: organization.id },
       orderBy: { createdAt: 'desc' },
@@ -434,6 +526,7 @@ app.get('/api/organizations/:organizationId/documents', async (request, response
 
 app.get('/api/processes/:processId/documents', async (request, response, next) => {
   try {
+    await requireProcess(request, request.params.processId);
     const attachments = await prisma.attachment.findMany({
       where: { processNodeId: request.params.processId },
       orderBy: { createdAt: 'desc' },
@@ -447,7 +540,7 @@ app.get('/api/processes/:processId/documents', async (request, response, next) =
 
 app.post('/api/processes/:processId/documents', async (request, response, next) => {
   try {
-    const processNode = await prisma.processNode.findUnique({ where: { id: request.params.processId } });
+    const processNode = await requireProcess(request, request.params.processId);
     if (!processNode) {
       response.status(404).json({ message: 'Process not found' });
       return;
@@ -479,11 +572,7 @@ app.post('/api/processes/:processId/documents', async (request, response, next) 
 app.patch('/api/documents/:documentId', async (request, response, next) => {
   try {
     const { documentId } = request.params;
-    const existing = await prisma.attachment.findUnique({ where: { id: documentId } });
-    if (!existing) {
-      response.status(404).json({ message: 'Dokument sa nenasiel.' });
-      return;
-    }
+    const existing = await requireDocument(request, documentId);
 
     const fileName = typeof request.body?.name === 'string' ? request.body.name.trim() : undefined;
     if (fileName !== undefined && !fileName) throw new HttpError(400, 'Nazov dokumentu nesmie byt prazdny.');
@@ -516,11 +605,7 @@ app.patch('/api/documents/:documentId', async (request, response, next) => {
 // stiahnutie dokumentu — obsah je ulozeny ako data URL v storagePath
 app.get('/api/documents/:documentId/download', async (request, response, next) => {
   try {
-    const attachment = await prisma.attachment.findUnique({ where: { id: request.params.documentId } });
-    if (!attachment) {
-      response.status(404).json({ message: 'Dokument sa nenasiel.' });
-      return;
-    }
+    const attachment = await requireDocument(request, request.params.documentId);
 
     const stored = attachment.storagePath ?? '';
     const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(stored);
@@ -555,6 +640,7 @@ app.get('/api/documents/:documentId/download', async (request, response, next) =
 
 app.delete('/api/documents/:documentId', async (request, response, next) => {
   try {
+    await requireDocument(request, request.params.documentId);
     await prisma.attachment.delete({ where: { id: request.params.documentId } });
     response.status(204).end();
   } catch (error) {
@@ -565,8 +651,8 @@ app.delete('/api/documents/:documentId', async (request, response, next) => {
 app.post('/api/processes/:processId/revisions', async (request, response, next) => {
   try {
     const { processId } = request.params;
-    const processNode = await prisma.processNode.findUnique({ where: { id: processId } });
-    if (!processNode || !processNode.bpmnXml) {
+    const processNode = await requireProcess(request, processId);
+    if (!processNode.bpmnXml) {
       response.status(404).json({ message: 'Process with BPMN XML not found' });
       return;
     }
@@ -594,6 +680,7 @@ app.post('/api/processes/:processId/revisions', async (request, response, next) 
 
 app.post('/api/processes/:processId/camunda7/deploy', async (request, response, next) => {
   try {
+    await requireProcess(request, request.params.processId);
     response.json(await deployProcessToCamunda(request.params.processId, request.body));
   } catch (error) {
     next(error);
@@ -602,6 +689,7 @@ app.post('/api/processes/:processId/camunda7/deploy', async (request, response, 
 
 app.post('/api/camunda7/deploy', async (request, response, next) => {
   try {
+    await requireProcess(request, request.body.processId);
     response.json(await deployProcessToCamunda(request.body.processId, request.body));
   } catch (error) {
     next(error);
@@ -710,6 +798,119 @@ function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
+// --- Relacie (#1) ---
+
+/** Platnost relacie. */
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+/** V databaze drzime iba hash — surovy token vidi len klient. */
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+async function createSession(userId: string, organizationId: string): Promise<string> {
+  const token = randomBytes(32).toString('hex');
+  await prisma.session.create({
+    data: {
+      tokenHash: hashToken(token),
+      userId,
+      organizationId,
+      expiresAt: new Date(Date.now() + SESSION_TTL_MS)
+    }
+  });
+  return token;
+}
+
+type AuthContext = { userId: string; organizationId: string; sessionId: string };
+
+async function resolveSession(request: express.Request): Promise<AuthContext | null> {
+  const header = request.headers.authorization ?? '';
+  if (!header.startsWith('Bearer ')) return null;
+
+  const session = await prisma.session.findUnique({ where: { tokenHash: hashToken(header.slice(7)) } });
+  if (!session) return null;
+
+  if (session.expiresAt.getTime() < Date.now()) {
+    await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
+    return null;
+  }
+
+  // posuvanie aktivity — bez cakania, nech neblokuje poziadavku
+  void prisma.session
+    .update({ where: { id: session.id }, data: { lastSeenAt: new Date() } })
+    .catch(() => undefined);
+
+  return { userId: session.userId, organizationId: session.organizationId, sessionId: session.id };
+}
+
+/** Prihlaseny kontext poziadavky. Nastavuje ho requireAuth. */
+function auth(request: express.Request): AuthContext {
+  const context = (request as any).auth as AuthContext | undefined;
+  if (!context) throw new HttpError(401, 'Vyzaduje sa prihlasenie.');
+  return context;
+}
+
+/**
+ * Organizacia sa berie VZDY z relacie (#3). Ak URL obsahuje ine id,
+ * je to pokus o pristup do cudzej firmy — koncime 404, aby sme
+ * neprezradili, ci taka organizacia existuje.
+ */
+function orgScope(request: express.Request): string {
+  const context = auth(request);
+  const fromUrl = request.params['organizationId'];
+  if (fromUrl && fromUrl !== context.organizationId) {
+    throw new HttpError(404, 'Nenajdene.');
+  }
+  return context.organizationId;
+}
+
+/**
+ * Straze objektovej urovne (#4). Kazdy objekt sa hlada VYHRADNE v organizacii
+ * z relacie. Cudzi objekt konci na 404 — nie 403, aby sa neprezradilo,
+ * ze take id existuje.
+ */
+
+async function requireProcess(request: express.Request, processId: string) {
+  const node = await prisma.processNode.findFirst({
+    where: { id: processId, organizationId: orgScope(request) }
+  });
+  if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
+  return node;
+}
+
+async function requireDocument(request: express.Request, documentId: string) {
+  const attachment = await prisma.attachment.findFirst({
+    where: { id: documentId, organizationId: orgScope(request) }
+  });
+  if (!attachment) throw new HttpError(404, 'Dokument sa nenasiel.');
+  return attachment;
+}
+
+async function requirePosition(request: express.Request, positionId: string) {
+  const position = await prisma.orgPosition.findFirst({
+    where: { id: positionId, organizationId: orgScope(request) }
+  });
+  if (!position) throw new HttpError(404, 'Pozicia sa nenasla.');
+  return position;
+}
+
+async function requireUnit(request: express.Request, unitId: string) {
+  const unit = await prisma.orgUnit.findFirst({
+    where: { id: unitId, organizationId: orgScope(request) }
+  });
+  if (!unit) throw new HttpError(404, 'Zlozka sa nenasla.');
+  return unit;
+}
+
+/** Pouzivatel musi byt clenom organizacie z relacie. */
+async function requireOrgMember(request: express.Request, userId: string) {
+  const membership = await prisma.organizationUser.findFirst({
+    where: { userId, organizationId: orgScope(request) }
+  });
+  if (!membership) throw new HttpError(404, 'Pouzivatel sa nenasiel.');
+  return membership;
+}
+
 // Frontend roly (RoleId) <-> Prisma OrganizationRole
 const ROLE_TO_DB: Record<string, OrganizationRole> = {
   owner: OrganizationRole.OWNER,
@@ -808,7 +1009,10 @@ app.post('/api/register', async (request, response, next) => {
       return { user, organization };
     });
 
+    const token = await createSession(result.user.id, result.organization.id);
+
     response.status(201).json({
+      token,
       user: {
         id: result.user.id,
         organizationId: result.organization.id,
@@ -825,7 +1029,7 @@ app.post('/api/register', async (request, response, next) => {
   }
 });
 
-app.post('/api/login', async (request, response, next) => {
+app.post('/api/login', rateLimitLogin, async (request, response, next) => {
   try {
     const { email, password } = request.body ?? {};
     if (!email || !password) {
@@ -850,7 +1054,10 @@ app.post('/api/login', async (request, response, next) => {
     const owner = await prisma.organizationUser.findFirst({
       where: { organizationId: membership.organizationId, isOwner: true }
     });
+    const token = await createSession(user.id, membership.organizationId);
+
     response.json({
+      token,
       user: {
         id: user.id,
         organizationId: membership.organizationId,
@@ -867,10 +1074,20 @@ app.post('/api/login', async (request, response, next) => {
   }
 });
 
+// #5 — odhlasenie zneplatni relaciu na serveri
+app.post('/api/logout', async (request, response, next) => {
+  try {
+    await prisma.session.delete({ where: { id: auth(request).sessionId } }).catch(() => undefined);
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.patch('/api/organizations/:organizationId', async (request, response, next) => {
   try {
     const organization = await prisma.organization.update({
-      where: { id: request.params.organizationId },
+      where: { id: orgScope(request) },
       data: { name: request.body.name ?? undefined }
     });
     const owner = await prisma.organizationUser.findFirst({
@@ -885,7 +1102,7 @@ app.patch('/api/organizations/:organizationId', async (request, response, next) 
 app.get('/api/organizations/:organizationId/users', async (request, response, next) => {
   try {
     const memberships = await prisma.organizationUser.findMany({
-      where: { organizationId: request.params.organizationId },
+      where: { organizationId: orgScope(request) },
       orderBy: { createdAt: 'asc' },
       include: { user: { include: { positions: { include: { position: true } } } } }
     });
@@ -898,7 +1115,7 @@ app.get('/api/organizations/:organizationId/users', async (request, response, ne
 app.get('/api/organizations/:organizationId/invitations', async (request, response, next) => {
   try {
     const invitations = await prisma.invitation.findMany({
-      where: { organizationId: request.params.organizationId },
+      where: { organizationId: orgScope(request) },
       orderBy: { createdAt: 'desc' }
     });
     response.json(invitations.map(mapInvitation));
@@ -913,7 +1130,7 @@ app.post('/api/organizations/:organizationId/invitations', async (request, respo
     if (!email) {
       throw new HttpError(400, 'email je povinny');
     }
-    const organization = await prisma.organization.findUnique({ where: { id: request.params.organizationId } });
+    const organization = await prisma.organization.findUnique({ where: { id: orgScope(request) } });
     if (!organization) {
       throw new HttpError(404, 'Organizacia neexistuje');
     }
@@ -1088,7 +1305,7 @@ const POSITION_INCLUDE = { users: { include: { user: true } }, unit: true };
 app.get('/api/organizations/:organizationId/units', async (request, response, next) => {
   try {
     const units = await prisma.orgUnit.findMany({
-      where: { organizationId: request.params.organizationId },
+      where: { organizationId: orgScope(request) },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       include: { _count: { select: { positions: true } } }
     });
@@ -1103,12 +1320,12 @@ app.post('/api/organizations/:organizationId/units', async (request, response, n
     const { name, description } = request.body ?? {};
     if (!name?.trim()) throw new HttpError(400, 'name je povinny');
     const existing = await prisma.orgUnit.findFirst({
-      where: { organizationId: request.params.organizationId, name: { equals: name.trim(), mode: 'insensitive' } }
+      where: { organizationId: orgScope(request), name: { equals: name.trim(), mode: 'insensitive' } }
     });
     if (existing) throw new HttpError(409, 'Zlozka s tymto nazvom uz existuje.');
     const unit = await prisma.orgUnit.create({
       data: {
-        organizationId: request.params.organizationId,
+        organizationId: orgScope(request),
         name: name.trim(),
         description: description?.trim() || null
       },
@@ -1122,6 +1339,7 @@ app.post('/api/organizations/:organizationId/units', async (request, response, n
 
 app.patch('/api/units/:unitId', async (request, response, next) => {
   try {
+    await requireUnit(request, request.params.unitId);
     const unit = await prisma.orgUnit.update({
       where: { id: request.params.unitId },
       data: {
@@ -1139,6 +1357,7 @@ app.patch('/api/units/:unitId', async (request, response, next) => {
 
 app.delete('/api/units/:unitId', async (request, response, next) => {
   try {
+    await requireUnit(request, request.params.unitId);
     // pozicie ostavaju, len stratia zaradenie (onDelete: SetNull)
     await prisma.orgUnit.delete({ where: { id: request.params.unitId } });
     response.status(204).end();
@@ -1150,7 +1369,7 @@ app.delete('/api/units/:unitId', async (request, response, next) => {
 app.get('/api/organizations/:organizationId/positions', async (request, response, next) => {
   try {
     const positions = await prisma.orgPosition.findMany({
-      where: { organizationId: request.params.organizationId },
+      where: { organizationId: orgScope(request) },
       orderBy: { name: 'asc' },
       include: POSITION_INCLUDE
     });
@@ -1165,12 +1384,12 @@ app.post('/api/organizations/:organizationId/positions', async (request, respons
     const { name, description, unitId } = request.body ?? {};
     if (!name) throw new HttpError(400, 'name je povinny');
     const existing = await prisma.orgPosition.findFirst({
-      where: { organizationId: request.params.organizationId, name: { equals: name, mode: 'insensitive' } }
+      where: { organizationId: orgScope(request), name: { equals: name, mode: 'insensitive' } }
     });
     if (existing) throw new HttpError(409, 'Pozicia s tymto nazvom uz existuje.');
     const position = await prisma.orgPosition.create({
       data: {
-        organizationId: request.params.organizationId,
+        organizationId: orgScope(request),
         name,
         description: description || null,
         unitId: unitId || null
@@ -1185,6 +1404,7 @@ app.post('/api/organizations/:organizationId/positions', async (request, respons
 
 app.patch('/api/positions/:positionId', async (request, response, next) => {
   try {
+    await requirePosition(request, request.params.positionId);
     const position = await prisma.orgPosition.update({
       where: { id: request.params.positionId },
       data: {
@@ -1202,6 +1422,7 @@ app.patch('/api/positions/:positionId', async (request, response, next) => {
 
 app.delete('/api/positions/:positionId', async (request, response, next) => {
   try {
+    await requirePosition(request, request.params.positionId);
     await prisma.orgPosition.delete({ where: { id: request.params.positionId } });
     response.status(204).end();
   } catch (error) {
@@ -1213,6 +1434,8 @@ app.post('/api/users/:userId/positions', async (request, response, next) => {
   try {
     const { positionId } = request.body ?? {};
     if (!positionId) throw new HttpError(400, 'positionId je povinny');
+    await requireOrgMember(request, request.params.userId);
+    await requirePosition(request, positionId);
     await prisma.userPosition.upsert({
       where: { userId_positionId: { userId: request.params.userId, positionId } },
       update: {},
@@ -1226,6 +1449,8 @@ app.post('/api/users/:userId/positions', async (request, response, next) => {
 
 app.delete('/api/users/:userId/positions/:positionId', async (request, response, next) => {
   try {
+    await requireOrgMember(request, request.params.userId);
+    await requirePosition(request, request.params.positionId);
     await prisma.userPosition.deleteMany({
       where: { userId: request.params.userId, positionId: request.params.positionId }
     });
@@ -1260,7 +1485,7 @@ function decryptSecret(stored: string): string | null {
 
 app.get('/api/organizations/:organizationId/settings/translation', async (request, response, next) => {
   try {
-    const organization = await prisma.organization.findUnique({ where: { id: request.params.organizationId } });
+    const organization = await prisma.organization.findUnique({ where: { id: orgScope(request) } });
     if (!organization) throw new HttpError(404, 'Organizacia neexistuje');
     response.json({
       autoTranslate: organization.autoTranslate,
@@ -1277,7 +1502,7 @@ app.post('/api/organizations/:organizationId/settings/translation', async (reque
   try {
     const { autoTranslate, provider, targetLocale, apiKey } = request.body ?? {};
     const organization = await prisma.organization.update({
-      where: { id: request.params.organizationId },
+      where: { id: orgScope(request) },
       data: {
         autoTranslate: Boolean(autoTranslate),
         translationProvider: provider || null,
@@ -1414,6 +1639,7 @@ async function computeIsoSuggestions(processId: string) {
 
 app.post('/api/processes/:processId/iso-detect', async (request, response, next) => {
   try {
+    await requireProcess(request, request.params.processId);
     response.json(await computeIsoSuggestions(request.params.processId));
   } catch (error) {
     next(error);

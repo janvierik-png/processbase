@@ -73,6 +73,25 @@ model Organization {
   camundaDeployments CamundaDeployment[]
   positions          OrgPosition[]
   units              OrgUnit[]
+  sessions           Session[]
+}
+
+/// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
+/// neumoznuje prevziat cudziu relaciu.
+model Session {
+  id             String       @id @default(uuid())
+  tokenHash      String       @unique
+  userId         String
+  organizationId String
+  createdAt      DateTime     @default(now())
+  lastSeenAt     DateTime     @default(now())
+  expiresAt      DateTime
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model User {
@@ -91,6 +110,7 @@ model User {
   approvalSteps  ApprovalStep[]     @relation("ApprovalStepAssignee")
   attachments    Attachment[]       @relation("AttachmentUploader")
   positions      UserPosition[]
+  sessions       Session[]
   processChanges ProcessChangeLog[]
 }
 

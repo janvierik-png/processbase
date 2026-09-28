@@ -15,6 +15,7 @@ interface RegisterPayload {
 }
 
 interface AuthResponse {
+  token?: string;
   user: User;
   organization: Organization;
 }
@@ -23,6 +24,7 @@ interface AuthResponse {
 export class AuthService {
   private readonly currentUserKey = 'ngCurrentUser';
   private readonly currentOrgKey = 'ngCurrentOrganization';
+  private readonly tokenKey = 'ngSessionToken';
 
   readonly currentUserSignal = signal<User | null>(this.storage.read<User | null>(this.currentUserKey, null));
   readonly currentOrganizationSignal = signal<Organization | null>(this.storage.read<Organization | null>(this.currentOrgKey, null));
@@ -84,11 +86,16 @@ export class AuthService {
   }
 
   logout(): void {
-    this.currentUserSignal.set(null);
-    this.currentOrganizationSignal.set(null);
-    this.storage.remove(this.currentUserKey);
-    this.storage.remove(this.currentOrgKey);
-    this.router.navigateByUrl('/');
+    // #5 — relaciu treba zneplatnit aj na serveri, nielen zabudnut token
+    const finish = () => {
+      this.clearSession();
+      this.router.navigateByUrl('/');
+    };
+    if (this.token()) {
+      this.http.post(`${API_BASE_URL}/logout`, {}).subscribe({ next: finish, error: finish });
+    } else {
+      finish();
+    }
   }
 
   updateOrganizationName(name: string): void {
@@ -158,5 +165,20 @@ export class AuthService {
     this.currentOrganizationSignal.set(response.organization);
     this.storage.write(this.currentUserKey, response.user);
     this.storage.write(this.currentOrgKey, response.organization);
+    if (response.token) this.storage.writeString(this.tokenKey, response.token);
+  }
+
+  /** Token relácie pre Authorization hlavičku (#1). */
+  token(): string | null {
+    return this.storage.readString(this.tokenKey, '') || null;
+  }
+
+  /** Vyčistí lokálny stav — volá sa aj pri 401 z interceptora. */
+  clearSession(): void {
+    this.currentUserSignal.set(null);
+    this.currentOrganizationSignal.set(null);
+    this.storage.remove(this.currentUserKey);
+    this.storage.remove(this.currentOrgKey);
+    this.storage.remove(this.tokenKey);
   }
 }
