@@ -104,3 +104,59 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  production-image:
+    name: Produkčný obraz — build a smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Konfiguracia (synteticke tajomstva len pre CI)
+        run: |
+          {
+            echo "POSTGRES_PASSWORD=ci-$(openssl rand -hex 16)"
+            echo "APP_URL=http://127.0.0.1:3000"
+          } > deploy/.env
+
+      - name: Build a start
+        run: docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
+
+      - name: Cakanie na aplikaciu
+        run: |
+          for attempt in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:3000/api/translations > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Smoke test
+        run: |
+          set -e
+          code() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
+          test "$(code http://127.0.0.1:3000/)" = 200
+          curl -s http://127.0.0.1:3000/app/processes | grep -q '<pp-root>'
+          # API operatora na verejnom porte nie je
+          test "$(code http://127.0.0.1:3000/api/backoffice/health)" = 404
+          # chranene API bez prihlasenia
+          test "$(code http://127.0.0.1:3000/api/organizations/x/processes)" = 401
+          # backoffice na vlastnom porte
+          test "$(code http://127.0.0.1:4300/)" = 200
+          test "$(code http://127.0.0.1:4300/api/backoffice/health)" = 401
+          # zostavene subory s hashom sa cachuju, index nie
+          asset=$(curl -s http://127.0.0.1:3000/ | grep -o 'main-[A-Z0-9]*\.js' | head -1)
+          curl -sI "http://127.0.0.1:3000/$asset" | grep -qi 'cache-control: public, max-age=31536000, immutable'
+          curl -sI http://127.0.0.1:3000/ | grep -qi 'cache-control: no-cache'
+          # tajomstva a prvy admin vznikli v zvazku /data, nie v obraze
+          docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env exec -T app test -s /data/secrets.json
+          docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env exec -T app test -s /data/initial-backoffice-password.txt
+          echo "Smoke test OK"
+
+      - name: Log pri chybe
+        if: failure()
+        run: docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env logs --no-color app | tail -100
+
+      - name: Upratanie
+        if: always()
+        run: docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env down -v

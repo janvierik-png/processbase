@@ -1,5 +1,9 @@
-node_modules
-dist
-.angular
-.git
-npm-debug.log
+# Nic z toho nepatri do obrazu — hlavne nie tajomstva a data zakaznikov.
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+.angular/
+*.log
+.git/

@@ -243,7 +243,8 @@ Každá zmena je overená na lokálnom Dockeri a naviazaná na GitHub issue (`Fi
 | 5 — Tajomstvá bez záložných hodnôt v kóde | `821b449` | #19, B3, B6 | podvrhnutý backoffice token: 200 → 401; kľúč zašifrovaný starým verejným kľúčom sa pri štarte presifruje (starý ho už nedešifruje) |
 | 4 — Backoffice: spotreba plánu, stav služby, audit zásahov | `2626058` | #17, #18 | `scripts/backoffice-test.mjs` 19/19 — agregáty bez obsahu zákazníka (test hľadá názvy procesu/osoby/dokumentu v odpovediach), zmena plánu a prihlásenia v audite, bez hesiel |
 | 5 — CI na GitHube | `b1e3afa` | #22 | prvý beh [úspešný](https://github.com/janvierik-png/processbase/actions/runs/36497855629): typy, produkčný build, testy API proti PostgreSQL 16, build backoffice |
-| 5 — Overenie e-mailu a obnova hesla (bez doručovania) | *(commit #20)* | #20 | `scripts/account-flows-test.mjs` 19/19 — jednorazové a expirujúce odkazy, obnova odhlási všade, odpoveď neprezradí existenciu účtu |
+| 5 — Overenie e-mailu a obnova hesla (bez doručovania) | `af3ae76` | #20 | `scripts/account-flows-test.mjs` 19/19 — jednorazové a expirujúce odkazy, obnova odhlási všade, odpoveď neprezradí existenciu účtu |
+| 5 — Produkčné nasadenie (pripravené, nenasadené) | *(commit nasadenia)* | #23 (posúdenie) | `deploy/` + [DEPLOYMENT.md](DEPLOYMENT.md); lokálne overené: SPA z API, `/api/backoffice` na verejnom porte 404, backoffice na vlastnom porte; obraz stavia a testuje CI |
 
 **Stav nálezov:** B1, B2 — opravené (Etapa 1, doplnené o odkazované ID, autora zmien a pozvánky). B4 — hlavičky a rate limit doplnené, `cors`
 zostáva otvorený (rieši sa pri produkčných nastaveniach). B5 — oddelené úložisko hotové,

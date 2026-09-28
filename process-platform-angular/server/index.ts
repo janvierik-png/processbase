@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import cors from 'cors';
 import express from 'express';
@@ -13,7 +15,7 @@ import {
   ResponsibilityRole
 } from '../generated/prisma/client';
 import { prisma } from './prisma';
-import { secret } from './secrets';
+import { SECRETS_FILE, secret } from './secrets';
 import { APP_URL, emailDeliveryStats, queueEmail } from './mailer';
 import {
   fileKey,
@@ -34,6 +36,19 @@ const port = Number(process.env['API_PORT'] ?? 3000);
 const host = process.env['API_HOST'] ?? '0.0.0.0';
 
 app.use(cors({ origin: true }));
+
+/**
+ * Ak bezi backoffice na vlastnom porte (BACKOFFICE_PORT), API operatora sa na
+ * verejnom porte neponuka vobec — utocnik z internetu nema ani prihlasovaci formular.
+ */
+const BACKOFFICE_PORT = Number(process.env['BACKOFFICE_PORT'] ?? 0) || null;
+app.use('/api/backoffice', (request, response, next) => {
+  if (BACKOFFICE_PORT && request.socket.localPort !== BACKOFFICE_PORT) {
+    response.status(404).json({ message: 'Not found' });
+    return;
+  }
+  next();
+});
 /**
  * Maximalna velkost nahravaneho suboru. Subor sa posiela ako binarny stream (#10)
  * a limit sa strazi pocas zapisu na disk, nie cez express.json.
@@ -3309,6 +3324,35 @@ app.delete('/api/backoffice/translations/:translationId', async (request, respon
   }
 });
 
+// --- produkcia: zostaveny frontend z toho isteho procesu (docs/DEPLOYMENT.md) ---
+
+/**
+ * STATIC_DIR = zostavena aplikacia (ng build). Vyvojovy server Angularu
+ * (ng serve) nie je urceny na verejny internet — v produkcii servuje staticke
+ * subory priamo API a pred nim je reverzna proxy s TLS.
+ */
+function serveSpa(target: express.Express, directory: string): void {
+  const root = path.resolve(directory);
+  // subory s hashom v nazve sa nemenia — mozu sa cachovat dlho; index.html nie
+  target.use(express.static(root, {
+    index: false,
+    setHeaders: (response, filePath) => {
+      // Angular pomenuva zostavene subory ako main-XH5NX6AK.js
+      response.setHeader('Cache-Control', /-[A-Z0-9]{8,}\.(js|css|woff2?|png|jpe?g|svg)$/.test(path.basename(filePath))
+        ? 'public, max-age=31536000, immutable'
+        : 'no-cache');
+    }
+  }));
+  // SPA: vsetky ostatne GET mimo /api vratia index.html (routing robi Angular)
+  target.get(/^(?!\/api\/).*/, (_request, response) => {
+    response.setHeader('Cache-Control', 'no-cache');
+    response.sendFile(path.join(root, 'index.html'));
+  });
+}
+
+const STATIC_DIR = process.env['STATIC_DIR'];
+if (STATIC_DIR) serveSpa(app, STATIC_DIR);
+
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   console.error(error);
   if (error instanceof HttpError) {
@@ -3338,7 +3382,51 @@ class HttpError extends Error {
   }
 }
 
+/**
+ * Prvy backoffice admin (#19) — LEN ak ziadny neexistuje. Heslo nie je v zdrojaku
+ * (repozitar je verejny): berie sa z BACKOFFICE_ADMIN_PASSWORD, inak sa vygeneruje
+ * do suboru citatelneho len vlastnikom — nie do logu, logy sa kopiruju dalej.
+ */
+async function ensureFirstBackofficeAdmin(): Promise<void> {
+  if ((await prisma.backofficeAdmin.count()) > 0) return;
+  const username = process.env['BACKOFFICE_ADMIN_USERNAME'] || 'admin';
+  const fromEnv = process.env['BACKOFFICE_ADMIN_PASSWORD'];
+  const password = fromEnv || randomBytes(12).toString('base64url');
+  await prisma.backofficeAdmin.create({ data: { username, passwordHash: hashPassword(password) } });
+  if (fromEnv) {
+    console.log(`[backoffice] admin "${username}" vytvoreny s heslom z BACKOFFICE_ADMIN_PASSWORD.`);
+    return;
+  }
+  const file = path.join(path.dirname(SECRETS_FILE), 'initial-backoffice-password.txt');
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${username}\n${password}\n`, { mode: 0o600 });
+  console.log(`[backoffice] admin "${username}" vytvoreny, docasne heslo je v ${file} — po prihlaseni ho zmente a subor zmazte.`);
+}
+
 app.listen(port, host, () => {
   console.log(`API listening on http://${host}:${port}`);
   reencryptLegacySecrets().catch((error) => console.error('[secrets] presifrovanie zlyhalo:', error));
+  ensureFirstBackofficeAdmin().catch((error) => console.error('[backoffice] prvy admin:', error));
 });
+
+/**
+ * Backoffice na samostatnom porte (produkcia). Port sa ma vystavit len do
+ * internej siete alebo cez VPN — operator nema byt dostupny z internetu.
+ * Na verejnom porte je potom /api/backoffice zablokovane (vid middleware hore).
+ */
+if (BACKOFFICE_PORT && process.env['BACKOFFICE_STATIC_DIR']) {
+  const backoffice = express();
+  backoffice.disable('x-powered-by');
+  backoffice.use((request, response, next) => {
+    if (request.path.startsWith('/api/backoffice')) {
+      app(request, response);
+      return;
+    }
+    next();
+  });
+  serveSpa(backoffice, process.env['BACKOFFICE_STATIC_DIR']);
+  const backofficeHost = process.env['BACKOFFICE_HOST'] ?? '127.0.0.1';
+  backoffice.listen(BACKOFFICE_PORT, backofficeHost, () => {
+    console.log(`Backoffice listening on http://${backofficeHost}:${BACKOFFICE_PORT}`);
+  });
+}

@@ -1,0 +1,12 @@
+# Kontext pre deploy/Dockerfile (koren repozitara).
+**/.env
+**/.env.*
+!**/.env.example
+**/storage/
+**/node_modules/
+**/dist/
+**/generated/
+**/.angular/
+**/*.log
+.git/
+process-platform/
