@@ -18,7 +18,9 @@ import http from 'node:http';
 import path from 'node:path';
 
 const API = process.env.API_URL ?? 'http://localhost:3000/api';
-const UPLOAD_DIR = path.resolve('/app', process.env.UPLOAD_DIR ?? 'storage/uploads');
+// APP_DIR = koren aplikacie: /app v Docker kontajneri, v CI adresar repozitara
+const APP_DIR = process.env.APP_DIR ?? '/app';
+const UPLOAD_DIR = path.resolve(APP_DIR, process.env.UPLOAD_DIR ?? 'storage/uploads');
 const STAMP = Date.now();
 const results = [];
 

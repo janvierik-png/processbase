@@ -1,0 +1,106 @@
+# CI (#22): pri kazdom pushi a pull requeste build, typova kontrola a testy API
+# proti skutocnej PostgreSQL. Testy pouzivaju len synteticke udaje.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  platform:
+    name: Platforma — typy, build, testy API
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: process_platform
+          POSTGRES_USER: process_user
+          POSTGRES_PASSWORD: process_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U process_user -d process_platform"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    defaults:
+      run:
+        working-directory: process-platform-angular
+
+    env:
+      DATABASE_URL: postgresql://process_user:process_password@localhost:5432/process_platform?schema=public
+      # testy uloziska kontroluju subory na disku — koren aplikacie v CI
+      APP_DIR: ${{ github.workspace }}/process-platform-angular
+      API_URL: http://localhost:3000/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: process-platform-angular/package-lock.json
+
+      - name: Zavislosti
+        run: npm ci
+
+      - name: Prisma klient a migracie
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Typova kontrola (klient + server)
+        run: npm run typecheck
+
+      - name: Build aplikacie
+        run: npm run build
+
+      - name: Spustenie API
+        run: |
+          nohup npx tsx server/index.ts > api.log 2>&1 &
+          for attempt in $(seq 1 40); do
+            if curl -sf http://localhost:3000/api/translations > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "API nenabehlo:"; cat api.log; exit 1
+
+      - name: Testy API (izolacia firiem, ulozisko, organizacia, backoffice)
+        run: npm run test:api
+
+      - name: Log API pri chybe
+        if: failure()
+        run: cat api.log || true
+
+  backoffice:
+    name: Backoffice — build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: process-platform-backoffice
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: process-platform-backoffice/package-lock.json
+
+      - name: Zavislosti
+        run: npm ci
+
+      - name: Build
+        run: npm run build

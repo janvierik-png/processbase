@@ -241,7 +241,7 @@ Každá zmena je overená na lokálnom Dockeri a naviazaná na GitHub issue (`Fi
 | — Pozvánka na existujúci účet | `48391f0` | B1 | prijatie pozvánky nevyžadovalo heslo existujúceho účtu (pôvodný kód: 200); po Etape 1 navyše nevracala token |
 | 3 — Profil práce a verzie popisu | `71ba516` | #16 | návrh → publikovaná (nemenná), platná/plánovaná podľa dátumu účinnosti |
 | 5 — Tajomstvá bez záložných hodnôt v kóde | `821b449` | #19, B3, B6 | podvrhnutý backoffice token: 200 → 401; kľúč zašifrovaný starým verejným kľúčom sa pri štarte presifruje (starý ho už nedešifruje) |
-| 4 — Backoffice: spotreba plánu, stav služby, audit zásahov | *(commit Etapy 4)* | #17, #18 | `scripts/backoffice-test.mjs` 19/19 — agregáty bez obsahu zákazníka (test hľadá názvy procesu/osoby/dokumentu v odpovediach), zmena plánu a prihlásenia v audite, bez hesiel |
+| 4 — Backoffice: spotreba plánu, stav služby, audit zásahov | `2626058` | #17, #18 | `scripts/backoffice-test.mjs` 19/19 — agregáty bez obsahu zákazníka (test hľadá názvy procesu/osoby/dokumentu v odpovediach), zmena plánu a prihlásenia v audite, bez hesiel |
 
 **Stav nálezov:** B1, B2 — opravené (Etapa 1, doplnené o odkazované ID, autora zmien a pozvánky). B4 — hlavičky a rate limit doplnené, `cors`
 zostáva otvorený (rieši sa pri produkčných nastaveniach). B5 — oddelené úložisko hotové,

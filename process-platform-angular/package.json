@@ -8,6 +8,8 @@
     "api": "tsx watch server/index.ts",
     "dev": "npm start",
     "build": "ng build",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --esModuleInterop server/index.ts",
+    "test:api": "node scripts/tenant-isolation-test.mjs && node scripts/file-storage-test.mjs && node scripts/org-module-test.mjs && node scripts/backoffice-test.mjs",
     "test": "ng test",
     "lint": "ng lint",
     "db:generate": "prisma generate",

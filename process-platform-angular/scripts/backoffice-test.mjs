@@ -103,7 +103,7 @@ try {
   await db.query(`delete from "BackofficeAdmin" where username = $1`, [adminName]);
   if (orgId) {
     await db.query(`delete from "Organization" where id = $1`, [orgId]);
-    rmSync(`/app/storage/uploads/${orgId}`, { recursive: true, force: true });
+    rmSync(`${process.env.APP_DIR ?? '/app'}/storage/uploads/${orgId}`, { recursive: true, force: true });
   }
   await db.query(`delete from "User" where email = $1`, [`orgtest-bo-${STAMP}@example.test`]);
   await db.end();
