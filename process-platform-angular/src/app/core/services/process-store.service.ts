@@ -32,11 +32,6 @@ export class ProcessStoreService {
     private readonly auth: AuthService
   ) {}
 
-  // R7: identifikacia autora zmeny pre audit log
-  private userHeaders() {
-    return { headers: { 'x-user-id': this.auth.currentUser()?.id ?? '' } };
-  }
-
   activeProcess(): ProcessNode | null {
     return this.flatten(this.tree()).find((node) => node.id === this.activeProcessId() && node.type === 'process') ?? null;
   }
@@ -91,7 +86,7 @@ export class ProcessStoreService {
     const { positionIds, changeDescription, ...nodePatch } = patch;
     this.tree.set(this.walk(this.tree(), (node) => node.id === id ? { ...node, ...nodePatch } : node));
     this.persist();
-    this.http.patch<ProcessNode>(`${API_BASE_URL}/processes/${id}`, patch, this.userHeaders()).subscribe({
+    this.http.patch<ProcessNode>(`${API_BASE_URL}/processes/${id}`, patch).subscribe({
       next: (updated) => {
         this.tree.set(this.walk(this.tree(), (node) => node.id === id ? { ...node, ...updated } : node));
         this.persist();

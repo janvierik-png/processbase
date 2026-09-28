@@ -307,13 +307,18 @@ model OrgUnit {
   organizationId String
   name           String
   description    String?
+  /// Nadradena jednotka (#12). Strom bez cyklov — kontroluje API pri zmene.
+  parentId       String?
   sortOrder      Int           @default(0)
   createdAt      DateTime      @default(now())
 
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent         OrgUnit?      @relation("UnitTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       OrgUnit[]     @relation("UnitTree")
   positions      OrgPosition[]
 
   @@unique([organizationId, name])
+  @@index([parentId])
 }
 
 model OrgPosition {
@@ -322,10 +327,14 @@ model OrgPosition {
   unitId         String?
   name           String
   description    String?
+  /// Nadriadene pracovne miesto (#12) — komu miesto podlieha.
+  reportsToId    String?
   createdAt      DateTime     @default(now())
 
   organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   unit           OrgUnit?             @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  reportsTo      OrgPosition?         @relation("PositionReports", fields: [reportsToId], references: [id], onDelete: SetNull)
+  subordinates   OrgPosition[]        @relation("PositionReports")
   users          UserPosition[]
   processes      ProcessPosition[]
   documents      AttachmentPosition[]

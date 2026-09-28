@@ -130,6 +130,52 @@ async function main() {
     }
   }
 
+  // --- 2b. firma A podstrčí ID objektov firmy B do väzieb svojich objektov ---
+  // bez kontroly by sa cudzí objekt pripojil a jeho názov by sa vrátil vo výpise
+  if (token.a) {
+    const { payload: unitB } = await call(`/organizations/${b.orgId}/units`, {
+      method: 'POST', body: { name: `Tajna zlozka B ${STAMP}` }, auth: token.b
+    });
+    const { payload: procA } = await call(`/organizations/${a.orgId}/processes`, {
+      method: 'POST', body: { name: 'Proces A', type: 'process' }, auth: token.a
+    });
+    const { payload: posA } = await call(`/organizations/${a.orgId}/positions`, {
+      method: 'POST', body: { name: `Pozicia A ${STAMP}` }, auth: token.a
+    });
+    const { payload: docA } = await call(`/processes/${procA?.id}/documents`, {
+      method: 'POST',
+      body: { fileName: 'a.txt', mimeType: 'text/plain', dataUrl: 'data:text/plain;base64,QQ==' },
+      auth: token.a
+    });
+
+    const patchA = (body) => call(`/processes/${procA?.id}`, { method: 'PATCH', body, auth: token.a });
+    record('A: proces pod proces B', 404, (await patchA({ parentId: procBId })).status);
+    record('A: súvisiaci proces B', 404, (await patchA({ relatedProcessIds: [procBId] })).status);
+    record('A: pozícia B v procese', 404, (await patchA({ positionIds: [posBId] })).status);
+    record('A: nový proces pod proces B', 404, (await call(`/organizations/${a.orgId}/processes`, {
+      method: 'POST', body: { name: 'X', type: 'process', parentId: procBId }, auth: token.a
+    })).status);
+    record('A: pozícia B pri dokumente', 404, (await call(`/documents/${docA?.id}`, {
+      method: 'PATCH', body: { positionIds: [posBId] }, auth: token.a
+    })).status);
+    record('A: miesto do zložky B', 404, (await call(`/positions/${posA?.id}`, {
+      method: 'PATCH', body: { unitId: unitB?.id }, auth: token.a
+    })).status);
+    record('A: nadriadený = miesto B', 404, (await call(`/positions/${posA?.id}`, {
+      method: 'PATCH', body: { reportsToId: posBId }, auth: token.a
+    })).status);
+    record('A: zložka pod zložku B', 404, (await call(`/organizations/${a.orgId}/units`, {
+      method: 'POST', body: { name: `Zlozka A ${STAMP}`, parentId: unitB?.id }, auth: token.a
+    })).status);
+
+    const { payload: detailA } = await call(`/processes/${procA?.id}`, { auth: token.a });
+    const leaked = JSON.stringify(detailA ?? {}).includes('Tajn');
+    results.push({
+      name: 'detail procesu A bez názvov B', expected: 'bez úniku',
+      actual: leaked ? 'ÚNIK' : 'bez úniku', ok: !leaked, detail: ''
+    });
+  }
+
   // --- 3. overenie, že proces B je stále nedotknutý ---
   const { payload: finalB } = await call(`/processes/${procBId}`, { auth: token.b ?? undefined });
   const nazovOk = finalB?.name === 'Tajny proces B';

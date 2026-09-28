@@ -337,10 +337,11 @@ app.post('/api/organizations/:organizationId/processes', async (request, respons
     const organization = await ensureOrganization(organizationId);
     const type = request.body.type === 'folder' ? ProcessNodeType.GROUP : ProcessNodeType.PROCESS;
     const name = request.body.name ?? (type === ProcessNodeType.GROUP ? 'Nova skupina' : 'Novy proces');
+    const [parentId = null] = await assertOwnedIds('processNode', organization.id, [request.body.parentId]);
     const processNode = await prisma.processNode.create({
       data: {
         organizationId: organization.id,
-        parentId: request.body.parentId || null,
+        parentId,
         type,
         name,
         description: request.body.purpose ?? null,
@@ -357,11 +358,6 @@ app.post('/api/organizations/:organizationId/processes', async (request, respons
   }
 });
 
-async function resolveUserId(headerValue: unknown): Promise<string | null> {
-  if (typeof headerValue !== 'string' || !headerValue) return null;
-  const user = await prisma.user.findUnique({ where: { id: headerValue } });
-  return user?.id ?? null;
-}
 
 const PROCESS_INCLUDE = {
   owner: true,
@@ -383,6 +379,24 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     }
 
     const body = request.body ?? {};
+
+    // odkazy len na objekty vlastnej firmy (B2) a strom procesov bez cyklov
+    if (body.parentId) {
+      await assertOwnedIds('processNode', current.organizationId, [body.parentId]);
+      const nodes = await prisma.processNode.findMany({
+        where: { organizationId: current.organizationId },
+        select: { id: true, parentId: true }
+      });
+      assertAcyclic(processId, body.parentId, new Map(nodes.map((node) => [node.id, node.parentId])),
+        'Proces nemozno presunut pod seba ani pod svoj podproces.');
+    }
+    if (Array.isArray(body.relatedProcessIds)) {
+      body.relatedProcessIds = await assertOwnedIds('processNode', current.organizationId, body.relatedProcessIds);
+    }
+    if (Array.isArray(body.positionIds)) {
+      body.positionIds = await assertOwnedIds('orgPosition', current.organizationId, body.positionIds);
+    }
+
     const data = {
       name: body.name ?? undefined,
       description: body.purpose ?? undefined,
@@ -443,7 +457,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       await prisma.processChangeLog.create({
         data: {
           processNodeId: processId,
-          userId: await resolveUserId(request.headers['x-user-id']),
+          // autor z relacie, nie z hlavicky od klienta (B1) — inak by sa dal podvrhnut
+          userId: auth(request).userId,
           changedFields,
           description: body.changeDescription || null
         }
@@ -477,7 +492,7 @@ app.get('/api/processes/:processId', async (request, response, next) => {
     }
     const related = node.relatedProcessIds.length
       ? await prisma.processNode.findMany({
-          where: { id: { in: node.relatedProcessIds } },
+          where: { id: { in: node.relatedProcessIds }, organizationId: node.organizationId },
           select: { id: true, name: true }
         })
       : [];
@@ -689,7 +704,7 @@ app.patch('/api/documents/:documentId', async (request, response, next) => {
     }
 
     if (Array.isArray(request.body?.positionIds)) {
-      const nextIds = [...new Set(request.body.positionIds as string[])];
+      const nextIds = await assertOwnedIds('orgPosition', existing.organizationId, request.body.positionIds);
       await prisma.attachmentPosition.deleteMany({ where: { attachmentId: documentId } });
       if (nextIds.length > 0) {
         await prisma.attachmentPosition.createMany({
@@ -784,6 +799,7 @@ app.post('/api/processes/:processId/revisions', async (request, response, next) 
     const revision = await prisma.processRevision.create({
       data: {
         processNodeId: processId,
+        authorId: auth(request).userId,
         name: request.body.name || `Verzia ${new Date().toISOString().slice(0, 10)}`,
         note: request.body.note ?? null,
         bpmnXml: request.body.bpmnXml ?? processNode.bpmnXml,
@@ -1017,6 +1033,35 @@ async function requirePosition(request: express.Request, positionId: string) {
   });
   if (!position) throw new HttpError(404, 'Pozicia sa nenasla.');
   return position;
+}
+
+/**
+ * Overi, ze vsetky ODKAZOVANE objekty patria organizacii z relacie (B2).
+ * Bez toho by sa dal cudzi objekt pripojit cez jeho ID (nadradeny proces,
+ * suvisiaci proces, pozicia, zlozka) a jeho nazov by sa potom vratil vo vypise.
+ */
+async function assertOwnedIds(
+  model: 'processNode' | 'orgPosition' | 'orgUnit',
+  organizationId: string,
+  ids: unknown[]
+): Promise<string[]> {
+  const unique = [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
+  if (unique.length === 0) return unique;
+  const count = await (prisma[model] as any).count({ where: { id: { in: unique }, organizationId } });
+  if (count !== unique.length) throw new HttpError(404, 'Odkazovany objekt sa nenasiel.');
+  return unique;
+}
+
+/**
+ * Strom bez cyklov (#12): nastavenie rodica `parentId` uzlu `nodeId` nesmie
+ * urobit uzol predkom seba sama. parentOf = mapa id -> id rodica v ramci firmy.
+ */
+function assertAcyclic(nodeId: string, parentId: string, parentOf: Map<string, string | null>, message: string): void {
+  let current: string | null = parentId;
+  for (let steps = 0; current && steps <= parentOf.size; steps++) {
+    if (current === nodeId) throw new HttpError(400, message);
+    current = parentOf.get(current) ?? null;
+  }
 }
 
 async function requireUnit(request: express.Request, unitId: string) {
@@ -1453,6 +1498,8 @@ function mapOrgPosition(position: any) {
     organizationId: position.organizationId,
     unitId: position.unitId ?? null,
     unitName: position.unit?.name ?? null,
+    reportsToId: position.reportsToId ?? null,
+    reportsToName: position.reportsTo?.name ?? null,
     name: position.name,
     description: position.description ?? '',
     createdAt: position.createdAt.toISOString().slice(0, 10),
@@ -1464,6 +1511,7 @@ function mapOrgUnit(unit: any) {
   return {
     id: unit.id,
     organizationId: unit.organizationId,
+    parentId: unit.parentId ?? null,
     name: unit.name,
     description: unit.description ?? '',
     sortOrder: unit.sortOrder ?? 0,
@@ -1471,7 +1519,50 @@ function mapOrgUnit(unit: any) {
   };
 }
 
-const POSITION_INCLUDE = { users: { include: { user: true } }, unit: true };
+const POSITION_INCLUDE = {
+  users: { include: { user: { select: { id: true, name: true } } } },
+  unit: { select: { name: true } },
+  reportsTo: { select: { name: true } }
+};
+
+const UNIT_INCLUDE = { _count: { select: { positions: true } } };
+
+/**
+ * Nadradena zlozka (#12): musi patrit firme a nesmie vzniknut cyklus.
+ * undefined = bez zmeny, null = korenova zlozka.
+ */
+async function resolveUnitParent(organizationId: string, unitId: string | null, parentId: unknown) {
+  if (parentId === undefined) return undefined;
+  if (!parentId) return null;
+  const [id] = await assertOwnedIds('orgUnit', organizationId, [parentId]);
+  if (unitId) {
+    const units = await prisma.orgUnit.findMany({ where: { organizationId }, select: { id: true, parentId: true } });
+    assertAcyclic(unitId, id, new Map(units.map((unit) => [unit.id, unit.parentId])),
+      'Zlozka nemoze byt podriadena sama sebe ani svojej podriadenej zlozke.');
+  }
+  return id;
+}
+
+/** Nadriadene miesto (#12) — rovnake pravidla ako pri zlozkach. */
+async function resolveReportsTo(organizationId: string, positionId: string | null, reportsToId: unknown) {
+  if (reportsToId === undefined) return undefined;
+  if (!reportsToId) return null;
+  const [id] = await assertOwnedIds('orgPosition', organizationId, [reportsToId]);
+  if (positionId) {
+    const positions = await prisma.orgPosition.findMany({ where: { organizationId }, select: { id: true, reportsToId: true } });
+    assertAcyclic(positionId, id, new Map(positions.map((position) => [position.id, position.reportsToId])),
+      'Miesto nemoze byt nadriadene samo sebe ani svojmu podriadenemu.');
+  }
+  return id;
+}
+
+/** Zaradenie miesta do zlozky — len zlozka vlastnej firmy. */
+async function resolvePositionUnit(organizationId: string, unitId: unknown) {
+  if (unitId === undefined) return undefined;
+  if (!unitId) return null;
+  const [id] = await assertOwnedIds('orgUnit', organizationId, [unitId]);
+  return id;
+}
 
 // --- organizacne zlozky (utvary) ---
 
@@ -1480,7 +1571,7 @@ app.get('/api/organizations/:organizationId/units', async (request, response, ne
     const units = await prisma.orgUnit.findMany({
       where: { organizationId: orgScope(request) },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      include: { _count: { select: { positions: true } } }
+      include: UNIT_INCLUDE
     });
     response.json(units.map(mapOrgUnit));
   } catch (error) {
@@ -1490,19 +1581,21 @@ app.get('/api/organizations/:organizationId/units', async (request, response, ne
 
 app.post('/api/organizations/:organizationId/units', async (request, response, next) => {
   try {
-    const { name, description } = request.body ?? {};
+    const organizationId = orgScope(request);
+    const { name, description, parentId } = request.body ?? {};
     if (!name?.trim()) throw new HttpError(400, 'name je povinny');
     const existing = await prisma.orgUnit.findFirst({
-      where: { organizationId: orgScope(request), name: { equals: name.trim(), mode: 'insensitive' } }
+      where: { organizationId, name: { equals: name.trim(), mode: 'insensitive' } }
     });
     if (existing) throw new HttpError(409, 'Zlozka s tymto nazvom uz existuje.');
     const unit = await prisma.orgUnit.create({
       data: {
-        organizationId: orgScope(request),
+        organizationId,
         name: name.trim(),
-        description: description?.trim() || null
+        description: description?.trim() || null,
+        parentId: (await resolveUnitParent(organizationId, null, parentId)) ?? null
       },
-      include: { _count: { select: { positions: true } } }
+      include: UNIT_INCLUDE
     });
     response.status(201).json(mapOrgUnit(unit));
   } catch (error) {
@@ -1512,15 +1605,16 @@ app.post('/api/organizations/:organizationId/units', async (request, response, n
 
 app.patch('/api/units/:unitId', async (request, response, next) => {
   try {
-    await requireUnit(request, request.params.unitId);
+    const current = await requireUnit(request, request.params.unitId);
     const unit = await prisma.orgUnit.update({
-      where: { id: request.params.unitId },
+      where: { id: current.id },
       data: {
         name: request.body.name?.trim() || undefined,
         description: request.body.description === undefined ? undefined : (request.body.description?.trim() || null),
-        sortOrder: request.body.sortOrder === undefined ? undefined : Number(request.body.sortOrder)
+        sortOrder: request.body.sortOrder === undefined ? undefined : Number(request.body.sortOrder),
+        parentId: await resolveUnitParent(current.organizationId, current.id, request.body.parentId)
       },
-      include: { _count: { select: { positions: true } } }
+      include: UNIT_INCLUDE
     });
     response.json(mapOrgUnit(unit));
   } catch (error) {
@@ -1530,9 +1624,13 @@ app.patch('/api/units/:unitId', async (request, response, next) => {
 
 app.delete('/api/units/:unitId', async (request, response, next) => {
   try {
-    await requireUnit(request, request.params.unitId);
+    const unit = await requireUnit(request, request.params.unitId);
+    // podriadene zlozky sa posunu o uroven vyssie, strom sa nerozpadne;
     // pozicie ostavaju, len stratia zaradenie (onDelete: SetNull)
-    await prisma.orgUnit.delete({ where: { id: request.params.unitId } });
+    await prisma.$transaction([
+      prisma.orgUnit.updateMany({ where: { parentId: unit.id }, data: { parentId: unit.parentId } }),
+      prisma.orgUnit.delete({ where: { id: unit.id } })
+    ]);
     response.status(204).end();
   } catch (error) {
     next(error);
@@ -1554,18 +1652,20 @@ app.get('/api/organizations/:organizationId/positions', async (request, response
 
 app.post('/api/organizations/:organizationId/positions', async (request, response, next) => {
   try {
-    const { name, description, unitId } = request.body ?? {};
+    const organizationId = orgScope(request);
+    const { name, description, unitId, reportsToId } = request.body ?? {};
     if (!name) throw new HttpError(400, 'name je povinny');
     const existing = await prisma.orgPosition.findFirst({
-      where: { organizationId: orgScope(request), name: { equals: name, mode: 'insensitive' } }
+      where: { organizationId, name: { equals: name, mode: 'insensitive' } }
     });
     if (existing) throw new HttpError(409, 'Pozicia s tymto nazvom uz existuje.');
     const position = await prisma.orgPosition.create({
       data: {
-        organizationId: orgScope(request),
+        organizationId,
         name,
         description: description || null,
-        unitId: unitId || null
+        unitId: (await resolvePositionUnit(organizationId, unitId)) ?? null,
+        reportsToId: (await resolveReportsTo(organizationId, null, reportsToId)) ?? null
       },
       include: POSITION_INCLUDE
     });
@@ -1577,13 +1677,14 @@ app.post('/api/organizations/:organizationId/positions', async (request, respons
 
 app.patch('/api/positions/:positionId', async (request, response, next) => {
   try {
-    await requirePosition(request, request.params.positionId);
+    const current = await requirePosition(request, request.params.positionId);
     const position = await prisma.orgPosition.update({
-      where: { id: request.params.positionId },
+      where: { id: current.id },
       data: {
         name: request.body.name ?? undefined,
         description: request.body.description === undefined ? undefined : (request.body.description || null),
-        unitId: request.body.unitId === undefined ? undefined : (request.body.unitId || null)
+        unitId: await resolvePositionUnit(current.organizationId, request.body.unitId),
+        reportsToId: await resolveReportsTo(current.organizationId, current.id, request.body.reportsToId)
       },
       include: POSITION_INCLUDE
     });
@@ -1595,8 +1696,12 @@ app.patch('/api/positions/:positionId', async (request, response, next) => {
 
 app.delete('/api/positions/:positionId', async (request, response, next) => {
   try {
-    await requirePosition(request, request.params.positionId);
-    await prisma.orgPosition.delete({ where: { id: request.params.positionId } });
+    const position = await requirePosition(request, request.params.positionId);
+    // podriadene miesta prejdu pod nadriadeneho mazaneho miesta
+    await prisma.$transaction([
+      prisma.orgPosition.updateMany({ where: { reportsToId: position.id }, data: { reportsToId: position.reportsToId } }),
+      prisma.orgPosition.delete({ where: { id: position.id } })
+    ]);
     response.status(204).end();
   } catch (error) {
     next(error);
