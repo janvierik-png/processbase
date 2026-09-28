@@ -6,6 +6,22 @@ export const appRoutes: Routes = [
     path: '',
     loadComponent: () => import('./features/landing/landing-page.component').then((m) => m.LandingPageComponent)
   },
+  // #20 — odkazy z e-mailov (bez prihlásenia)
+  {
+    path: 'overenie-emailu',
+    data: { mode: 'verify' },
+    loadComponent: () => import('./features/account/account-flow-page.component').then((m) => m.AccountFlowPageComponent)
+  },
+  {
+    path: 'zabudnute-heslo',
+    data: { mode: 'forgot' },
+    loadComponent: () => import('./features/account/account-flow-page.component').then((m) => m.AccountFlowPageComponent)
+  },
+  {
+    path: 'obnova-hesla',
+    data: { mode: 'reset' },
+    loadComponent: () => import('./features/account/account-flow-page.component').then((m) => m.AccountFlowPageComponent)
+  },
   {
     path: 'app',
     canActivate: [authGuard],

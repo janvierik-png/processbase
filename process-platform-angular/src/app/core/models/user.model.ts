@@ -10,6 +10,8 @@ export interface User {
   active: boolean;
   status: 'active' | 'pending' | 'disabled';
   positions?: Array<{ id: string; name: string }>;
+  /** #20 — false = pouzivatel este nepotvrdil e-mail */
+  emailVerified?: boolean;
 }
 
 export interface OrgUnit {

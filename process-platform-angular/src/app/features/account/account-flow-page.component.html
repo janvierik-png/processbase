@@ -1,0 +1,68 @@
+<main class="account-page">
+  <section class="card">
+    <a routerLink="/" class="brand"><span class="logo">P</span> Processbase</a>
+
+    @switch (mode) {
+      @case ('verify') {
+        <h1>Potvrdenie e-mailu</h1>
+        @if (state() === 'working') {
+          <p class="muted">Overujem odkaz...</p>
+        } @else {
+          <p class="result" [class.ok]="state() === 'done'" [class.bad]="state() === 'error'">{{ message() }}</p>
+          @if (auth.isAuthenticated()) {
+            <a routerLink="/app/processes" class="btn primary">Pokračovať do aplikácie</a>
+          } @else {
+            <a routerLink="/" class="btn primary">Prihlásiť sa</a>
+          }
+        }
+      }
+
+      @case ('forgot') {
+        <h1>Zabudnuté heslo</h1>
+        @if (state() === 'done') {
+          <p class="result ok">{{ message() }}</p>
+          <a routerLink="/" class="btn">Späť na prihlásenie</a>
+        } @else {
+          <p class="muted">Zadajte e-mail svojho účtu. Pošleme naň odkaz na nastavenie nového hesla.</p>
+          <form (ngSubmit)="requestReset()">
+            <label>E-mail
+              <input type="email" name="email" [(ngModel)]="email" required autocomplete="email" placeholder="vas@email.sk">
+            </label>
+            @if (state() === 'error') {
+              <p class="result bad">{{ message() }}</p>
+            }
+            <button type="submit" class="btn primary" [disabled]="state() === 'working' || !email.trim()">
+              {{ state() === 'working' ? 'Odosielam...' : 'Poslať odkaz' }}
+            </button>
+          </form>
+        }
+      }
+
+      @case ('reset') {
+        <h1>Nové heslo</h1>
+        @if (state() === 'done') {
+          <p class="result ok">{{ message() }}</p>
+          <a routerLink="/" class="btn primary">Prihlásiť sa novým heslom</a>
+        } @else if (state() === 'error') {
+          <p class="result bad">{{ message() }}</p>
+          <a routerLink="/zabudnute-heslo" class="btn">Vyžiadať nový odkaz</a>
+        } @else {
+          <form (ngSubmit)="resetPassword()">
+            <label>Nové heslo (min. {{ minPassword }} znakov)
+              <input type="password" name="password" [(ngModel)]="password" required autocomplete="new-password" [minlength]="minPassword">
+            </label>
+            <label>Nové heslo znova
+              <input type="password" name="passwordRepeat" [(ngModel)]="passwordRepeat" required autocomplete="new-password">
+            </label>
+            @if (message()) {
+              <p class="result bad">{{ message() }}</p>
+            }
+            <button type="submit" class="btn primary" [disabled]="state() === 'working'">
+              {{ state() === 'working' ? 'Ukladám...' : 'Nastaviť heslo' }}
+            </button>
+          </form>
+        }
+      }
+    }
+  </section>
+</main>

@@ -1,6 +1,6 @@
 import { Component, HostListener, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Invitation } from '../../core/models/user.model';
 import { AuthService } from '../../core/services/auth.service';
 
@@ -10,7 +10,7 @@ type Modal = 'none' | 'login' | 'register' | 'invite';
 @Component({
   selector: 'pp-landing-page',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, RouterLink],
   templateUrl: './landing-page.component.html',
   styleUrl: './landing-page.component.scss'
 })

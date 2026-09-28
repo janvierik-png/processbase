@@ -162,6 +162,33 @@ export class AuthService {
     return this.http.post<TranslationSettings>(`${API_BASE_URL}/organizations/${this.currentOrganizationId()}/settings/translation`, payload);
   }
 
+  // --- #20 overenie e-mailu a obnova hesla ---
+
+  verifyEmail(token: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${API_BASE_URL}/auth/verify-email`, { token });
+  }
+
+  resendVerification(): Observable<{ ok: boolean; alreadyVerified?: boolean }> {
+    return this.http.post<{ ok: boolean; alreadyVerified?: boolean }>(`${API_BASE_URL}/auth/resend-verification`, {});
+  }
+
+  forgotPassword(email: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${API_BASE_URL}/auth/forgot-password`, { email });
+  }
+
+  resetPassword(token: string, password: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${API_BASE_URL}/auth/reset-password`, { token, password });
+  }
+
+  /** Po overení e-mailu v tomto prehliadači — skryje upozornenie. */
+  markEmailVerified(): void {
+    const user = this.currentUserSignal();
+    if (!user) return;
+    const updated = { ...user, emailVerified: true };
+    this.currentUserSignal.set(updated);
+    this.storage.write(this.currentUserKey, updated);
+  }
+
   private setSession(response: AuthResponse): void {
     // iny ucet alebo firma — neukazat ani na chvilu procesy predchadzajucej
     if (this.currentOrganizationId() !== response.organization.id) {

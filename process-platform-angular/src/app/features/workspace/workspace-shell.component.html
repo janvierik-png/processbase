@@ -60,6 +60,17 @@
     </header>
 
     <main class="workspace">
+      <!-- #20 — neoverený e-mail: upozornenie s možnosťou poslať odkaz znova -->
+      @if (auth.currentUser()?.emailVerified === false) {
+        <div class="verify-banner" role="status">
+          <span>Potvrďte svoj e-mail <strong>{{ auth.currentUser()?.email }}</strong> — odkaz sme poslali pri registrácii.</span>
+          @if (resendState() === 'sent') {
+            <span class="muted">Nový odkaz je na ceste.</span>
+          } @else {
+            <button type="button" class="ghost" (click)="resendVerification()" [disabled]="resendState() === 'sending'">Poslať znova</button>
+          }
+        </div>
+      }
       <router-outlet />
     </main>
   </div>

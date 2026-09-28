@@ -57,6 +57,19 @@ enum JobDescriptionStatus {
   PUBLISHED
 }
 
+/// Typ jednorazoveho tokenu (#20).
+enum AuthTokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+/// Stav odchadzajuceho emailu (#20).
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
 enum AttachmentKind {
   DOCUMENT
   IMAGE
@@ -121,6 +134,8 @@ model User {
   email          String             @unique
   name           String
   passwordHash   String
+  /// #20 — kedy pouzivatel potvrdil email; null = neovereny
+  emailVerifiedAt DateTime?
   locale         String             @default("sk")
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
@@ -133,6 +148,7 @@ model User {
   attachments    Attachment[]       @relation("AttachmentUploader")
   persons        Person[]
   jobDescriptions JobDescriptionVersion[]
+  authTokens     AuthToken[]
   sessions       Session[]
   processChanges ProcessChangeLog[]
 }
@@ -488,6 +504,38 @@ model ProcessChangeLog {
 
 /// Audit zasahov operatora v backoffice (#18). Zapisuje sa kto, co a na com —
 /// nikdy nie obsah zakaznika (procesy, dokumenty, osoby).
+/// Jednorazovy token na overenie emailu a reset hesla (#20). V DB je len hash —
+/// unik databazy neumozni pouzit cudzi odkaz.
+model AuthToken {
+  id        String        @id @default(uuid())
+  userId    String
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+/// Odchadzajuce emaily (#20). Kym nie je nastaveny poskytovatel (SMTP), zostavaju
+/// vo fronte; po odoslani sa telo maze (obsahuje jednorazove odkazy).
+model EmailOutbox {
+  id        String      @id @default(uuid())
+  toAddress String
+  template  String
+  subject   String
+  bodyText  String
+  status    EmailStatus @default(QUEUED)
+  error     String?
+  createdAt DateTime    @default(now())
+  sentAt    DateTime?
+
+  @@index([status, createdAt])
+}
+
 model BackofficeAuditLog {
   id            String   @id @default(uuid())
   adminId       String?

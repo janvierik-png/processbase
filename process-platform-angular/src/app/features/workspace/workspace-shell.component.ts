@@ -14,6 +14,7 @@ import { LanguageCode } from '../../core/models/translation.model';
 })
 export class WorkspaceShellComponent {
   readonly collapsed = signal(this.storage.readString('ngNavCollapsed', '0') === '1');
+  readonly resendState = signal<'idle' | 'sending' | 'sent'>('idle');
 
   constructor(
     readonly auth: AuthService,
@@ -23,6 +24,18 @@ export class WorkspaceShellComponent {
 
   setLanguage(value: string): void {
     this.i18n.setLanguage(value as LanguageCode);
+  }
+
+  /** #20 — nový overovací odkaz (predchádzajúci tým prestane platiť). */
+  resendVerification(): void {
+    this.resendState.set('sending');
+    this.auth.resendVerification().subscribe({
+      next: (result) => {
+        if (result.alreadyVerified) this.auth.markEmailVerified();
+        this.resendState.set('sent');
+      },
+      error: () => this.resendState.set('idle')
+    });
   }
 
   toggleCollapse(): void {

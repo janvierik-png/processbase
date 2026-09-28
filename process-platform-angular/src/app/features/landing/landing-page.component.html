@@ -193,6 +193,7 @@
           {{ auth.loading() ? 'Prihlasujem...' : 'Prihlásiť sa' }}
         </button>
       </form>
+      <p class="modal-foot forgot"><a routerLink="/zabudnute-heslo" class="link-btn" (click)="closeModal()">Zabudnuté heslo?</a></p>
 
       <p class="modal-foot">Nemáte účet? <button type="button" class="link-btn" (click)="openModal('register')">Zaregistrujte firmu</button></p>
     </div>

@@ -231,3 +231,21 @@
     display: none;
   }
 }
+
+// #20 — neovereny e-mail
+.verify-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid #f0dcb4;
+  border-radius: var(--r-md);
+  background: var(--gold-soft);
+  color: var(--gold);
+  font-size: 13.5px;
+
+  button { margin-left: auto; }
+  .muted { color: var(--muted); }
+}

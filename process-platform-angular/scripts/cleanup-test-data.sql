@@ -4,3 +4,4 @@
 -- Súbory príloh zmazaných firiem v storage/uploads/<organizationId> treba zmazať zvlášť.
 delete from "Organization" where name like 'Izolacia _ %' or name like 'Org Test %' or name like 'Org UI Test %' or name like 'Ulozisko Test %' or name like 'Migracia Test %';
 delete from "User" where email like 'izolacia-%@example.test' or email like 'orgtest-%@example.test' or email like 'orgui-%@example.test' or email like 'ulozisko-%@example.test' or email like 'migracia-%@example.test' or email = 'kolega@example.test';
+delete from "EmailOutbox" where "toAddress" like '%@example.test';

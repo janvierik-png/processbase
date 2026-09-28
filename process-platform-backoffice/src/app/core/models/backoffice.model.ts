@@ -46,7 +46,7 @@ export interface ServiceHealth {
   activeSessions: number;
   requests: { total: number; clientErrors: number; serverErrors: number; serverErrorsLastHour: number };
   incidents: Array<{ at: string; method: string; route: string; status: number; error: string | null }>;
-  email: { configured: boolean; note: string };
+  email: { configured: boolean; transport?: string; queued?: number; sentLastDay?: number; failedLastDay?: number; note: string };
 }
 
 /** #18 — zasah operatora. */

@@ -242,6 +242,8 @@ Každá zmena je overená na lokálnom Dockeri a naviazaná na GitHub issue (`Fi
 | 3 — Profil práce a verzie popisu | `71ba516` | #16 | návrh → publikovaná (nemenná), platná/plánovaná podľa dátumu účinnosti |
 | 5 — Tajomstvá bez záložných hodnôt v kóde | `821b449` | #19, B3, B6 | podvrhnutý backoffice token: 200 → 401; kľúč zašifrovaný starým verejným kľúčom sa pri štarte presifruje (starý ho už nedešifruje) |
 | 4 — Backoffice: spotreba plánu, stav služby, audit zásahov | `2626058` | #17, #18 | `scripts/backoffice-test.mjs` 19/19 — agregáty bez obsahu zákazníka (test hľadá názvy procesu/osoby/dokumentu v odpovediach), zmena plánu a prihlásenia v audite, bez hesiel |
+| 5 — CI na GitHube | `b1e3afa` | #22 | prvý beh [úspešný](https://github.com/janvierik-png/processbase/actions/runs/36497855629): typy, produkčný build, testy API proti PostgreSQL 16, build backoffice |
+| 5 — Overenie e-mailu a obnova hesla (bez doručovania) | *(commit #20)* | #20 | `scripts/account-flows-test.mjs` 19/19 — jednorazové a expirujúce odkazy, obnova odhlási všade, odpoveď neprezradí existenciu účtu |
 
 **Stav nálezov:** B1, B2 — opravené (Etapa 1, doplnené o odkazované ID, autora zmien a pozvánky). B4 — hlavičky a rate limit doplnené, `cors`
 zostáva otvorený (rieši sa pri produkčných nastaveniach). B5 — oddelené úložisko hotové,
@@ -284,6 +286,13 @@ B3, B6 — opravené (#19).
   štartu, posledných 20 incidentov (metóda, routa, stav, typ chyby — bez obsahu). E-maily: nenakonfigurované (#20).
 - Odpoveď 500 už neposiela klientovi text chyby (mohol prezradiť štruktúru DB); detail je len v logu servera.
 - Metriky sú v pamäti procesu (od posledného štartu); audit je v DB (`BackofficeAuditLog`).
+
+**Etapa 5 — e-maily (#20), stav:** tokeny (hash v DB, 48 h overenie / 1 h obnova, jednorazové,
+novší odkaz zneplatní starší), stránky `/overenie-emailu`, `/zabudnute-heslo`, `/obnova-hesla`,
+upozornenie na neoverený e-mail v aplikácii, heslo min. 10 znakov. **Chýba doručovanie:**
+e-maily čakajú vo fronte `EmailOutbox` (backoffice ukazuje počet). Na dokončenie treba vybrať
+poskytovateľa (SMTP/API), odosielaciu doménu a DNS (SPF, DKIM, DMARC); potom
+`REQUIRE_EMAIL_VERIFICATION=true`. Existujúcim používateľom migrácia nastavila e-mail ako overený.
 
 ### Poznámky k rozporom medzi zadaním a skutočnosťou
 

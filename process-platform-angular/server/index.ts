@@ -8,11 +8,13 @@ import {
   OrganizationRole,
   ProcessNodeType,
   ProcessStatus,
+  AuthTokenType,
   JobDescriptionStatus,
   ResponsibilityRole
 } from '../generated/prisma/client';
 import { prisma } from './prisma';
 import { secret } from './secrets';
+import { APP_URL, emailDeliveryStats, queueEmail } from './mailer';
 import {
   fileKey,
   isFileKey,
@@ -149,7 +151,9 @@ const PUBLIC_API_ROUTES: Array<{ method: string; pattern: RegExp }> = [
   { method: 'GET', pattern: /^\/api\/invitations\/[^/]+$/ },
   { method: 'POST', pattern: /^\/api\/invitations\/[^/]+\/accept$/ },
   { method: 'GET', pattern: /^\/api\/translations$/ },
-  { method: 'GET', pattern: /^\/api\/iso-norms$/ }
+  { method: 'GET', pattern: /^\/api\/iso-norms$/ },
+  // #20 — odkazy z emailov a obnova hesla (bez prihlasenia)
+  { method: 'POST', pattern: /^\/api\/auth\/(verify-email|forgot-password|reset-password)$/ }
 ];
 
 function isPublicRoute(method: string, path: string): boolean {
@@ -1340,7 +1344,8 @@ app.post('/api/register', async (request, response, next) => {
     if (!organizationName || !ownerName || !email || !password) {
       throw new HttpError(400, 'organizationName, ownerName, email a password su povinne');
     }
-    const normalizedEmail = String(email).toLowerCase();
+    assertUserPassword(password);
+    const normalizedEmail = String(email).trim().toLowerCase();
     const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existing) {
       throw new HttpError(409, 'Pouzivatel s tymto emailom uz existuje. Prihlas sa.');
@@ -1374,6 +1379,8 @@ app.post('/api/register', async (request, response, next) => {
     });
 
     const token = await createSession(result.user.id, result.organization.id);
+    // #20 — overovaci email; registraciu neblokuje, ak sa nepodari zaradit do fronty
+    await sendVerificationEmail(result.user).catch((error) => console.error('[email] overenie:', error));
 
     response.status(201).json({
       token,
@@ -1383,6 +1390,7 @@ app.post('/api/register', async (request, response, next) => {
         name: result.user.name,
         email: result.user.email,
         roleId: 'owner',
+        emailVerified: false,
         active: true,
         status: 'active'
       },
@@ -1411,6 +1419,10 @@ app.post('/api/login', rateLimitLogin, async (request, response, next) => {
     if (!user || !verifyPassword(password, user.passwordHash)) {
       throw new HttpError(401, 'Nespravny email alebo heslo.');
     }
+    // #20 — ked uz budu emaily dorucovane, da sa prihlasenie bez overenia zakazat
+    if (process.env['REQUIRE_EMAIL_VERIFICATION'] === 'true' && !user.emailVerifiedAt) {
+      throw new HttpError(403, 'Najprv potvrdte svoj e-mail — odkaz sme poslali pri registracii.');
+    }
     const membership = user.organizations[0];
     if (!membership) {
       throw new HttpError(403, 'Pouzivatel nie je clenom ziadnej organizacie.');
@@ -1428,6 +1440,7 @@ app.post('/api/login', rateLimitLogin, async (request, response, next) => {
         name: user.name,
         email: user.email,
         roleId: ROLE_FROM_DB[membership.role] ?? 'approver',
+        emailVerified: Boolean(user.emailVerifiedAt),
         active: true,
         status: 'active'
       },
@@ -1442,6 +1455,114 @@ app.post('/api/login', rateLimitLogin, async (request, response, next) => {
 app.post('/api/logout', async (request, response, next) => {
   try {
     await prisma.session.delete({ where: { id: auth(request).sessionId } }).catch(() => undefined);
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- #20 overenie emailu a obnova hesla ---
+
+/** Minimalna dlzka hesla pouzivatela (registracia, pozvanka, obnova). */
+const MIN_USER_PASSWORD = 10; // rovnako ako v registracnom formulari
+
+function assertUserPassword(password: unknown): string {
+  if (typeof password !== 'string' || password.length < MIN_USER_PASSWORD) {
+    throw new HttpError(400, `Heslo musi mat aspon ${MIN_USER_PASSWORD} znakov.`);
+  }
+  return password;
+}
+
+const AUTH_TOKEN_TTL_MS: Record<AuthTokenType, number> = {
+  [AuthTokenType.EMAIL_VERIFY]: 48 * 60 * 60 * 1000,
+  [AuthTokenType.PASSWORD_RESET]: 60 * 60 * 1000
+};
+
+/**
+ * Vyda jednorazovy token. Predchadzajuce nepouzite tokeny rovnakeho typu sa
+ * zneplatnia — plati vzdy len najnovsi odkaz. V DB je len hash.
+ */
+async function issueAuthToken(userId: string, type: AuthTokenType): Promise<string> {
+  await prisma.authToken.updateMany({ where: { userId, type, usedAt: null }, data: { usedAt: new Date() } });
+  const token = randomBytes(32).toString('base64url');
+  await prisma.authToken.create({
+    data: { userId, type, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + AUTH_TOKEN_TTL_MS[type]) }
+  });
+  return token;
+}
+
+/** Pouzije token (len raz — aj pri dvoch sucasnych poziadavkach). Vrati userId. */
+async function consumeAuthToken(token: unknown, type: AuthTokenType): Promise<string> {
+  if (typeof token !== 'string' || !token) throw new HttpError(400, 'Odkaz je neplatny.');
+  const stored = await prisma.authToken.findUnique({ where: { tokenHash: hashToken(token) } });
+  if (!stored || stored.type !== type || stored.usedAt) {
+    throw new HttpError(400, 'Odkaz je neplatny alebo uz bol pouzity.');
+  }
+  if (stored.expiresAt.getTime() < Date.now()) throw new HttpError(410, 'Platnost odkazu vyprsala. Vyziadajte si novy.');
+  const claimed = await prisma.authToken.updateMany({ where: { id: stored.id, usedAt: null }, data: { usedAt: new Date() } });
+  if (claimed.count !== 1) throw new HttpError(400, 'Odkaz uz bol pouzity.');
+  return stored.userId;
+}
+
+async function sendVerificationEmail(user: { id: string; name: string; email: string }): Promise<void> {
+  const token = await issueAuthToken(user.id, AuthTokenType.EMAIL_VERIFY);
+  await queueEmail(user.email, 'email-verify', { name: user.name, link: `${APP_URL}/overenie-emailu?token=${token}` });
+}
+
+app.post('/api/auth/verify-email', async (request, response, next) => {
+  try {
+    const userId = await consumeAuthToken(request.body?.token, AuthTokenType.EMAIL_VERIFY);
+    await prisma.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } });
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/resend-verification', async (request, response, next) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: auth(request).userId } });
+    if (!user) throw new HttpError(404, 'Pouzivatel sa nenasiel.');
+    if (user.emailVerifiedAt) {
+      response.json({ ok: true, alreadyVerified: true });
+      return;
+    }
+    await sendVerificationEmail(user);
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Ziadost o obnovu hesla. Odpoved je VZDY rovnaka — inak by sa dalo zistit,
+ * ci email v systeme existuje.
+ */
+app.post('/api/auth/forgot-password', rateLimitLogin, async (request, response, next) => {
+  try {
+    const email = String(request.body?.email ?? '').trim().toLowerCase();
+    const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
+    if (user) {
+      const token = await issueAuthToken(user.id, AuthTokenType.PASSWORD_RESET);
+      await queueEmail(user.email, 'password-reset', { name: user.name, link: `${APP_URL}/obnova-hesla?token=${token}` });
+    }
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/reset-password', rateLimitLogin, async (request, response, next) => {
+  try {
+    const password = assertUserPassword(request.body?.password);
+    const userId = await consumeAuthToken(request.body?.token, AuthTokenType.PASSWORD_RESET);
+    await prisma.user.update({
+      where: { id: userId },
+      // odkaz prisiel na email — tym je vlastnictvo emailu overene
+      data: { passwordHash: hashPassword(password), emailVerifiedAt: new Date() }
+    });
+    // odhlasit vsade: ak niekto heslo poznal, jeho relacia tu konci
+    await prisma.session.deleteMany({ where: { userId } });
     response.json({ ok: true });
   } catch (error) {
     next(error);
@@ -1575,6 +1696,9 @@ app.post('/api/invitations/:token/accept', rateLimitLogin, async (request, respo
     if (existingUser && !verifyPassword(String(password), existingUser.passwordHash)) {
       throw new HttpError(401, 'Ucet s tymto emailom uz existuje. Zadajte jeho heslo.');
     }
+    if (!existingUser) {
+      assertUserPassword(password);
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       const user = existingUser ?? await tx.user.create({
@@ -1603,6 +1727,9 @@ app.post('/api/invitations/:token/accept', rateLimitLogin, async (request, respo
     });
     // #1 — bez tokenu by novy kolega po prijati pozvanky dostal hned 401
     const token = await createSession(result.user.id, invitation.organizationId);
+    if (!result.user.emailVerifiedAt) {
+      await sendVerificationEmail(result.user).catch((error) => console.error('[email] overenie:', error));
+    }
     response.json({
       token,
       user: {
@@ -1611,6 +1738,7 @@ app.post('/api/invitations/:token/accept', rateLimitLogin, async (request, respo
         name: result.user.name,
         email: result.user.email,
         roleId: ROLE_FROM_DB[result.membership.role] ?? 'approver',
+        emailVerified: Boolean(result.user.emailVerifiedAt),
         active: true,
         status: 'active'
       },
@@ -3102,7 +3230,7 @@ app.get('/api/backoffice/health', async (_request, response, next) => {
       },
       incidents: incidents.slice(0, 20),
       // #20 — doručovanie emailov zatial neexistuje (chyba SMTP poskytovatel)
-      email: { configured: false, note: 'Odosielanie emailov nie je nakonfigurovane (#20).' }
+      email: await emailDeliveryStats()
     });
   } catch (error) {
     next(error);
