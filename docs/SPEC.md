@@ -15,7 +15,7 @@ Posledná aktualizácia: 11. júna 2026 — **implementované R1–R11 zo SPEC v
 | **Backoffice** | `process-platform-backoffice/` | Angular 18 | 4300 | Admin aplikácia prevádzkovateľa |
 | Databáza | Docker | PostgreSQL 16 + Prisma 7 | 5432 | Zdieľaná oboma aplikáciami |
 | *(archív)* Prototyp | `process-platform/` | Vite + Express + SQLite | 5173/3000 | Pôvodný MVP, už sa nerozvíja |
-| *(archív)* Legacy | koreňový adresár | PHP + MySQL | — | Pôvodný systém, už sa nerozvíja |
+| *(odstránené)* Legacy | — | PHP + MySQL | — | Pôvodný systém, vymazaný 28. 9. 2026; v prípade potreby dostupný v histórii gitu |
 
 - Backoffice nemá vlastný backend — volá API platformy cez `/api/backoffice/*` (dev proxy → port 3000)
 - Prisma klient sa generuje do `process-platform-angular/generated/` (nie je v gite)

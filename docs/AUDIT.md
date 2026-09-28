@@ -44,7 +44,7 @@ ako demo. **Nie je použiteľná ako viacnájomný SaaS na verejnom internete.**
 | Backoffice | Angular 18, samostatná aplikácia | `process-platform-backoffice/` |
 | Databáza | PostgreSQL 16 + Prisma 7 | `process-platform-angular/prisma/schema.prisma` |
 | Prevádzka | Docker Compose (4 kontajnery) | `process-platform-angular/docker-compose.yml` |
-| Archív | Vite prototyp, PHP legacy | `process-platform/`, koreň repa |
+| Archív | Vite prototyp (PHP legacy odstránený 28. 9. 2026) | `process-platform/` |
 
 **Tok dát:** Angular → relatívne `/api/*` → dev proxy (`proxy.conf.mjs`) → Express `:3000` → Prisma → PostgreSQL.
 
@@ -110,7 +110,13 @@ Keďže aplikácia beží na verejnej doméne, ide o bezprostredné riziko.
 **Oprava:** serverová relácia (token), `requireAuth` middleware nad `/api/*` s výnimkou
 verejných tokov, odvodenie `organizationId` z relácie namiesto URL.
 
-### B2 — Žiadna izolácia firiem · **Kritická** · `potvrdené v kóde`
+### B2 — Žiadna izolácia firiem · **Kritická** · `overené behom`
+
+> **Výsledok testu z 28. 9. 2026** (`process-platform-angular/scripts/tenant-isolation-test.mjs`,
+> lokálny Docker): **0 z 8 kontrol prešlo.** Anonymný volajúci bez akéhokoľvek prihlásenia
+> prečítal procesy, dokumenty, pozície aj používateľov cudzej firmy — a `PATCH`-om jej
+> **prepísal názov procesu**. Nejde teda len o čítanie, ale aj o zápis.
+
 
 18 endpointov prijíma priamy identifikátor objektu (`/api/processes/:id`,
 `/api/documents/:id`, `/api/positions/:id`, `/api/units/:id`). Ani jeden neoveruje, do
