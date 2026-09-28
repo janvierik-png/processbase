@@ -1,0 +1,226 @@
+# Process Base — audit stavu aplikácie
+
+Vypracované: 28. 9. 2026 · commit `69af831` · autor: Claude
+
+**Stavy zistení:** `overené behom` · `potvrdené v kóde` · `čiastočné` · `nenájdené` · `neoveriteľné bez prístupu`
+
+> **Obmedzenie tohto auditu:** Docker stack v čase auditu nebežal, preto sú zistenia
+> podložené **čítaním kódu, schémy a migrácií**, nie behom aplikácie. Body označené
+> `potvrdené v kóde` sú doložené konkrétnym súborom a riadkom; runtime overenie
+> (najmä test izolácie firiem) je pripravené a čaká na spustenie prostredia.
+
+---
+
+## 1. Zhrnutie stavu
+
+Process Base je **funkčný prototyp procesnej knižnice**, nie produkčne nasaditeľný SaaS.
+
+**Čo aplikácia dnes reálne dokáže** (`potvrdené v kóde`, väčšina overená behom v predchádzajúcich session):
+registrácia firmy, prihlásenie, pozvánky s expiráciou, strom procesov s drag-and-drop,
+BPMN editor aj jednoduchý flowchart, revízie, dokumentácia v Markdowne, prílohy s
+priradením pracovným pozíciám, organizačné zložky a pracovné pozície, ISO väzby s
+automatickou detekciou, audit log zmien procesu, dvojjazyčné UI, backoffice s vlastným
+prihlásením.
+
+**Pre koho je použiteľná:** pre jednu dôveryhodnú firmu v uzavretom prostredí, prípadne
+ako demo. **Nie je použiteľná ako viacnájomný SaaS na verejnom internete.**
+
+### Tri najväčšie riziká
+
+| # | Riziko | Závažnosť |
+|---|---|---|
+| 1 | **Platformové API nemá žiadnu autentifikáciu.** Ktokoľvek na sieti môže bez prihlásenia čítať a meniť dáta ľubovoľnej firmy. | Kritická |
+| 2 | **Neexistuje izolácia firiem.** 18 endpointov pracuje s priamym identifikátorom objektu a ani jeden neoveruje, komu objekt patrí. | Kritická |
+| 3 | **Žiadne testy, žiadne CI.** Každá zmena sa overuje ručne; regresia sa zistí až v prevádzke. | Vysoká |
+
+---
+
+## 2. Mapa architektúry
+
+| Vrstva | Technológia | Umiestnenie |
+|---|---|---|
+| Platforma (frontend) | Angular 18, standalone komponenty, signals | `process-platform-angular/src/app` |
+| Platforma (API) | Express 5, TypeScript, `tsx watch` | `process-platform-angular/server/index.ts` |
+| Backoffice | Angular 18, samostatná aplikácia | `process-platform-backoffice/` |
+| Databáza | PostgreSQL 16 + Prisma 7 | `process-platform-angular/prisma/schema.prisma` |
+| Prevádzka | Docker Compose (4 kontajnery) | `process-platform-angular/docker-compose.yml` |
+| Archív | Vite prototyp, PHP legacy | `process-platform/`, koreň repa |
+
+**Tok dát:** Angular → relatívne `/api/*` → dev proxy (`proxy.conf.mjs`) → Express `:3000` → Prisma → PostgreSQL.
+
+**Autentifikácia:**
+- Platforma: **žiadna na serveri.** Klient si po prihlásení uloží používateľa a `organizationId`
+  do `localStorage` (`auth.service.ts:50`) a posiela `organizationId` v URL. Server ho prijme bez overenia.
+- Backoffice: HMAC-SHA256 token, 12 h platnosť, guard na `/api/backoffice/*` (`server/index.ts:1508`).
+
+**Úložisko:** prílohy sa ukladajú ako base64 `data:` URL priamo do stĺpca `Attachment.storagePath`
+v databáze. Žiadne súborové ani objektové úložisko.
+
+**Email:** `nenájdené` — v kóde nie je žiadny SMTP klient ani odosielanie (`grep nodemailer|smtp|sendMail` = 0).
+Pozvánky sa doručujú ručným skopírovaním odkazu.
+
+**Nasadenie:** `docker compose` lokálne; produkčne `ng serve` (dev server) za doménou
+`processbase.klomproject.sk`. Žiadny CI/CD (`.github/` neexistuje).
+
+---
+
+## 3. Matica funkcií
+
+| Oblasť | Požadovaný stav | Aktuálny stav | Dôkaz | Medzera | Priorita |
+|---|---|---|---|---|---|
+| Registrácia firmy | Funkčná + overenie emailu | Registrácia funguje, **overenie emailu chýba** | `server/index.ts` register; `emailVerified` = 0 výskytov | Overenie emailu, obmedzenie pokusov | P1 |
+| Prihlásenie | Bezpečné heslá, relácie | Heslá **scrypt + salt + timingSafeEqual** — v poriadku; relácia len v `localStorage` | `index.ts:701-710` | Serverová relácia, token, odhlásenie | P1 |
+| Zabudnuté heslo | Reset cez token | `nenájdené` | `resetToken`, `forgot` = 0 výskytov | Celý tok | P2 |
+| Pozvánky | Token, expirácia, odmietnutie neplatných | **Funguje** — 14 dní, expirácia sa kontroluje | `index.ts:936, 957, 977` | Doručenie emailom | P2 |
+| 2FA pre správcov | Vyžadované | `nenájdené` | — | Celé | P3 |
+| Multi-tenancy | Firma A nevidí dáta firmy B | **Neexistuje** | 18 objektových endpointov, 0 kontrol organizácie | Autentifikácia + scoping | **P0** |
+| Autorizácia na objekt | Kontrola vlastníctva | **Neexistuje** | ako vyššie | — | **P0** |
+| Rate limiting | Ochrana prihlásenia a API | `nenájdené` | `rate-limit` = 0 | Celé | P1 |
+| Bezpečnostné hlavičky | helmet / CSP / HSTS | `nenájdené` | `helmet` = 0 | Celé | P1 |
+| CSRF | Ochrana | Neaplikovateľné dnes (žiadne cookies), **stane sa relevantným** po zavedení relácií | `cors({origin:true})` `index.ts:17` | Po zavedení cookies | P1 |
+| Úložisko — limity | Kvóta v GB na firmu | **Iba limit na súbor (100 MB)**, žiadna kvóta | `MAX_UPLOAD_BYTES`; `quota` = 0 | Meranie a vynucovanie GB | P1 |
+| Úložisko — bezpečnosť | Privátne úložisko, antivírus | base64 v DB, **žiadny sken** | `Attachment.storagePath` | Externé úložisko, skener | P2 |
+| Org jednotky | Strom bez cyklov | `OrgUnit` existuje, ale je **plochý — nemá `parentId`** | `schema.prisma` OrgUnit | Hierarchia | P1 |
+| Profil práce | Znovupoužiteľný opis | `nenájdené` | — | Celá entita | P2 |
+| Pracovné miesto | Pozícia + nadriadenosť | `OrgPosition` existuje, **bez nadriadenosti** | `schema.prisma` | `reportsToId` | P2 |
+| Osoba (adresár) | Oddelená od účtu | **Neexistuje** — iba `User` s loginom | `schema.prisma` | Celá entita | P1 |
+| Obsadenie miesta | S obdobím platnosti, história | `UserPosition` má len `assignedAt` | `schema.prisma` | `validFrom`/`validTo` | P1 |
+| Zodpovednosť za proces | S rolou (vlastník/vykonávateľ) | `ProcessPosition` **bez roly** | `schema.prisma` | Pole `role` | P1 |
+| Verzia popisu práce | Návrh/publikované | `nenájdené` | — | Celá entita | P3 |
+| Backoffice | Agregáty bez obsahu zákazníka | Prihlásenie funguje; **vidí len počty** | `index.ts:1508+` | Spotreba GB, stav mailov | P2 |
+| Cookies / súhlas | Súhlas pred marketingom | `nenájdené` | žiadny consent kód | Celé + právne texty | P3 |
+| Testy / CI | Automatizované | **Žiadne** | `.github/` neexistuje, 0 spec súborov | Celé | P1 |
+| On-premise | Inštalačný balík | Docker Compose existuje ako základ | `docker-compose.yml` | Konfigurácia, licencie, upgrade | P3 |
+
+---
+
+## 4. Bezpečnosť a súkromie
+
+### B1 — Platformové API bez autentifikácie · **Kritická** · `potvrdené v kóde`
+
+Z 57 endpointov v `server/index.ts` má guard iba vetva `/api/backoffice/*` (riadok 1508).
+Všetkých ostatných ~50 endpointov je verejných. Jediná zmienka o identite používateľa je
+hlavička `x-user-id` na riadku 342, ktorá sa používa len na zápis autora do audit logu —
+a je plne pod kontrolou klienta.
+
+**Dopad:** ktokoľvek s dostupnosťou na API môže bez prihlásenia čítať a meniť procesy,
+dokumenty, pozície a nastavenia ľubovoľnej firmy, vrátane zápisu falošného autora do auditu.
+Keďže aplikácia beží na verejnej doméne, ide o bezprostredné riziko.
+
+**Oprava:** serverová relácia (token), `requireAuth` middleware nad `/api/*` s výnimkou
+verejných tokov, odvodenie `organizationId` z relácie namiesto URL.
+
+### B2 — Žiadna izolácia firiem · **Kritická** · `potvrdené v kóde`
+
+18 endpointov prijíma priamy identifikátor objektu (`/api/processes/:id`,
+`/api/documents/:id`, `/api/positions/:id`, `/api/units/:id`). Ani jeden neoveruje, do
+ktorej organizácie objekt patrí — dotazy sú `findUnique({ where: { id } })` bez podmienky
+na organizáciu.
+
+**Dopad:** aj po zavedení prihlásenia by prihlásený používateľ firmy A mohol uhádnutím či
+získaním UUID čítať a mazať objekty firmy B.
+
+**Oprava:** každý objektový dotaz rozšíriť o `organizationId` z relácie; pri nezhode vrátiť 404
+(nie 403 — neprezrádzať existenciu).
+
+### B3 — Šifrovací kľúč s verejne známou zálohou · **Vysoká** · `potvrdené v kóde`
+
+`SETTINGS_ENCRYPTION_KEY` nie je v `docker-compose.yml` nastavený, preto sa použije
+fallback `'dev-settings-encryption-key'` (`index.ts:1240`) — hodnota je v zdrojáku na GitHube.
+Ním sa šifrujú API kľúče prekladača.
+
+**Dopad:** ktokoľvek s prístupom k databáze a repozitáru dešifruje uložené kľúče.
+**Pozor pri oprave:** po zmene premennej sa staré kľúče už nedajú dešifrovať a treba ich zadať znova.
+
+### B4 — Chýbajúce prevádzkové ochrany · **Stredná** · `potvrdené v kóde`
+
+Bez `helmet` (bezpečnostné hlavičky), bez rate limitingu (prihlásenie sa dá skúšať neobmedzene),
+`cors({ origin: true })` odráža ľubovoľný pôvod (`index.ts:17`).
+
+### B5 — Prílohy bez skenovania a bez oddeleného úložiska · **Stredná** · `potvrdené v kóde`
+
+Súbory do 100 MB sa ukladajú ako base64 do databázy. Žiadny antivírusový sken, žiadne
+oddelené privátne úložisko. Pri sťahovaní sa `Content-Type` preberá z hodnoty, ktorú
+poslal klient pri nahratí.
+
+### Realistické tvrdenie o prístupe prevádzkovateľa
+
+> **Prevádzkovateľ má dnes technicky plný prístup k obsahu procesov aj k osobným údajom.**
+
+Obsah je v databáze v čitateľnej podobe, prílohy tiež (base64 nie je šifrovanie). Šifrovaný
+je jediný údaj — API kľúč prekladača — a to kľúčom, ktorý je verejne známy (B3).
+Zálohy, logy ani podpora nie sú nijako oddelené.
+
+**Produkt preto nesmie sľubovať, že prevádzkovateľ nevidí obsah.** Ak má byť také tvrdenie
+pravdivé, vyžaduje šifrovanie na strane klienta a správu kľúčov mimo prevádzkovateľa — to je
+zásadná architektonická zmena, nie doplnok.
+
+---
+
+## 5. Čo viem implementovať
+
+| Úloha | Výstup | Závislosti | Zložitosť | Riziko migrácie | Stav |
+|---|---|---|---|---|---|
+| Serverové relácie + `requireAuth` | Token, middleware, odhlásenie | — | M | žiadne (len nové stĺpce) | **teraz** |
+| Izolácia firiem na všetkých endpointoch | `organizationId` z relácie, scoping dotazov | relácie | L | žiadne | **teraz** |
+| Testy izolácie A↔B | Skript s reprodukovateľným výsledkom | relácie | S | žiadne | **teraz** |
+| Rate limiting + helmet | Middleware | — | S | žiadne | **teraz** |
+| Šifrovací kľúč do env | Zmena compose + dokumentácia | — | S | staré kľúče treba zadať znova | **teraz** |
+| Meranie úložiska na firmu | Stĺpec + prepočet + vynucovanie kvóty | — | M | prepočet existujúcich príloh | **teraz** |
+| Org strom (`parentId`) + role zodpovednosti | Migrácia + API + UI | — | M | žiadne | **teraz** |
+| Entita Osoba + obsadenie s obdobím | Migrácia + API + UI | org strom | L | prevod `UserPosition` | **teraz** |
+| Overenie emailu, reset hesla | Tokeny + šablóny | **SMTP poskytovateľ, doména, DNS** | M | žiadne | po dodaní vstupu |
+| Antivírusový sken príloh | Integrácia skenera | externá služba | M | žiadne | po dodaní vstupu |
+| Cookies a súhlasy | Banner + evidencia | **právne texty** | M | žiadne | po dodaní vstupu |
+| Produkčné nasadenie (TLS, proxy, zálohy) | Reprodukovateľný postup | **prístup na server** | L | — | po dodaní vstupu |
+| On-premise balík | Inštalátor, licencie | pilotný zákazník | L | — | neskôr |
+
+**Kroky vlastníka služby (nedajú sa spraviť v kóde):** SMTP poskytovateľ + SPF/DKIM/DMARC,
+právne texty (GDPR, podmienky, cookies), platobná brána, prístupy na produkčný server,
+rozhodnutie o cenových pásmach v GB.
+
+---
+
+## 6. Plán prvej etapy
+
+**Rozsah:** *Autentifikácia a izolácia firiem.* Rieši obe kritické riziká; všetko ostatné
+(kvóty, org modul, backoffice metriky) na nej stojí a bez nej nemá zmysel.
+
+| # | Úloha | Akceptačné kritérium |
+|---|---|---|
+| 1 | Tabuľka relácií + vydanie tokenu pri prihlásení/registrácii | Prihlásenie vráti token; token má expiráciu |
+| 2 | `requireAuth` nad `/api/*`, výnimky: register, login, prijatie pozvánky | Volanie bez tokenu vráti 401 |
+| 3 | `organizationId` sa berie **z relácie**, nie z URL | Podvrhnutie cudzieho `organizationId` v URL neprejde |
+| 4 | Scoping všetkých 18 objektových endpointov | Prístup k cudziemu objektu vráti 404 |
+| 5 | Odhlásenie a zneplatnenie relácie | Po odhlásení token nefunguje |
+| 6 | Rate limiting na prihlásenie + helmet | Opakované zlyhané prihlásenie sa zablokuje |
+| 7 | Overovací skript izolácie | Firma A nedostane ani jeden objekt firmy B |
+
+**Plán overenia:** skript založí dve firmy so syntetickými údajmi a pre každý objektový
+endpoint skúsi krížový prístup. Očakávaný výsledok: 401 bez tokenu, 404 s cudzím tokenom.
+Výstup skriptu sa priloží ako dôkaz.
+
+**Čo v tejto etape zámerne nie je:** overenie emailu (chýba SMTP), 2FA, kvóty, org modul.
+
+---
+
+## 7. Vykonané zmeny
+
+**Zatiaľ žiadne zmeny v kóde.** Tento dokument je výstupom auditu.
+
+**Blokátor pre implementáciu:** Docker stack v čase auditu nebežal, takže sa nedá overiť
+žiadna zmena ani spustiť test izolácie. Zavedenie autentifikácie naprieč ~50 endpointmi bez
+možnosti overiť beh by bolo neprimerane rizikové.
+
+**Presný ďalší krok:** spustiť `docker compose up -d` v `process-platform-angular/`, potom
+implementovať etapu 1 v poradí podľa tabuľky vyššie, s overením po každom bode.
+
+### Poznámky k rozporom medzi zadaním a skutočnosťou
+
+- Zadanie predpokladá, že môže existovať tvrdenie „prevádzkovateľ nevidí procesy". V tejto
+  architektúre **neplatí** a bez klientskeho šifrovania platiť nebude.
+- Zadanie uvádza úložisko ako hlavný kapacitný parameter. Dnes sa **nemeria vôbec**;
+  pri terajšom ukladaní do databázy bude navyše 1 GB príloh znamenať 1,33 GB v databáze
+  (base64) — účtovanie treba postaviť na reálnej veľkosti súboru, nie na veľkosti riadku.
+- Zadanie žiada, aby zamestnanci v adresári neboli platení používatelia. Dnes **neexistuje
+  entita Osoba** — každý človek v systéme je `User` s prihlásením.
