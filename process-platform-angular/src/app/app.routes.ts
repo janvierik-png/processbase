@@ -34,6 +34,10 @@ export const appRoutes: Routes = [
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'processes' },
       {
+        path: 'moja-praca',
+        loadComponent: () => import('./features/my-work/my-work-page.component').then((m) => m.MyWorkPageComponent)
+      },
+      {
         path: 'processes',
         loadComponent: () => import('./features/processes/process-workspace.component').then((m) => m.ProcessWorkspaceComponent)
       },

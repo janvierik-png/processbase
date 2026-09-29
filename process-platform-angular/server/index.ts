@@ -2713,6 +2713,88 @@ function cleanText(value: unknown, max = 200): string | null {
   return text || null;
 }
 
+/**
+ * „Moja práca“ (#33 UX-01a): procesy podla miest, ktore prihlaseny DNES (alebo
+ * v den `at`) zastava — nie podla pevne zapisaneho cloveka. Po zmene obsadenia
+ * sa proces presunie k novemu drzitelovi. Pri viacerych miestach sa zlucia
+ * a pri kazdom procese je zdroj zodpovednosti.
+ */
+app.get('/api/me/work', async (request, response, next) => {
+  try {
+    const { userId, organizationId } = auth(request);
+    const at = parseDay(request.query['at'], today(), 'at')!;
+    const person = await prisma.person.findFirst({ where: { organizationId, userId }, select: { id: true, name: true } });
+    if (!person) {
+      response.json({ at: day(at), person: null, positions: [], processes: [] });
+      return;
+    }
+
+    const assignments = await prisma.positionAssignment.findMany({
+      where: { personId: person.id, organizationId, ...activeOn(at) },
+      include: { position: { select: { id: true, name: true } } },
+      orderBy: { validFrom: 'asc' }
+    });
+    const positionIds = assignments.map((assignment) => assignment.positionId);
+    const links = positionIds.length
+      ? await prisma.processPosition.findMany({
+          where: { positionId: { in: positionIds }, processNode: { organizationId, type: ProcessNodeType.PROCESS } },
+          include: {
+            processNode: {
+              select: {
+                id: true, name: true,
+                versions: { select: { id: true, revision: true, effectiveFrom: true, effectiveTo: true, nextReviewAt: true } }
+              }
+            }
+          }
+        })
+      : [];
+
+    // nazov z platnej verzie (to, co plati), inak z navrhu
+    const effectiveByProcess = new Map<string, any>();
+    for (const link of links) {
+      if (effectiveByProcess.has(link.processNodeId)) continue;
+      effectiveByProcess.set(link.processNodeId, pickEffective(link.processNode.versions, at));
+    }
+    const versionIds = [...effectiveByProcess.values()].filter(Boolean).map((version: any) => version.id);
+    const names = versionIds.length
+      ? await prisma.$queryRaw<Array<{ id: string; name: string }>>`SELECT id, snapshot->>'name' AS name FROM "ProcessVersion" WHERE id = ANY(${versionIds})`
+      : [];
+    const versionName = new Map(names.map((row) => [row.id, row.name]));
+    const positionName = new Map(assignments.map((assignment) => [assignment.positionId, assignment.position.name]));
+    const soon = new Date(at.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const byProcess = new Map<string, any>();
+    for (const link of links) {
+      const effective = effectiveByProcess.get(link.processNodeId);
+      const entry = byProcess.get(link.processNodeId) ?? {
+        id: link.processNodeId,
+        name: (effective && versionName.get(effective.id)) || link.processNode.name,
+        effective: effective
+          ? { revision: effective.revision, effectiveFrom: day(effective.effectiveFrom), nextReviewAt: day(effective.nextReviewAt) }
+          : null,
+        review: !effective?.nextReviewAt ? null : effective.nextReviewAt < at ? 'overdue' : effective.nextReviewAt <= soon ? 'soon' : null,
+        roles: [] as Array<{ role: string; positionId: string; positionName: string }>
+      };
+      entry.roles.push({ role: link.role, positionId: link.positionId, positionName: positionName.get(link.positionId) ?? '' });
+      byProcess.set(link.processNodeId, entry);
+    }
+
+    response.json({
+      at: day(at),
+      person,
+      positions: assignments.map((assignment) => ({
+        id: assignment.positionId,
+        name: assignment.position.name,
+        validFrom: day(assignment.validFrom),
+        validTo: day(assignment.validTo)
+      })),
+      processes: [...byProcess.values()].sort((a, b) => a.name.localeCompare(b.name, 'sk'))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/organizations/:organizationId/people', async (request, response, next) => {
   try {
     const people = await prisma.person.findMany({

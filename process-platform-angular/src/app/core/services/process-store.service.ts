@@ -6,6 +6,7 @@ import {
   IsoSuggestion,
   ProcessChange,
   ProcessDetail,
+  MyWork,
   ProcessNode,
   ProcessVersionMeta
 } from '../models/process.model';
@@ -91,6 +92,12 @@ export class ProcessStoreService {
 
   versionDetail(id: string, revision: number): Observable<ProcessDetail> {
     return this.http.get<ProcessDetail>(`${API_BASE_URL}/processes/${id}/versions/${revision}`);
+  }
+
+  /** #33 — procesy podľa miest, ktoré prihlásený v daný deň zastáva. */
+  myWork(at?: string): Observable<MyWork> {
+    const query = at ? `?at=${encodeURIComponent(at)}` : '';
+    return this.http.get<MyWork>(`${API_BASE_URL}/me/work${query}`);
   }
 
   /** #39 — diagram z bezplatného modelera ako návrh procesu (pôvodné XML sa uloží bez zmeny). */

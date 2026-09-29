@@ -58,6 +58,22 @@ export interface ProcessDetail extends ProcessNode {
   documents?: Array<{ id: string; name: string }>;
 }
 
+/** #33 — „Moja práca": procesy podľa miest, ktoré prihlásený zastáva. */
+export interface MyWork {
+  at: string;
+  person: { id: string; name: string } | null;
+  positions: Array<{ id: string; name: string; validFrom: string; validTo: string | null }>;
+  processes: Array<{
+    id: string;
+    name: string;
+    effective: { revision: number; effectiveFrom: string; nextReviewAt: string | null } | null;
+    /** termín revízie: po termíne / do 30 dní */
+    review: 'overdue' | 'soon' | null;
+    /** zdroj zodpovednosti — miesto a rola */
+    roles: Array<{ role: 'OWNER' | 'PERFORMER'; positionId: string; positionName: string }>;
+  }>;
+}
+
 /** #28 — krok procesu (lineárny zoznam). */
 export interface ProcessActivity {
   id: string;

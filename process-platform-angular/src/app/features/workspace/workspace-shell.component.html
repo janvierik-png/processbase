@@ -6,6 +6,10 @@
     </div>
 
     <nav class="nav-list">
+      <a routerLink="/app/moja-praca" routerLinkActive="active" [title]="'Moja práca — procesy podľa mojich pracovných miest'">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+        <span>Moja práca</span>
+      </a>
       <a routerLink="/app/processes" routerLinkActive="active" [title]="'Procesy'">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v5H4zM14 5h6v5h-6zM9 14h6v5H9z"/><path d="M7 10v2h10v-2M12 12v2"/></svg>
         <span>{{ i18n.t('nav.processes') }}</span>

@@ -1,0 +1,78 @@
+<header class="page-head">
+  <p class="eyebrow">Moja práca</p>
+  <h2>Moje postupy</h2>
+  @if (work(); as w) {
+    @if (w.positions.length > 0) {
+      <p class="lead">Podľa miest, ktoré dnes zastávate: <strong>{{ positionNames() }}</strong></p>
+    }
+  }
+</header>
+
+@if (error()) {
+  <p class="message error">{{ error() }}</p>
+}
+
+@if (work(); as w) {
+  @if (w.positions.length === 0) {
+    <section class="panel empty">
+      <strong>Zatiaľ nemáte priradené pracovné miesto.</strong>
+      <p>Postupy sa tu zobrazia, keď vás vlastník alebo administrátor firmy priradí na miesto v časti
+        <a routerLink="/app/settings/positions">Organizácia</a>. Všetky procesy firmy nájdete v časti
+        <a routerLink="/app/processes">Procesy</a>.</p>
+    </section>
+  } @else {
+    @if (reviews().length > 0 || unpublished().length > 0) {
+      <section class="panel attention">
+        <h3>Potrebuje vašu pozornosť</h3>
+        @for (item of reviews(); track item.id) {
+          <a class="attention-row" [routerLink]="['/app/processes', item.id]">
+            <span class="chip" [class.warn]="item.review === 'overdue'">{{ item.review === 'overdue' ? 'Revízia po termíne' : 'Revízia do 30 dní' }}</span>
+            <strong>{{ item.name }}</strong>
+            <span class="muted">termín {{ item.effective?.nextReviewAt }}</span>
+          </a>
+        }
+        @for (item of unpublished(); track item.id) {
+          <a class="attention-row" [routerLink]="['/app/processes', item.id]">
+            <span class="chip neutral">Bez platnej verzie</span>
+            <strong>{{ item.name }}</strong>
+            <span class="muted">kolegovia ho zatiaľ nevidia ako platný postup</span>
+          </a>
+        }
+      </section>
+    }
+
+    <section class="panel">
+      <h3>Zodpovedám <small class="muted">({{ owned().length }})</small></h3>
+      @for (item of owned(); track item.id) {
+        <ng-container *ngTemplateOutlet="row; context: { $implicit: item }" />
+      } @empty {
+        <p class="muted">Žiadny proces, za ktorý by vaše miesto zodpovedalo.</p>
+      }
+    </section>
+
+    <section class="panel">
+      <h3>Vykonávam <small class="muted">({{ performed().length }})</small></h3>
+      @for (item of performed(); track item.id) {
+        <ng-container *ngTemplateOutlet="row; context: { $implicit: item }" />
+      } @empty {
+        <p class="muted">Žiadny ďalší proces, v ktorom vaše miesto vykonáva prácu.</p>
+      }
+    </section>
+  }
+} @else if (!error()) {
+  <p class="muted">Načítavam...</p>
+}
+
+<ng-template #row let-item>
+  <a class="work-row" [routerLink]="['/app/processes', item.id]">
+    <div>
+      <strong>{{ item.name }}</strong>
+      <small class="muted">{{ sources(item) }}</small>
+    </div>
+    @if (item.effective) {
+      <span class="chip subtle">Platná v{{ item.effective.revision }}</span>
+    } @else {
+      <span class="chip neutral">Návrh</span>
+    }
+  </a>
+</ng-template>
