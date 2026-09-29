@@ -51,6 +51,9 @@ export interface OrgPosition {
   holders: PositionHolder[];
   /** Nikto miesto dnes nezastava. */
   vacant: boolean;
+  /** #43 — archivované miesto: nové väzby nedostáva, existujúce ostávajú */
+  archived?: boolean;
+  archivedAt?: string | null;
 }
 
 /** Obsadenie miesta osobou na obdobie (#14); validTo = null -> aktivne. */
@@ -127,4 +130,15 @@ export interface Invitation {
   token: string;
   createdAt: string;
   expiresAt?: string;
+}
+
+/** #43 — čo od miesta závisí; ukáže sa pred archiváciou. */
+export interface PositionImpact {
+  position: { id: string; name: string; archived: boolean };
+  holders: Array<{ assignmentId: string; name: string; validFrom: string | null }>;
+  processes: Array<{ id: string; name: string; code: string; roles: string[]; ownerLost: boolean }>;
+  /** procesy, ktoré po archivácii ostanú bez obsadeného vlastníka */
+  ownerless: string[];
+  versions: Array<{ processId: string; name: string; revision: number; scheduled: boolean }>;
+  documents: Array<{ id: string; title: string }>;
 }

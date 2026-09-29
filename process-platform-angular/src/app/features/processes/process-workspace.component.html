@@ -440,7 +440,7 @@
                         </select>
                         <select [name]="'raci-holder-' + step.key" [(ngModel)]="step.newHolder" aria-label="Kto">
                           <option value="">— pracovné miesto —</option>
-                          @for (position of positions(); track position.id) {
+                          @for (position of selectablePositions(); track position.id) {
                             <option [value]="'pos:' + position.id">{{ position.name }} ({{ position.vacant ? 'neobsadené' : holderNames(position) }})</option>
                           }
                           @if (canCreatePosition) {
@@ -646,7 +646,7 @@
               @if (editSection() === 'relations') {
                 <select [(ngModel)]="ownerPositionDraft" name="ownerPosition">
                   <option value="">— bez vlastníka podľa miesta</option>
-                  @for (position of positions(); track position.id) {
+                  @for (position of selectablePositions([ownerPositionDraft]); track position.id) {
                     <option [value]="position.id">
                       {{ position.unitName ? position.unitName + ' — ' + position.name : position.name }}
                       ({{ position.vacant ? 'neobsadené' : holderNames(position) }})
@@ -665,7 +665,10 @@
                 @if (process.ownerPosition; as owner) {
                   <div class="responsibility" [class.vacant]="owner.vacant">
                     <strong>{{ owner.name }}</strong>
-                    @if (owner.vacant) {
+                    <!-- #43 — archivácia miesta vlastníka ticho nezmazala; treba určiť nové -->
+                    @if (owner.archived) {
+                      <span class="chip warn">Archivované miesto — určte nového vlastníka</span>
+                    } @else if (owner.vacant) {
                       <span class="chip warn">Neobsadené — proces nemá vlastníka</span>
                     } @else {
                       <span>{{ (owner.holders ?? []).join(', ') }}</span>
@@ -680,7 +683,7 @@
             <div class="relation-box">
               <h4>Vykonávatelia (pracovné miesta)</h4>
               @if (editSection() === 'relations') {
-                @for (position of positions(); track position.id) {
+                @for (position of selectablePositions(process.positionIds ?? []); track position.id) {
                   <label class="check-row">
                     <input type="checkbox"
                       [checked]="(process.positionIds ?? []).includes(position.id)"

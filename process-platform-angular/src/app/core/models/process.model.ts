@@ -47,6 +47,8 @@ export interface ProcessPositionRef {
   /** kto miesto dnes zastava */
   holders?: string[];
   vacant?: boolean;
+  /** #43 — miesto bolo archivované; väzba ostala, treba určiť nové */
+  archived?: boolean;
 }
 
 export interface ProcessDetail extends ProcessNode {

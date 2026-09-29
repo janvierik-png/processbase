@@ -494,6 +494,9 @@ model OrgPosition {
   reportsToId    String?
   /// Profil prace, ktory miesto napla (#16)
   jobProfileId   String?
+  /// #43 GRAPH-01 — archivovane miesto: nikto ho nezastava a nove vazby nedostava;
+  /// existujuce vazby a historia ostavaju (vlastnik procesu sa ticho nestrati)
+  archivedAt     DateTime?
   createdAt      DateTime     @default(now())
 
   organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)

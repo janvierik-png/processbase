@@ -2,7 +2,7 @@ import { Component, OnInit, computed, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { JobDescriptionVersion, JobProfile, JobVersionStatus, OrgPosition, OrgUnit, Person, PositionHolder } from '../../core/models/user.model';
+import { JobDescriptionVersion, JobProfile, JobVersionStatus, OrgPosition, OrgUnit, Person, PositionHolder, PositionImpact } from '../../core/models/user.model';
 import { OrganizationService } from '../../core/services/organization.service';
 import { PositionService } from '../../core/services/position.service';
 import { AuthService } from '../../core/services/auth.service';
@@ -74,11 +74,14 @@ export class PositionsPageComponent implements OnInit {
     const blocked = this.editingPositionSignal()
       ? subtreeIds(this.positions(), (position) => position.reportsToId, this.editingPositionSignal()!)
       : new Set<string>();
-    return this.positions().filter((position) => !blocked.has(position.id));
+    return this.activePositions().filter((position) => !blocked.has(position.id));
   });
 
-  readonly unassignedPositions = computed(() => this.positions().filter((position) => !position.unitId));
-  readonly vacantCount = computed(() => this.positions().filter((position) => position.vacant).length);
+  /** #43 — archivované miesta sa v štruktúre neukazujú, sú v samostatnom zozname */
+  readonly activePositions = computed(() => this.positions().filter((position) => !position.archived));
+  readonly archivedPositions = computed(() => this.positions().filter((position) => position.archived));
+  readonly unassignedPositions = computed(() => this.activePositions().filter((position) => !position.unitId));
+  readonly vacantCount = computed(() => this.activePositions().filter((position) => position.vacant).length);
   readonly activePeople = computed(() => this.people().filter((person) => person.active));
 
   private readonly editingUnitSignal = signal<string | null>(null);
@@ -179,7 +182,7 @@ export class PositionsPageComponent implements OnInit {
   }
 
   positionsOf(unitId: string): OrgPosition[] {
-    return this.positions().filter((position) => position.unitId === unitId);
+    return this.activePositions().filter((position) => position.unitId === unitId);
   }
 
   // --- pracovné miesta ---
@@ -226,8 +229,47 @@ export class PositionsPageComponent implements OnInit {
   }
 
   removePosition(position: OrgPosition): void {
-    if (!window.confirm(`Vymazať miesto ${position.name}?\nZmaže sa aj história jeho obsadenia a väzby na procesy.`)) return;
+    // #43 — použité miesto server nevymaže (vlastník procesu by ticho zmizol); ponúkne archiváciu
+    if (!window.confirm(`Vymazať miesto ${position.name}?\nVymazať sa dá len miesto, ktoré nikde nie je použité — inak ho archivujte.`)) return;
     this.positionsApi.remove(position.id).subscribe({ next: this.done(), error: this.fail('Miesto sa nepodarilo vymazať.') });
+  }
+
+  // --- #43 archivácia: najprv dopad, potom potvrdenie ---
+
+  readonly archiveImpact = signal<PositionImpact | null>(null);
+
+  startArchive(position: OrgPosition): void {
+    this.error.set(null);
+    this.positionsApi.impact(position.id).subscribe({
+      next: (impact) => this.archiveImpact.set(impact),
+      error: this.fail('Dopad archivácie sa nepodarilo zistiť.')
+    });
+  }
+
+  confirmArchive(): void {
+    const impact = this.archiveImpact();
+    if (!impact) return;
+    this.positionsApi.archive(impact.position.id).subscribe({
+      next: () => {
+        this.archiveImpact.set(null);
+        this.done(impact.processes.length
+          ? `Miesto ${impact.position.name} je archivované. Dotknuté procesy nájdete v Prehľade medzi neobsadenými.`
+          : `Miesto ${impact.position.name} je archivované.`)();
+      },
+      error: this.fail('Miesto sa nepodarilo archivovať.')
+    });
+  }
+
+  holderList(impact: PositionImpact): string {
+    return impact.holders.map((holder) => holder.name).join(', ');
+  }
+
+  documentList(impact: PositionImpact): string {
+    return impact.documents.map((document) => document.title).join(', ');
+  }
+
+  restorePosition(position: OrgPosition): void {
+    this.positionsApi.restore(position.id).subscribe({ next: this.done(`Miesto ${position.name} je obnovené.`), error: this.fail('Miesto sa nepodarilo obnoviť.') });
   }
 
   // --- obsadenie ---

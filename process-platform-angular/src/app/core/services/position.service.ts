@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
-import { OrgPosition, OrgUnit } from '../models/user.model';
+import { OrgPosition, OrgUnit, PositionImpact } from '../models/user.model';
 import { AuthService } from './auth.service';
 import { API_BASE_URL } from './api-url';
 
@@ -38,6 +38,21 @@ export class PositionService {
 
   remove(positionId: string): Observable<void> {
     return this.http.delete<void>(`${API_BASE_URL}/positions/${positionId}`);
+  }
+
+  // --- #43 dopad a archivácia miesta ---
+
+  impact(positionId: string): Observable<PositionImpact> {
+    return this.http.get<PositionImpact>(`${API_BASE_URL}/positions/${positionId}/impact`);
+  }
+
+  /** Archivácia až po potvrdení dopadu (server bez potvrdenia odmietne). */
+  archive(positionId: string): Observable<PositionImpact> {
+    return this.http.post<PositionImpact>(`${API_BASE_URL}/positions/${positionId}/archive`, { confirm: true });
+  }
+
+  restore(positionId: string): Observable<{ id: string; archived: boolean }> {
+    return this.http.post<{ id: string; archived: boolean }>(`${API_BASE_URL}/positions/${positionId}/restore`, {});
   }
 
   // --- organizacne zlozky (#12 strom) ---

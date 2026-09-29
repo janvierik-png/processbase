@@ -129,6 +129,20 @@
       @if (units().length === 0 && positions().length === 0) {
         <p class="muted">Zatiaľ žiadna štruktúra. Začnite zložkou (napr. Vedenie) alebo rovno pracovným miestom.</p>
       }
+
+      <!-- #43 — archivované miesta: väzby a história ostávajú, nové väzby nedostávajú -->
+      @if (archivedPositions().length > 0) {
+        <details class="archived-positions">
+          <summary>Archivované miesta ({{ archivedPositions().length }})</summary>
+          @for (position of archivedPositions(); track position.id) {
+            <div class="archived-row">
+              <strong>{{ position.name }}</strong>
+              <small class="muted">archivované {{ position.archivedAt }}</small>
+              <button type="button" class="ghost small edit-only" (click)="restorePosition(position)">Obnoviť</button>
+            </div>
+          }
+        </details>
+      }
     </section>
   </section>
 }
@@ -182,8 +196,44 @@
     <div class="row-actions edit-only">
       <button type="button" class="small" (click)="startAssign(position)">Obsadiť</button>
       <button type="button" class="ghost small" (click)="editPosition(position)">Upraviť</button>
+      <button type="button" class="ghost small" (click)="startArchive(position)">Archivovať…</button>
       <button type="button" class="ghost small" (click)="removePosition(position)">Vymazať</button>
     </div>
+
+    <!-- #43 scenár 8 — pred archiváciou sa ukáže, čo od miesta závisí -->
+    @if (archiveImpact()?.position?.id === position.id) {
+      @if (archiveImpact(); as impact) {
+        <div class="impact-panel">
+          <strong>Čo sa archiváciou miesta „{{ impact.position.name }}“ zmení</strong>
+          @if (impact.holders.length > 0) {
+            <p>Obsadenie sa ukončí (od dnes miesto nikto nezastáva): {{ holderList(impact) }}</p>
+          }
+          @if (impact.processes.length > 0) {
+            <p>Dotknuté procesy — väzba ostane, miesto sa ukáže ako archivované a neobsadené:</p>
+            <ul>
+              @for (item of impact.processes; track item.id) {
+                <li><a [routerLink]="['/app/processes', item.id]">{{ item.code ? item.code + ' ' : '' }}{{ item.name }}</a> — {{ item.roles.join(', ') }}</li>
+              }
+            </ul>
+          } @else {
+            <p class="muted">Od miesta nezávisí žiadny proces.</p>
+          }
+          @if (impact.ownerless.length > 0) {
+            <p class="warn-line">Bez obsadeného vlastníka ostanú: {{ impact.ownerless.join(', ') }} — po archivácii im určte nové miesto.</p>
+          }
+          @if (impact.versions.length > 0) {
+            <p class="muted">Platné a naplánované verzie s týmto miestom ostávajú nezmenené ({{ impact.versions.length }}).</p>
+          }
+          @if (impact.documents.length > 0) {
+            <p class="muted">Vlastník dokumentov: {{ documentList(impact) }}</p>
+          }
+          <div class="impact-actions">
+            <button type="button" class="small primary" (click)="confirmArchive()">Archivovať miesto</button>
+            <button type="button" class="small" (click)="archiveImpact.set(null)">Zrušiť</button>
+          </div>
+        </div>
+      }
+    }
   </article>
 </ng-template>
 

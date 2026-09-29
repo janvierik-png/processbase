@@ -348,3 +348,42 @@ button.small {
 .read-only .side:not(:has(> :not(.edit-only))) {
   display: none;
 }
+
+// #43 — dopad archivácie a archivované miesta
+.impact-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--r-md);
+  background: var(--warn-soft);
+  font-size: 13px;
+
+  p, ul { margin: 0; }
+  ul { padding-left: 18px; }
+  a { color: var(--accent-strong); }
+  .warn-line { color: var(--warn); font-weight: 600; }
+}
+
+.impact-actions { display: flex; gap: 6px; }
+
+.archived-positions {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+
+  summary { cursor: pointer; color: var(--ink-soft); font-weight: 600; }
+}
+
+.archived-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+
+  & + .archived-row { border-top: 1px solid var(--line); }
+}

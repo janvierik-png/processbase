@@ -573,6 +573,11 @@ export class ProcessWorkspaceComponent implements OnInit {
     });
   }
 
+  /** #43 — na výber len aktívne miesta; už priradené archivované ostane viditeľné. */
+  selectablePositions(current: Array<string | null | undefined> = []): OrgPosition[] {
+    return this.positions().filter((position) => !position.archived || current.includes(position.id));
+  }
+
   newPerformerName = '';
 
   createPerformerPosition(): void {

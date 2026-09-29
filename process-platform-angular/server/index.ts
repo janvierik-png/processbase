@@ -274,7 +274,7 @@ const PERMISSION_RULES: PermissionRule[] = [
   },
   {
     methods: ['POST'],
-    pattern: /^\/api\/(people\/[^/]+\/leave|positions\/[^/]+\/assignments|job-profiles\/[^/]+\/versions|job-description-versions\/[^/]+\/publish)$/,
+    pattern: /^\/api\/(people\/[^/]+\/leave|positions\/[^/]+\/(assignments|archive|restore)|job-profiles\/[^/]+\/versions|job-description-versions\/[^/]+\/publish)$/,
     anyOf: ['organization:write']
   }
 ];
@@ -320,7 +320,7 @@ app.use('/api', (request, response, next) => {
   next();
 });
 
-type Responsibility = { id: string; name: string; role: string; holders: string[]; vacant: boolean };
+type Responsibility = { id: string; name: string; role: string; holders: string[]; vacant: boolean; archived?: boolean };
 
 type ProcessTreeNode = {
   id: string;
@@ -516,7 +516,9 @@ function mapResponsibility(link: any) {
     name: link.position?.name ?? '',
     role: link.role ?? ResponsibilityRole.PERFORMER,
     holders,
-    vacant: holders.length === 0
+    vacant: holders.length === 0,
+    // #43 — miesto bolo archivovane: vazba ostala, treba urcit nove miesto
+    archived: Boolean(link.position?.archivedAt)
   };
 }
 
@@ -746,6 +748,7 @@ function responsibilityInclude(at: Date = today()) {
         select: {
           id: true,
           name: true,
+          archivedAt: true,
           assignments: { where: activeOn(at), select: { person: { select: { name: true } } } }
         }
       }
@@ -865,7 +868,8 @@ function mapStepResponsibility(item: any) {
     vacant: Boolean(item.positionId) && holders.length === 0,
     /** priradene konkretnej osobe — pri jej odchode treba krok upravit */
     exception: Boolean(item.personId),
-    personLeft: item.person ? item.person.active === false : false
+    personLeft: item.person ? item.person.active === false : false,
+    archived: Boolean(item.position?.archivedAt)
   };
 }
 
@@ -882,7 +886,7 @@ function activityInclude(at: Date = today()) {
           role: true,
           positionId: true,
           personId: true,
-          position: { select: { id: true, name: true, assignments: { where: activeOn(at), select: { person: { select: { name: true } } } } } },
+          position: { select: { id: true, name: true, archivedAt: true, assignments: { where: activeOn(at), select: { person: { select: { name: true } } } } } },
           person: { select: { id: true, name: true, active: true } }
         }
       }
@@ -1644,6 +1648,12 @@ app.put('/api/processes/:processId/activities', async (request, response, next) 
     const raciInput = steps.flatMap((step) => step.raci ?? []);
     await assertOwnedIds('orgPosition', node.organizationId, raciInput.map((item) => item.positionId));
     await assertOwnedIds('person', node.organizationId, raciInput.map((item) => item.personId));
+    // #43 — archivovane miesto nove vazby nedostava; uz pouzite pri krokoch procesu moze ostat
+    const usedAtSteps = await prisma.activityResponsibility.findMany({
+      where: { activity: { processNodeId: node.id }, positionId: { not: null } },
+      select: { positionId: true }
+    });
+    await assertPositionsLinkable(node.organizationId, raciInput.flatMap((item) => item.positionId ?? []), usedAtSteps.flatMap((item) => item.positionId ?? []));
 
     const existing = await prisma.processActivity.findMany({
       where: { processNodeId: node.id },
@@ -1737,6 +1747,12 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     if (Array.isArray(body.positionIds)) {
       body.positionIds = await assertOwnedIds('orgPosition', current.organizationId, body.positionIds);
     }
+    // #43 — archivovane miesto nove vazby nedostava (existujuce mozu ostat)
+    const linkedPositions = current.positions.map((link) => link.positionId);
+    await assertPositionsLinkable(current.organizationId, [
+      ...(Array.isArray(body.positionIds) ? body.positionIds as string[] : []),
+      ...(typeof body.ownerPositionId === 'string' && body.ownerPositionId ? [body.ownerPositionId] : [])
+    ], linkedPositions);
     // #30 — kod je sucast navrhu; jedinecny vo firme
     const code = body.code === undefined ? undefined : normalizeProcessCode(body.code);
     if (code) await assertCodeFree(current.organizationId, processId, code);
@@ -3213,7 +3229,10 @@ function mapOrgPosition(position: any) {
       validFrom: day(assignment.validFrom),
       validTo: day(assignment.validTo)
     })),
-    vacant: (position.assignments ?? []).length === 0
+    vacant: (position.assignments ?? []).length === 0,
+    // #43 — archivovane miesto sa neponuka na nove vazby
+    archived: Boolean(position.archivedAt),
+    archivedAt: position.archivedAt ? new Intl.DateTimeFormat('sv-SE', { timeZone: BUSINESS_TIMEZONE }).format(position.archivedAt) : null
   };
 }
 
@@ -3414,9 +3433,133 @@ app.patch('/api/positions/:positionId', async (request, response, next) => {
   }
 });
 
+// --- #43 GRAPH-01 dopad zmeny miesta, archivacia namiesto mazania ---
+
+/**
+ * Co od miesta zavisi: procesy (vlastnik, vykonavatel, RACI krokov) v navrhu,
+ * platne a naplanovane verzie, ktore ho maju v snapshote, ludia, ktori ho dnes
+ * zastavaju, a dokumenty, ktorych je vlastnikom.
+ */
+async function positionImpact(organizationId: string, positionId: string) {
+  const now = today();
+  const [links, steps, holders, documents, versions] = await Promise.all([
+    prisma.processPosition.findMany({ where: { positionId }, select: { role: true, processNode: { select: { id: true, name: true, code: true } } } }),
+    prisma.activityResponsibility.findMany({
+      where: { positionId },
+      select: { role: true, activity: { select: { title: true, sortOrder: true, processNode: { select: { id: true, name: true, code: true } } } } }
+    }),
+    prisma.positionAssignment.findMany({ where: { positionId, ...activeOn(now) }, select: { id: true, validFrom: true, person: { select: { name: true } } } }),
+    prisma.controlledDocument.findMany({ where: { ownerPositionId: positionId }, select: { id: true, title: true } }),
+    prisma.$queryRaw<Array<{ processNodeId: string; revision: number; name: string; effectiveFrom: Date }>>`
+      SELECT v."processNodeId", v.revision, v.snapshot->>'name' AS name, v."effectiveFrom"
+      FROM "ProcessVersion" v
+      WHERE v."organizationId" = ${organizationId}
+        AND (v."effectiveTo" IS NULL OR v."effectiveTo" >= ${now})
+        AND (
+          COALESCE(v.snapshot->'responsibilities', '[]'::jsonb) @> ${JSON.stringify([{ positionId }])}::jsonb
+          OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(v.snapshot->'activities', '[]'::jsonb)) a
+                     WHERE COALESCE(a->'raci', '[]'::jsonb) @> ${JSON.stringify([{ positionId }])}::jsonb)
+        )
+      ORDER BY name, v.revision`
+  ]);
+  const processes = new Map<string, { id: string; name: string; code: string; roles: string[]; ownerLost: boolean }>();
+  const entry = (node: { id: string; name: string; code: string | null }) => {
+    const item = processes.get(node.id) ?? { id: node.id, name: node.name, code: node.code ?? '', roles: [], ownerLost: false };
+    processes.set(node.id, item);
+    return item;
+  };
+  for (const link of links) {
+    const item = entry(link.processNode);
+    item.roles.push(link.role === ResponsibilityRole.OWNER ? 'vlastník' : 'vykonávateľ');
+    if (link.role === ResponsibilityRole.OWNER) item.ownerLost = true;
+  }
+  for (const step of steps) {
+    entry(step.activity.processNode).roles.push(`krok ${step.activity.sortOrder + 1} „${step.activity.title}“ (${RACI_CODE[step.role]})`);
+  }
+  return {
+    holders: holders.map((holder) => ({ assignmentId: holder.id, name: holder.person.name, validFrom: day(holder.validFrom) })),
+    processes: [...processes.values()].sort((a, b) => a.name.localeCompare(b.name, 'sk')),
+    // po archivacii bude tieto procesy treba dat novemu vlastnikovi
+    ownerless: [...processes.values()].filter((item) => item.ownerLost).map((item) => item.name),
+    versions: versions.map((version) => ({ processId: version.processNodeId, name: version.name, revision: version.revision, scheduled: version.effectiveFrom > now })),
+    documents
+  };
+}
+
+app.get('/api/positions/:positionId/impact', async (request, response, next) => {
+  try {
+    const position = await requirePosition(request, request.params.positionId);
+    response.json({ position: { id: position.id, name: position.name, archived: Boolean(position.archivedAt) }, ...(await positionImpact(position.organizationId, position.id)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Archivacia miesta (scenar 8): az po potvrdeni dopadu. Obsadenie sa ukonci
+ * vcerajskom (od dnes miesto nikto nezastava), vazby a historia ostavaju — vlastnik procesu sa
+ * ticho nestrati, proces sa ukaze ako neobsadeny a editori dostanu upozornenie.
+ */
+app.post('/api/positions/:positionId/archive', async (request, response, next) => {
+  try {
+    const position = await requirePosition(request, request.params.positionId);
+    if (position.archivedAt) throw new HttpError(409, 'Miesto uz je archivovane.');
+    if (request.body?.confirm !== true) {
+      throw new HttpError(400, 'Najprv si pozrite dopad archivacie (GET /positions/:id/impact) a potvrdte ho.');
+    }
+    const impact = await positionImpact(position.organizationId, position.id);
+    const now = today();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    await prisma.$transaction(async (tx) => {
+      // od dnes miesto nikto nezastava: obsadenie sa ukonci vcerajskom;
+      // obsadenie so zaciatkom dnes alebo neskor by nikdy nenastalo — zmaze sa
+      await tx.positionAssignment.deleteMany({ where: { positionId: position.id, validFrom: { gte: now } } });
+      await tx.positionAssignment.updateMany({
+        where: { positionId: position.id, OR: [{ validTo: null }, { validTo: { gte: now } }] },
+        data: { validTo: yesterday }
+      });
+      await tx.orgPosition.update({ where: { id: position.id }, data: { archivedAt: new Date() } });
+      await emitEvent(tx, {
+        organizationId: position.organizationId,
+        type: 'PositionArchived',
+        actorId: auth(request).userId,
+        payload: { positionName: position.name, processCount: impact.processes.length, ownerless: impact.ownerless }
+      });
+    });
+    kickDispatcher();
+    response.json({ position: { id: position.id, name: position.name, archived: true }, ...impact });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/positions/:positionId/restore', async (request, response, next) => {
+  try {
+    const position = await requirePosition(request, request.params.positionId);
+    await prisma.orgPosition.update({ where: { id: position.id }, data: { archivedAt: null } });
+    response.json({ id: position.id, archived: false });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Nove vazby len na aktivne miesta; uz existujuce vazby na archivovane miesto mozu ostat. */
+async function assertPositionsLinkable(organizationId: string, positionIds: string[], alreadyLinked: string[] = []) {
+  const fresh = positionIds.filter((id) => !alreadyLinked.includes(id));
+  if (fresh.length === 0) return;
+  const archived = await prisma.orgPosition.findFirst({ where: { organizationId, id: { in: fresh }, archivedAt: { not: null } }, select: { name: true } });
+  if (archived) throw new HttpError(400, `Miesto „${archived.name}“ je archivované — vyberte iné.`);
+}
+
 app.delete('/api/positions/:positionId', async (request, response, next) => {
   try {
     const position = await requirePosition(request, request.params.positionId);
+    // #43 — pouzite miesto sa nemaze (vlastnik procesu by ticho zmizol, verzie by stratili nazov)
+    const impact = await positionImpact(position.organizationId, position.id);
+    const history = await prisma.positionAssignment.count({ where: { positionId: position.id } });
+    if (impact.processes.length > 0 || impact.versions.length > 0 || impact.documents.length > 0 || history > 0) {
+      throw new HttpError(409, `Miesto „${position.name}“ je použité (procesy: ${impact.processes.length}, obsadenia: ${history}) — archivujte ho, dopad uvidíte pred potvrdením.`);
+    }
     // podriadene miesta prejdu pod nadriadeneho mazaneho miesta
     await prisma.$transaction(async (tx) => {
       await tx.orgPosition.updateMany({ where: { reportsToId: position.id }, data: { reportsToId: position.reportsToId } });
@@ -3636,7 +3779,7 @@ app.get('/api/me/work', async (request, response, next) => {
 type EventClient = Pick<typeof prisma, 'domainEvent'>;
 type DomainEventInput = {
   organizationId: string;
-  type: 'ProcessPublished' | 'ReviewDue' | 'PositionAssignmentChanged' | 'ApprovalRequested' | 'ApprovalDecided' | 'FeedbackSubmitted' | 'FeedbackDecided' | 'DocumentSuperseded';
+  type: 'ProcessPublished' | 'ReviewDue' | 'PositionAssignmentChanged' | 'ApprovalRequested' | 'ApprovalDecided' | 'FeedbackSubmitted' | 'FeedbackDecided' | 'DocumentSuperseded' | 'PositionArchived';
   processNodeId?: string | null;
   actorId?: string | null;
   payload: Record<string, unknown>;
@@ -3758,6 +3901,15 @@ async function notificationsFor(event: { organizationId: string; type: string; p
         recipients: owners.length > 0 ? owners : await usersWithPermission(orgId, 'process:write')
       };
     }
+    case 'PositionArchived':
+      return {
+        title: `Miesto „${p.positionName}“ bolo archivované`,
+        body: p.processCount
+          ? `Dotknuté procesy: ${p.processCount}${(p.ownerless ?? []).length ? `; bez vlastníka: ${p.ownerless.join(', ')}` : ''}. Určte nové miesto.`
+          : 'Žiadny proces od neho nezávisel.',
+        link: '/app/prehlad?kategoria=vacant',
+        recipients: await usersWithPermission(orgId, 'process:write')
+      };
     case 'PositionAssignmentChanged':
       return {
         title: p.validTo ? `Pôsobenie na mieste „${p.positionName}“: ${p.validFrom} – ${p.validTo}` : `Zastávate miesto „${p.positionName}“ od ${p.validFrom}`,
@@ -4363,11 +4515,11 @@ app.get('/api/overview', async (request, response, next) => {
       const vacant = new Map<string, string[]>();
       const note = (positionName: string, where: string) => vacant.set(positionName, [...(vacant.get(positionName) ?? []), where]);
       for (const link of node.positions) {
-        if ((link.position?.assignments ?? []).length === 0) note(link.position?.name ?? '', link.role === ResponsibilityRole.OWNER ? 'vlastník' : 'vykonávateľ');
+        if ((link.position?.assignments ?? []).length === 0) note(`${link.position?.name ?? ''}${link.position?.archivedAt ? ' (archivované miesto)' : ''}`, link.role === ResponsibilityRole.OWNER ? 'vlastník' : 'vykonávateľ');
       }
       node.activities.forEach((activity, index) => {
         for (const item of activity.responsibilities) {
-          if (item.position && item.position.assignments.length === 0) note(item.position.name, `krok ${index + 1} (${RACI_CODE[item.role]})`);
+          if (item.position && item.position.assignments.length === 0) note(`${item.position.name}${item.position.archivedAt ? ' (archivované miesto)' : ''}`, `krok ${index + 1} (${RACI_CODE[item.role]})`);
         }
       });
       if (vacant.size > 0) {
@@ -4514,6 +4666,7 @@ app.post('/api/people/:personId/leave', async (request, response, next) => {
 app.post('/api/positions/:positionId/assignments', async (request, response, next) => {
   try {
     const position = await requirePosition(request, request.params.positionId);
+    if (position.archivedAt) throw new HttpError(409, 'Miesto je archivovane — obnovte ho alebo vyberte ine.');
     const person = await requirePerson(request, String(request.body?.personId ?? ''));
     if (!person.active) throw new HttpError(409, 'Osoba je oznacena ako neaktivna (odisla z firmy).');
 
