@@ -10,6 +10,7 @@ import {
   OrganizationRole,
   ProcessNodeType,
   ProcessStatus,
+  ApprovalStatus,
   AuthTokenType,
   JobDescriptionStatus,
   ResponsibilityRole
@@ -200,13 +201,13 @@ app.use('/api', async (request, response, next) => {
  * roly (src/app/core/data/default-data.ts); vlastnik smie vsetko.
  * Citat moze kazdy clen firmy — pravidla su len pre zapis.
  */
-type Permission = 'organization:write' | 'user:invite' | 'process:write' | 'iso:write';
+type Permission = 'organization:write' | 'user:invite' | 'process:write' | 'iso:write' | 'approval:approve';
 
 const ROLE_PERMISSIONS: Record<OrganizationRole, Permission[]> = {
-  [OrganizationRole.OWNER]: ['organization:write', 'user:invite', 'process:write', 'iso:write'],
-  [OrganizationRole.ADMIN]: ['organization:write', 'user:invite', 'process:write', 'iso:write'],
-  [OrganizationRole.MANAGER]: ['process:write', 'iso:write'], // manazer kvality
-  [OrganizationRole.MODELER]: [], // schvalovatel — cita a schvaluje
+  [OrganizationRole.OWNER]: ['organization:write', 'user:invite', 'process:write', 'iso:write', 'approval:approve'],
+  [OrganizationRole.ADMIN]: ['organization:write', 'user:invite', 'process:write', 'iso:write', 'approval:approve'],
+  [OrganizationRole.MANAGER]: ['process:write', 'iso:write', 'approval:approve'], // manazer kvality
+  [OrganizationRole.MODELER]: ['approval:approve'], // schvalovatel — cita a schvaluje
   [OrganizationRole.AUDITOR]: ['iso:write'], // ISO auditor
   [OrganizationRole.VIEWER]: []
 };
@@ -238,6 +239,10 @@ const PERMISSION_RULES: PermissionRule[] = [
   },
   { methods: ['DELETE'], pattern: /^\/api\/processes\/[^/]+$/, anyOf: ['process:write'] },
   { methods: ['PUT'], pattern: /^\/api\/processes\/[^/]+\/activities$/, anyOf: ['process:write'] },
+  // #37 — schvalovanie: navrh odosiela editor, rozhoduje schvalovatel (nie ten isty clovek — kontrola v handleri)
+  { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/approval-requests$/, anyOf: ['process:write'] },
+  { methods: ['POST'], pattern: /^\/api\/approval-requests\/[^/]+\/(approve|reject)$/, anyOf: ['approval:approve'] },
+  { methods: ['POST'], pattern: /^\/api\/approval-requests\/[^/]+\/withdraw$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/(documents|revisions|camunda7\/deploy|publish)$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/camunda7\/deploy$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/iso-detect$/, anyOf: ['process:write', 'iso:write'] },
@@ -687,7 +692,12 @@ function publicationInclude() {
     },
     attachments: { select: { id: true, fileName: true } },
     // #28 — kroky patria do obsahu navrhu
-    activities: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, title: true, description: true } }
+    activities: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, title: true, description: true } },
+    // #37 — cakajuca ziadost o schvalenie
+    approvalRequests: {
+      where: { status: ApprovalStatus.PENDING },
+      select: { id: true, requestedById: true, createdAt: true, effectiveFrom: true, requestedBy: { select: { name: true } } }
+    }
   };
 }
 
@@ -699,6 +709,8 @@ type Publication = {
   latestRevision: number;
   /** navrh (ProcessNode) sa lisi od poslednej publikovanej verzie */
   hasDraftChanges: boolean;
+  /** #37 — ziadost o schvalenie, ktora caka na rozhodnutie */
+  pendingApproval: { id: string; requestedBy: string | null; requestedById: string | null; createdAt: string; effectiveFrom: string | null } | null;
 };
 
 type ProcessSnapshot = {
@@ -801,7 +813,16 @@ function publicationState(node: any): { status: string; publication?: Publicatio
       effective: effective ? { revision: effective.revision, effectiveFrom: day(effective.effectiveFrom)! } : null,
       scheduled: scheduled ? { revision: scheduled.revision, effectiveFrom: day(scheduled.effectiveFrom)! } : null,
       latestRevision: latest?.revision ?? 0,
-      hasDraftChanges: latest ? snapshotHash(buildSnapshot(node)) !== latest.contentHash : true
+      hasDraftChanges: latest ? snapshotHash(buildSnapshot(node)) !== latest.contentHash : true,
+      pendingApproval: node.approvalRequests?.[0]
+        ? {
+            id: node.approvalRequests[0].id,
+            requestedBy: node.approvalRequests[0].requestedBy?.name ?? null,
+            requestedById: node.approvalRequests[0].requestedById ?? null,
+            createdAt: node.approvalRequests[0].createdAt.toISOString(),
+            effectiveFrom: day(node.approvalRequests[0].effectiveFrom)
+          }
+        : null
     }
   };
 }
@@ -816,6 +837,9 @@ function mapVersionMeta(version: any, now = today()) {
     changeReason: version.changeReason ?? null,
     publishedAt: version.publishedAt.toISOString(),
     publishedBy: version.publishedBy?.name ?? null,
+    // #37 — kto verziu schvalil (pri priamom publikovani null)
+    approvedBy: version.approvedBy?.name ?? null,
+    approvedAt: version.approvedAt ? version.approvedAt.toISOString() : null,
     state: version.effectiveFrom > now
       ? 'scheduled'
       : !version.effectiveTo || version.effectiveTo >= now ? 'effective' : 'superseded'
@@ -870,78 +894,346 @@ async function versionView(node: any, version: any, at: Date) {
   };
 }
 
+/** Navrh procesu so vsetkym, co patri do snapshotu verzie. */
+async function loadDraftForPublication(request: express.Request, processId: string) {
+  const node = await prisma.processNode.findFirst({
+    where: { id: processId, organizationId: orgScope(request) },
+    include: {
+      positions: true,
+      attachments: { select: { id: true, fileName: true } },
+      activities: { orderBy: { sortOrder: 'asc' }, select: { id: true, title: true, description: true } }
+    }
+  });
+  if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
+  if (node.type === ProcessNodeType.GROUP) throw new HttpError(400, 'Skupinu procesov nemozno publikovat.');
+  return node;
+}
+
+/**
+ * Spolocne kontroly pre priame publikovanie aj odoslanie na schvalenie:
+ * minimum (#28), zmena oproti poslednej verzii, dovod zmeny, ucinnost.
+ */
+async function preparePublication(node: any, body: any) {
+  const missing = publishReadiness(node).filter((item) => item.required && !item.ok);
+  if (missing.length > 0) {
+    throw new HttpError(400, `Na publikovanie chýba: ${missing.map((item) => item.label.split(' — ')[0].toLowerCase()).join(', ')}.`);
+  }
+  const now = today();
+  const effectiveFrom = parseDay(body?.effectiveFrom, now, 'effectiveFrom')!;
+  // spatne datovana ucinnost by prepisala, co ludia v minulosti realne pouzivali
+  if (effectiveFrom < now) throw new HttpError(400, 'Ucinnost nemoze zacat v minulosti.');
+  const nextReviewAt = parseDay(body?.nextReviewAt, null, 'nextReviewAt');
+  if (nextReviewAt && nextReviewAt <= effectiveFrom) throw new HttpError(400, 'Termin revizie musi byt po zaciatku ucinnosti.');
+  const changeReason = cleanText(body?.changeReason, 1000);
+
+  const snapshot = buildSnapshot(node);
+  const contentHash = snapshotHash(snapshot);
+  const last = await prisma.processVersion.findFirst({ where: { processNodeId: node.id }, orderBy: { revision: 'desc' } });
+  if (last) {
+    if (last.contentHash === contentHash) throw new HttpError(409, `Navrh sa nelisi od verzie v${last.revision}.`);
+    if (!changeReason) throw new HttpError(400, 'Uvedte dovod zmeny oproti predchadzajucej verzii.');
+    if (effectiveFrom < last.effectiveFrom) {
+      throw new HttpError(400, `Ucinnost musi zacat najskor ${day(last.effectiveFrom)} (vtedy zacina v${last.revision}).`);
+    }
+  }
+  return { snapshot, contentHash, effectiveFrom, nextReviewAt, changeReason };
+}
+
+/** Vytvori dalsiu verziu; predchadzajuca plati do dna pred novou (v ten isty den vyhra vyssia revizia). */
+async function createVersion(input: {
+  organizationId: string;
+  processNodeId: string;
+  snapshot: ProcessSnapshot;
+  contentHash: string;
+  effectiveFrom: Date;
+  nextReviewAt: Date | null;
+  changeReason: string | null;
+  publishedById: string | null;
+  approvedById?: string | null;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const last = await tx.processVersion.findFirst({ where: { processNodeId: input.processNodeId }, orderBy: { revision: 'desc' } });
+    if (last && input.effectiveFrom < last.effectiveFrom) {
+      throw new HttpError(409, `Medzitym vznikla verzia v${last.revision} s ucinnostou od ${day(last.effectiveFrom)}.`);
+    }
+    if (last) {
+      const dayBefore = new Date(input.effectiveFrom.getTime() - 24 * 60 * 60 * 1000);
+      await tx.processVersion.update({
+        where: { id: last.id },
+        data: { effectiveTo: dayBefore < last.effectiveFrom ? last.effectiveFrom : dayBefore }
+      });
+    }
+    return tx.processVersion.create({
+      data: {
+        organizationId: input.organizationId,
+        processNodeId: input.processNodeId,
+        revision: (last?.revision ?? 0) + 1,
+        snapshot: input.snapshot as any,
+        contentHash: input.contentHash,
+        changeReason: input.changeReason,
+        effectiveFrom: input.effectiveFrom,
+        nextReviewAt: input.nextReviewAt,
+        publishedById: input.publishedById,
+        approvedById: input.approvedById ?? null,
+        approvedAt: input.approvedById ? new Date() : null
+      },
+      include: { publishedBy: { select: { name: true } }, approvedBy: { select: { name: true } } }
+    });
+  });
+}
+
 app.post('/api/processes/:processId/publish', async (request, response, next) => {
   try {
-    const node = await prisma.processNode.findFirst({
-      where: { id: String(request.params.processId), organizationId: orgScope(request) },
-      include: {
-        positions: true,
-        attachments: { select: { id: true, fileName: true } },
-        activities: { orderBy: { sortOrder: 'asc' }, select: { id: true, title: true, description: true } }
-      }
-    });
-    if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
-    if (node.type === ProcessNodeType.GROUP) throw new HttpError(400, 'Skupinu procesov nemozno publikovat.');
-    // #28 — zrozumitelne minimum: co chyba, to sa povie po mene
-    const missing = publishReadiness(node).filter((item) => item.required && !item.ok);
-    if (missing.length > 0) {
-      throw new HttpError(400, `Na publikovanie chýba: ${missing.map((item) => item.label.split(' — ')[0].toLowerCase()).join(', ')}.`);
+    const node = await loadDraftForPublication(request, String(request.params.processId));
+    const organization = await prisma.organization.findUnique({ where: { id: node.organizationId }, select: { requireApproval: true } });
+    // #37 — firma, ktora vyzaduje schvalenie, nezverejni verziu obidenim schvalovania
+    if (organization?.requireApproval) {
+      throw new HttpError(409, 'Firma vyzaduje schvalenie — odoslite navrh na schvalenie.');
     }
-
-    const now = today();
-    const effectiveFrom = parseDay(request.body?.effectiveFrom, now, 'effectiveFrom')!;
-    // spatne datovana ucinnost by prepisala, co ludia v minulosti realne pouzivali
-    if (effectiveFrom < now) throw new HttpError(400, 'Ucinnost nemoze zacat v minulosti.');
-    const nextReviewAt = parseDay(request.body?.nextReviewAt, null, 'nextReviewAt');
-    if (nextReviewAt && nextReviewAt <= effectiveFrom) throw new HttpError(400, 'Termin revizie musi byt po zaciatku ucinnosti.');
-    const changeReason = cleanText(request.body?.changeReason, 1000);
-
-    const snapshot = buildSnapshot(node);
-    const contentHash = snapshotHash(snapshot);
-    const last = await prisma.processVersion.findFirst({ where: { processNodeId: node.id }, orderBy: { revision: 'desc' } });
-    if (last) {
-      if (last.contentHash === contentHash) throw new HttpError(409, `Navrh sa nelisi od verzie v${last.revision}.`);
-      if (!changeReason) throw new HttpError(400, 'Uvedte dovod zmeny oproti predchadzajucej verzii.');
-      if (effectiveFrom < last.effectiveFrom) {
-        throw new HttpError(400, `Ucinnost musi zacat najskor ${day(last.effectiveFrom)} (vtedy zacina v${last.revision}).`);
-      }
-    }
-
+    const prepared = await preparePublication(node, request.body);
     const userId = auth(request).userId;
-    const version = await prisma.$transaction(async (tx) => {
-      if (last) {
-        // predchadzajuca verzia plati do dna pred novou; v ten isty den vyhra vyssia revizia
-        const dayBefore = new Date(effectiveFrom.getTime() - 24 * 60 * 60 * 1000);
-        await tx.processVersion.update({
-          where: { id: last.id },
-          data: { effectiveTo: dayBefore < last.effectiveFrom ? last.effectiveFrom : dayBefore }
-        });
-      }
-      return tx.processVersion.create({
-        data: {
-          organizationId: node.organizationId,
-          processNodeId: node.id,
-          revision: (last?.revision ?? 0) + 1,
-          snapshot: snapshot as any,
-          contentHash,
-          changeReason,
-          effectiveFrom,
-          nextReviewAt,
-          publishedById: userId
-        },
-        include: { publishedBy: { select: { name: true } } }
-      });
-    });
+    const version = await createVersion({ organizationId: node.organizationId, processNodeId: node.id, ...prepared, publishedById: userId });
 
     await prisma.processChangeLog.create({
       data: {
         processNodeId: node.id,
         userId,
-        changedFields: { publikovanie: { from: last ? `v${last.revision}` : null, to: `v${version.revision} od ${day(effectiveFrom)}` } },
-        description: changeReason
+        changedFields: { publikovanie: { from: version.revision > 1 ? `v${version.revision - 1}` : null, to: `v${version.revision} od ${day(prepared.effectiveFrom)}` } },
+        description: prepared.changeReason
       }
     });
     response.status(201).json(mapVersionMeta(version));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- #37 GOV-01 schvalovanie verzie ---
+
+/** Miesta, ktore clovek v dany den zastava — zapise sa k rozhodnutiu ako historicky zaznam. */
+async function positionsHeldBy(organizationId: string, userId: string, at: Date): Promise<string> {
+  const person = await prisma.person.findFirst({ where: { organizationId, userId }, select: { id: true } });
+  if (!person) return '';
+  const held = await prisma.positionAssignment.findMany({
+    where: { personId: person.id, organizationId, ...activeOn(at) },
+    select: { position: { select: { name: true } } }
+  });
+  return held.map((item) => item.position.name).join(', ');
+}
+
+function mapApprovalRequest(item: any) {
+  const decision = (item.steps ?? []).find((step: any) => step.status !== ApprovalStatus.PENDING) ?? null;
+  return {
+    id: item.id,
+    processId: item.processNodeId,
+    processName: item.processNode?.name ?? undefined,
+    status: String(item.status).toLowerCase(),
+    requestedBy: item.requestedBy?.name ?? null,
+    requestedById: item.requestedById ?? null,
+    createdAt: item.createdAt.toISOString(),
+    effectiveFrom: day(item.effectiveFrom),
+    nextReviewAt: day(item.nextReviewAt),
+    changeReason: item.changeReason ?? null,
+    decidedAt: item.decidedAt ? item.decidedAt.toISOString() : null,
+    decision: decision
+      ? { by: decision.assignee?.name ?? null, positions: decision.deciderPositions || null, comment: decision.comment ?? null }
+      : null,
+    versionId: item.versionId ?? null
+  };
+}
+
+const APPROVAL_INCLUDE = {
+  requestedBy: { select: { name: true } },
+  processNode: { select: { name: true } },
+  steps: { include: { assignee: { select: { name: true } } }, orderBy: { order: 'asc' as const } }
+};
+
+async function requireApprovalRequest(request: express.Request, requestId: string) {
+  const item = await prisma.approvalRequest.findFirst({
+    where: { id: requestId, organizationId: orgScope(request) },
+    include: APPROVAL_INCLUDE
+  });
+  if (!item) throw new HttpError(404, 'Ziadost o schvalenie sa nenasla.');
+  return item;
+}
+
+/** Odoslanie navrhu na schvalenie — obsah sa zmrazi, neskorsie upravy navrhu ho nemenia. */
+app.post('/api/processes/:processId/approval-requests', async (request, response, next) => {
+  try {
+    const node = await loadDraftForPublication(request, String(request.params.processId));
+    const pending = await prisma.approvalRequest.findFirst({ where: { processNodeId: node.id, status: ApprovalStatus.PENDING } });
+    if (pending) throw new HttpError(409, 'Proces uz caka na schvalenie.');
+    const prepared = await preparePublication(node, request.body);
+    const userId = auth(request).userId;
+    const created = await prisma.approvalRequest.create({
+      data: {
+        organizationId: node.organizationId,
+        processNodeId: node.id,
+        requestedById: userId,
+        title: node.name,
+        snapshot: prepared.snapshot as any,
+        contentHash: prepared.contentHash,
+        effectiveFrom: prepared.effectiveFrom,
+        nextReviewAt: prepared.nextReviewAt,
+        changeReason: prepared.changeReason
+      },
+      include: APPROVAL_INCLUDE
+    });
+    await prisma.processChangeLog.create({
+      data: { processNodeId: node.id, userId, changedFields: { schvalovanie: { from: null, to: 'odoslane na schvalenie' } }, description: prepared.changeReason }
+    });
+    response.status(201).json(mapApprovalRequest(created));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Obsah na schvalenie tak, ako bol odoslany — schvalovatel posudzuje presne toto. */
+app.get('/api/approval-requests/:requestId/view', async (request, response, next) => {
+  try {
+    const item = await requireApprovalRequest(request, String(request.params.requestId));
+    const node = await prisma.processNode.findFirst({
+      where: { id: item.processNodeId, organizationId: orgScope(request) },
+      include: { ...processInclude(), parent: true }
+    });
+    if (!node || !item.snapshot) throw new HttpError(404, 'Obsah ziadosti sa nenasiel.');
+    const latest = await prisma.processVersion.findFirst({ where: { processNodeId: node.id }, orderBy: { revision: 'desc' }, select: { revision: true } });
+    const proposed = {
+      id: item.id,
+      revision: (latest?.revision ?? 0) + 1,
+      snapshot: item.snapshot,
+      effectiveFrom: item.effectiveFrom ?? today(),
+      effectiveTo: null,
+      nextReviewAt: item.nextReviewAt,
+      changeReason: item.changeReason,
+      publishedAt: item.createdAt,
+      publishedBy: item.requestedBy
+    };
+    const view = await versionView(node, proposed, today());
+    response.json({ ...view, view: 'approval', approvalRequest: mapApprovalRequest(item) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/processes/:processId/approval-requests', async (request, response, next) => {
+  try {
+    const node = await requireProcess(request, request.params.processId);
+    const items = await prisma.approvalRequest.findMany({
+      where: { processNodeId: node.id },
+      orderBy: { createdAt: 'desc' },
+      include: APPROVAL_INCLUDE
+    });
+    response.json(items.map(mapApprovalRequest));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Na moje schvalenie: cakajuce ziadosti firmy, ktore som neodoslal ja (#33 Moja praca). */
+app.get('/api/me/approvals', async (request, response, next) => {
+  try {
+    const { userId, organizationId } = auth(request);
+    if (!hasPermission(request, 'approval:approve')) {
+      response.json([]);
+      return;
+    }
+    const items = await prisma.approvalRequest.findMany({
+      where: { organizationId, status: ApprovalStatus.PENDING, NOT: { requestedById: userId } },
+      orderBy: { createdAt: 'asc' },
+      include: APPROVAL_INCLUDE
+    });
+    response.json(items.map(mapApprovalRequest));
+  } catch (error) {
+    next(error);
+  }
+});
+
+async function decide(request: express.Request, approve: boolean) {
+  const item = await requireApprovalRequest(request, String(request.params.requestId));
+  if (item.status !== ApprovalStatus.PENDING) throw new HttpError(409, 'Ziadost uz bola vybavena.');
+  const { userId, organizationId } = auth(request);
+  // oddelenie povinnosti: kto zmenu navrhol, ju sam neschvali
+  if (item.requestedById === userId) throw new HttpError(403, 'Vlastnu ziadost nemozete schvalit ani zamietnut.');
+  const comment = cleanText(request.body?.comment, 2000);
+  if (!approve && !comment) throw new HttpError(400, 'Uvedte dovod zamietnutia.');
+
+  const now = new Date();
+  let versionId: string | null = null;
+  if (approve) {
+    // ucinnost, ktora medzicasom presla, zacne dnes — nie spatne
+    const effectiveFrom = item.effectiveFrom && item.effectiveFrom > today() ? item.effectiveFrom : today();
+    const version = await createVersion({
+      organizationId,
+      processNodeId: item.processNodeId,
+      snapshot: item.snapshot as unknown as ProcessSnapshot,
+      contentHash: item.contentHash ?? '',
+      effectiveFrom,
+      nextReviewAt: item.nextReviewAt && item.nextReviewAt > effectiveFrom ? item.nextReviewAt : null,
+      changeReason: item.changeReason,
+      publishedById: item.requestedById,
+      approvedById: userId
+    });
+    versionId = version.id;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.approvalStep.create({
+      data: {
+        approvalRequestId: item.id,
+        assigneeId: userId,
+        status: approve ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED,
+        comment,
+        decidedAt: now,
+        deciderPositions: await positionsHeldBy(organizationId, userId, today())
+      }
+    });
+    await tx.approvalRequest.update({
+      where: { id: item.id },
+      data: { status: approve ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED, decidedAt: now, versionId }
+    });
+    await tx.processChangeLog.create({
+      data: {
+        processNodeId: item.processNodeId,
+        userId,
+        changedFields: { schvalovanie: { from: 'caka na schvalenie', to: approve ? 'schvalene a publikovane' : 'zamietnute' } },
+        description: comment
+      }
+    });
+  });
+  return requireApprovalRequest(request, item.id);
+}
+
+app.post('/api/approval-requests/:requestId/approve', async (request, response, next) => {
+  try {
+    response.json(mapApprovalRequest(await decide(request, true)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/approval-requests/:requestId/reject', async (request, response, next) => {
+  try {
+    response.json(mapApprovalRequest(await decide(request, false)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/approval-requests/:requestId/withdraw', async (request, response, next) => {
+  try {
+    const item = await requireApprovalRequest(request, String(request.params.requestId));
+    if (item.status !== ApprovalStatus.PENDING) throw new HttpError(409, 'Ziadost uz bola vybavena.');
+    const { userId, role } = auth(request);
+    // stiahnut smie ziadatel, alebo vlastnik/admin firmy
+    if (item.requestedById !== userId && role !== OrganizationRole.OWNER && role !== OrganizationRole.ADMIN) {
+      throw new HttpError(403, 'Ziadost moze stiahnut len ten, kto ju odoslal.');
+    }
+    await prisma.approvalRequest.update({ where: { id: item.id }, data: { status: ApprovalStatus.WITHDRAWN, decidedAt: new Date() } });
+    await prisma.processChangeLog.create({
+      data: { processNodeId: item.processNodeId, userId, changedFields: { schvalovanie: { from: 'caka na schvalenie', to: 'stiahnute' } } }
+    });
+    response.json(mapApprovalRequest(await requireApprovalRequest(request, item.id)));
   } catch (error) {
     next(error);
   }
@@ -955,7 +1247,8 @@ app.get('/api/processes/:processId/versions', async (request, response, next) =>
       orderBy: { revision: 'desc' },
       select: {
         id: true, revision: true, effectiveFrom: true, effectiveTo: true, nextReviewAt: true,
-        changeReason: true, publishedAt: true, publishedBy: { select: { name: true } }
+        changeReason: true, publishedAt: true, publishedBy: { select: { name: true } },
+        approvedAt: true, approvedBy: { select: { name: true } }
       }
     });
     const now = today();
@@ -975,7 +1268,7 @@ app.get('/api/processes/:processId/versions/:revision', async (request, response
     if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
     const version = await prisma.processVersion.findUnique({
       where: { processNodeId_revision: { processNodeId: node.id, revision: Number(request.params.revision) || 0 } },
-      include: { publishedBy: { select: { name: true } } }
+      include: { publishedBy: { select: { name: true } }, approvedBy: { select: { name: true } } }
     });
     if (!version) throw new HttpError(404, 'Verzia sa nenasla.');
     const at = parseDay(request.query['at'], today(), 'at')!;
@@ -1203,7 +1496,7 @@ app.get('/api/processes/:processId', async (request, response, next) => {
       const at = parseDay(request.query['at'], today(), 'at')!;
       const versions = await prisma.processVersion.findMany({
         where: { processNodeId: node.id },
-        include: { publishedBy: { select: { name: true } } }
+        include: { publishedBy: { select: { name: true } }, approvedBy: { select: { name: true } } }
       });
       const version = pickEffective(versions, at);
       if (!version) throw new HttpError(404, 'Proces zatial nema ucinnu verziu.');
@@ -1924,7 +2217,9 @@ function mapOrganization(organization: any, ownerUserId: string) {
     id: organization.id,
     name: organization.name,
     ownerUserId,
-    createdAt: organization.createdAt.toISOString().slice(0, 10)
+    createdAt: organization.createdAt.toISOString().slice(0, 10),
+    // #37 — verzie procesov sa zverejnuju len schvalenim
+    requireApproval: Boolean(organization.requireApproval)
   };
 }
 
@@ -2176,7 +2471,10 @@ app.patch('/api/organizations/:organizationId', async (request, response, next) 
   try {
     const organization = await prisma.organization.update({
       where: { id: orgScope(request) },
-      data: { name: request.body.name ?? undefined }
+      data: {
+        name: request.body.name ?? undefined,
+        requireApproval: typeof request.body.requireApproval === 'boolean' ? request.body.requireApproval : undefined
+      }
     });
     const owner = await prisma.organizationUser.findFirst({
       where: { organizationId: organization.id, isOwner: true }

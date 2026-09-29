@@ -39,6 +39,8 @@ enum ApprovalStatus {
   PENDING
   APPROVED
   REJECTED
+  /// #37 — ziadatel ziadost stiahol
+  WITHDRAWN
 }
 
 /// Rola pracovneho miesta v zodpovednosti za proces (#15).
@@ -90,6 +92,8 @@ model Organization {
   translationTargetLocale String?
   /// Kapacita uloziska v MB (#9). Hlavny kapacitny parameter planu — nie pocet procesov.
   storageQuotaMb     Int                  @default(1024)
+  /// #37 — true = verziu procesu mozno zverejnit len schvalenim (nie priamym publikovanim)
+  requireApproval    Boolean              @default(false)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
@@ -151,6 +155,7 @@ model User {
   jobDescriptions JobDescriptionVersion[]
   authTokens     AuthToken[]
   publishedVersions ProcessVersion[] @relation("ProcessVersionPublisher")
+  approvedVersions  ProcessVersion[] @relation("ProcessVersionApprover")
   sessions       Session[]
   processChanges ProcessChangeLog[]
 }
@@ -284,10 +289,14 @@ model ProcessVersion {
   nextReviewAt   DateTime?    @db.Date
   publishedById  String?
   publishedAt    DateTime     @default(now())
+  /// #37 — kto verziu schvalil (pri priamom publikovani prazdne)
+  approvedById   String?
+  approvedAt     DateTime?
 
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   processNode    ProcessNode  @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
   publishedBy    User?        @relation("ProcessVersionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+  approvedBy     User?        @relation("ProcessVersionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
 
   @@unique([processNodeId, revision])
   @@index([processNodeId, effectiveFrom])
@@ -339,11 +348,21 @@ model ApprovalRequest {
   status         ApprovalStatus @default(PENDING)
   createdAt      DateTime       @default(now())
   decidedAt      DateTime?
+  /// #37 — obsah zmrazeny pri odoslani: schvaluje sa presne to, co schvalovatel videl
+  snapshot       Json?
+  contentHash    String?
+  effectiveFrom  DateTime?      @db.Date
+  nextReviewAt   DateTime?      @db.Date
+  changeReason   String?
+  /// verzia, ktora vznikla schvalenim
+  versionId      String?
 
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   processNode    ProcessNode    @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
   requestedBy    User?          @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
   steps          ApprovalStep[]
+
+  @@index([organizationId, status])
 }
 
 model ApprovalStep {
@@ -354,6 +373,8 @@ model ApprovalStep {
   status            ApprovalStatus  @default(PENDING)
   comment           String?
   decidedAt         DateTime?
+  /// #37 — miesta, ktore rozhodujuci v den rozhodnutia zastaval (historicky zaznam)
+  deciderPositions  String?
 
   approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
   assignee          User?           @relation("ApprovalStepAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)

@@ -12,6 +12,20 @@
   <p class="message error">{{ error() }}</p>
 }
 
+<!-- #37 — schvaľovanie nezávisí od miesta: rozhoduje, kto má oprávnenie schvaľovať -->
+@if (approvals().length > 0) {
+  <section class="panel attention">
+    <h3>Čaká na moje schválenie <small class="muted">({{ approvals().length }})</small></h3>
+    @for (item of approvals(); track item.id) {
+      <a class="attention-row" [routerLink]="['/app/processes', item.processId]" [queryParams]="{ approval: item.id }">
+        <span class="chip warn">Návrh na schválenie</span>
+        <strong>{{ item.processName ?? 'Proces' }}</strong>
+        <span class="muted">{{ item.requestedBy ?? '—' }} · {{ item.createdAt.slice(0, 10) }}{{ item.changeReason ? ' · ' + item.changeReason : '' }}</span>
+      </a>
+    }
+  </section>
+}
+
 @if (work(); as w) {
   @if (w.positions.length === 0) {
     <section class="panel empty">

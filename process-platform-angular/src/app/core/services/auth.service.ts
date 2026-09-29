@@ -61,7 +61,7 @@ export class AuthService {
    * (DEFAULT_ROLES); vlastník smie všetko. Server to kontroluje aj tak — toto
    * len skrýva tlačidlá, ktoré by skončili chybou 403.
    */
-  can(permission: 'organization:write' | 'user:invite' | 'process:write' | 'iso:write'): boolean {
+  can(permission: 'organization:write' | 'user:invite' | 'process:write' | 'iso:write' | 'approval:approve'): boolean {
     const roleId = this.currentUserSignal()?.roleId;
     if (roleId === 'owner') return true;
     return DEFAULT_ROLES.find((role) => role.id === roleId)?.permissions.includes(permission) ?? false;
@@ -121,6 +121,19 @@ export class AuthService {
         this.storage.write(this.currentOrgKey, organization);
       },
       error: (error) => this.error.set(error?.error?.message ?? 'Nazov organizacie sa nepodarilo ulozit.')
+    });
+  }
+
+  /** #37 — zapnutie povinného schvaľovania verzií procesov. */
+  updateRequireApproval(requireApproval: boolean): void {
+    const organizationId = this.currentOrganizationId();
+    if (!organizationId) return;
+    this.http.patch<Organization>(`${API_BASE_URL}/organizations/${organizationId}`, { requireApproval }).subscribe({
+      next: (organization) => {
+        this.currentOrganizationSignal.set(organization);
+        this.storage.write(this.currentOrgKey, organization);
+      },
+      error: (error) => this.error.set(error?.error?.message ?? 'Nastavenie sa nepodarilo uložiť.')
     });
   }
 

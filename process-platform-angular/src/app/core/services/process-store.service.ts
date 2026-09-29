@@ -6,6 +6,7 @@ import {
   IsoSuggestion,
   ProcessChange,
   ProcessDetail,
+  ApprovalRequestInfo,
   MyWork,
   ProcessNode,
   ProcessVersionMeta
@@ -92,6 +93,29 @@ export class ProcessStoreService {
 
   versionDetail(id: string, revision: number): Observable<ProcessDetail> {
     return this.http.get<ProcessDetail>(`${API_BASE_URL}/processes/${id}/versions/${revision}`);
+  }
+
+  // --- #37 schvaľovanie ---
+
+  submitForApproval(id: string, payload: { effectiveFrom: string; changeReason?: string; nextReviewAt?: string }): Observable<ApprovalRequestInfo> {
+    return this.http.post<ApprovalRequestInfo>(`${API_BASE_URL}/processes/${id}/approval-requests`, payload);
+  }
+
+  approvalRequests(id: string): Observable<ApprovalRequestInfo[]> {
+    return this.http.get<ApprovalRequestInfo[]>(`${API_BASE_URL}/processes/${id}/approval-requests`);
+  }
+
+  myApprovals(): Observable<ApprovalRequestInfo[]> {
+    return this.http.get<ApprovalRequestInfo[]>(`${API_BASE_URL}/me/approvals`);
+  }
+
+  decideApproval(requestId: string, decision: 'approve' | 'reject' | 'withdraw', comment?: string): Observable<ApprovalRequestInfo> {
+    return this.http.post<ApprovalRequestInfo>(`${API_BASE_URL}/approval-requests/${requestId}/${decision}`, { comment });
+  }
+
+  /** Obsah zmrazený v žiadosti — to, o čom schvaľovateľ rozhoduje. */
+  approvalView(requestId: string): Observable<ProcessDetail> {
+    return this.http.get<ProcessDetail>(`${API_BASE_URL}/approval-requests/${requestId}/view`);
   }
 
   /** #33 — procesy podľa miest, ktoré prihlásený v daný deň zastáva. */

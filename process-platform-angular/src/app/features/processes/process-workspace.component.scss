@@ -947,6 +947,12 @@ button.small {
     border-color: #bfe0cb;
     background: var(--green-soft);
   }
+
+  // #37 — posudzovaný návrh, ešte nie platná verzia
+  &.viewing-approval {
+    border-color: var(--warn);
+    background: var(--warn-soft);
+  }
 }
 
 .pub-state {
@@ -960,8 +966,11 @@ button.small {
 
 .pub-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+
+  button { white-space: nowrap; }
 }
 
 .view-switch {
@@ -1009,6 +1018,13 @@ button.small {
 
   .span-two { grid-column: 1 / -1; }
   .error { margin: 0; color: var(--warn); }
+
+  button.danger {
+    color: var(--warn);
+    border-color: var(--warn);
+
+    &:hover:not(:disabled) { background: var(--warn-soft); }
+  }
 }
 
 .chip.subtle {

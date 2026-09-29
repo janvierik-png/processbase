@@ -9,6 +9,18 @@
     <label>Nazov spolocnosti <input name="companyName" [(ngModel)]="companyName"></label>
     <button class="primary" type="submit">Ulozit organizaciu</button>
   </form>
+
+  <!-- #37 — povinné schvaľovanie verzií -->
+  <section class="panel">
+    <h2>Zverejňovanie procesov</h2>
+    <label class="check-row">
+      <input type="checkbox" [checked]="organization()?.requireApproval"
+        (change)="auth.updateRequireApproval($any($event.target).checked)">
+      Novú verziu procesu zverejniť len po schválení
+    </label>
+    <p class="muted">Návrh potom editor odošle na schválenie a verzia vznikne až rozhodnutím schvaľovateľa —
+      nie toho istého človeka. Bez zaškrtnutia môže editor publikovať priamo.</p>
+  </section>
   }
 
   <section class="panel">

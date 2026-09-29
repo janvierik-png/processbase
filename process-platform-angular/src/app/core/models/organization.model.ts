@@ -4,4 +4,6 @@ export interface Organization {
   companyId?: string;
   ownerUserId: string;
   createdAt: string;
+  /** #37 — verzie procesov sa zverejňujú len schválením */
+  requireApproval?: boolean;
 }

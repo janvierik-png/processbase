@@ -1,7 +1,8 @@
 import { Component, OnInit, computed, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { MyWork } from '../../core/models/process.model';
+import { ApprovalRequestInfo, MyWork } from '../../core/models/process.model';
+import { AuthService } from '../../core/services/auth.service';
 import { ProcessStoreService } from '../../core/services/process-store.service';
 
 type WorkItem = MyWork['processes'][number];
@@ -21,6 +22,8 @@ type WorkItem = MyWork['processes'][number];
 export class MyWorkPageComponent implements OnInit {
   readonly work = signal<MyWork | null>(null);
   readonly error = signal('');
+  /** #37 — návrhy, o ktorých môžem rozhodnúť (nie moje vlastné) */
+  readonly approvals = signal<ApprovalRequestInfo[]>([]);
 
   /** zodpovedám = som vlastník procesu; vykonávam = len vykonávateľ */
   readonly owned = computed(() => (this.work()?.processes ?? []).filter((item) => item.roles.some((role) => role.role === 'OWNER')));
@@ -28,13 +31,19 @@ export class MyWorkPageComponent implements OnInit {
   readonly reviews = computed(() => this.owned().filter((item) => item.review));
   readonly unpublished = computed(() => this.owned().filter((item) => !item.effective));
 
-  constructor(private readonly store: ProcessStoreService) {}
+  constructor(
+    private readonly store: ProcessStoreService,
+    private readonly auth: AuthService
+  ) {}
 
   ngOnInit(): void {
     this.store.myWork().subscribe({
       next: (work) => this.work.set(work),
       error: () => this.error.set('Prehľad sa nepodarilo načítať.')
     });
+    if (this.auth.can('approval:approve')) {
+      this.store.myApprovals().subscribe({ next: (items) => this.approvals.set(items), error: () => this.approvals.set([]) });
+    }
   }
 
   roleLabel(role: 'OWNER' | 'PERFORMER'): string {

@@ -1,4 +1,4 @@
-<section class="process-layout" [class.no-write]="readOnlyView()" [class.no-iso]="!canIso || viewMode() === 'effective'" [class.panel-narrow]="panelState() === 'narrow'" [class.panel-hidden]="panelState() === 'hidden'">
+<section class="process-layout" [class.no-write]="readOnlyView()" [class.no-iso]="!canIso || viewMode() !== 'draft'" [class.panel-narrow]="panelState() === 'narrow'" [class.panel-hidden]="panelState() === 'hidden'">
   <aside class="process-tree">
     <header class="tree-header">
       <h3>Strom procesov</h3>
@@ -128,9 +128,18 @@
 
       <!-- #27 — platná verzia vs. rozpracovaný návrh -->
       @if (process.type === 'process') {
-        <section class="publication-bar" [class.viewing-version]="process.view === 'version'">
+        <section class="publication-bar" [class.viewing-version]="process.view === 'version'" [class.viewing-approval]="process.view === 'approval'">
           <div class="pub-state">
-            @if (process.view === 'version' && process.version) {
+            @if (process.view === 'approval' && process.approvalRequest; as req) {
+              <!-- #37 — posudzuje sa obsah zmrazený pri odoslaní -->
+              <strong>Návrh v{{ process.version?.revision }} — {{ approvalStatusLabel(req.status) }}</strong>
+              <span>odoslal(a) {{ req.requestedBy ?? '—' }} {{ req.createdAt.slice(0, 10) }}
+                · účinnosť od {{ req.status === 'pending' ? approvalEffective(req) : (req.effectiveFrom ?? '—') }}</span>
+              @if (req.changeReason) {
+                <span>Dôvod zmeny: {{ req.changeReason }}</span>
+              }
+              <span class="muted-small">Zobrazený je obsah v stave pri odoslaní — neskoršie úpravy návrhu doň nevstupujú.</span>
+            } @else if (process.view === 'version' && process.version) {
               <strong>Zobrazená verzia v{{ process.version.revision }}</strong>
               <span>účinná od {{ process.version.effectiveFrom }}{{ process.version.effectiveTo ? ' do ' + process.version.effectiveTo : '' }}
                 · publikoval {{ process.version.publishedBy ?? '—' }}</span>
@@ -145,23 +154,38 @@
             @if (process.publication?.scheduled; as scheduled) {
               <span class="chip">v{{ scheduled.revision }} naplánovaná od {{ scheduled.effectiveFrom }}</span>
             }
-            @if (process.publication?.hasDraftChanges && (process.publication?.latestRevision ?? 0) > 0) {
+            @if (process.view !== 'approval' && process.publication?.hasDraftChanges && (process.publication?.latestRevision ?? 0) > 0) {
               <span class="chip warn">Návrh má zmeny oproti v{{ process.publication?.latestRevision }}</span>
+            }
+            @if (process.view !== 'approval' && process.publication?.pendingApproval; as pending) {
+              <span class="chip warn">Čaká na schválenie · odoslal(a) {{ pending.requestedBy ?? '—' }} {{ pending.createdAt.slice(0, 10) }}</span>
             }
           </div>
           <div class="pub-actions">
-            @if (process.publication?.effective) {
-              <div class="view-switch" role="group" aria-label="Zobrazenie">
-                <button type="button" [class.active]="viewMode() === 'draft'" (click)="setViewMode('draft')">Návrh</button>
-                <button type="button" [class.active]="viewMode() === 'effective'" (click)="setViewMode('effective')">Platná verzia</button>
-              </div>
-            }
-            @if (viewMode() === 'draft') {
-              <button type="button" class="primary small write-action" (click)="openPublish()"
-                [disabled]="!process.publication?.hasDraftChanges || missingRequired().length > 0"
-                [title]="missingRequired().length > 0 ? 'Najprv doplňte povinné údaje' : process.publication?.hasDraftChanges ? 'Zverejniť návrh ako novú verziu' : 'Návrh sa nelíši od poslednej verzie'">
-                Publikovať…
-              </button>
+            @if (process.view === 'approval') {
+              <button type="button" class="small" (click)="setViewMode('draft')">← Späť na proces</button>
+            } @else {
+              @if (process.publication?.effective) {
+                <div class="view-switch" role="group" aria-label="Zobrazenie">
+                  <button type="button" [class.active]="viewMode() === 'draft'" (click)="setViewMode('draft')">Návrh</button>
+                  <button type="button" [class.active]="viewMode() === 'effective'" (click)="setViewMode('effective')">Platná verzia</button>
+                </div>
+              }
+              @if (process.publication?.pendingApproval; as pending) {
+                <!-- #37 — kým sa o návrhu nerozhodne, ďalší sa neodosiela -->
+                <button type="button" class="small" [class.primary]="canDecide(pending)" (click)="openApproval(pending.id)">
+                  {{ canDecide(pending) ? 'Posúdiť návrh…' : 'Zobraziť návrh na schválenie' }}
+                </button>
+                @if (canWithdraw(pending)) {
+                  <button type="button" class="small" (click)="decide('withdraw', pending.id)">Stiahnuť žiadosť</button>
+                }
+              } @else if (viewMode() === 'draft') {
+                <button type="button" class="primary small write-action" (click)="openPublish(requireApproval ? 'approval' : 'publish')"
+                  [disabled]="!process.publication?.hasDraftChanges || missingRequired().length > 0"
+                  [title]="missingRequired().length > 0 ? 'Najprv doplňte povinné údaje' : process.publication?.hasDraftChanges ? (requireApproval ? 'Odoslať návrh schvaľovateľovi' : 'Zverejniť návrh ako novú verziu') : 'Návrh sa nelíši od poslednej verzie'">
+                  {{ requireApproval ? 'Odoslať na schválenie…' : 'Publikovať…' }}
+                </button>
+              }
             }
           </div>
           <!-- #28 — zrozumiteľné minimum pred publikovaním -->
@@ -183,9 +207,35 @@
           }
         </section>
 
+        @if (process.view === 'approval' && process.approvalRequest; as req) {
+          @if (canDecide(req)) {
+            <form class="publish-form decision-form" (ngSubmit)="decide('approve', req.id)">
+              <h4>Rozhodnutie o návrhu v{{ process.version?.revision }}</h4>
+              <label class="span-two">Komentár (pri zamietnutí povinný)
+                <textarea name="decisionComment" [(ngModel)]="decisionComment" rows="2"
+                  placeholder="Pri zamietnutí napíšte, čo treba v návrhu upraviť"></textarea>
+              </label>
+              @if (decisionError()) {
+                <p class="error span-two">{{ decisionError() }}</p>
+              }
+              <p class="muted-small span-two">Schválením vznikne verzia v{{ process.version?.revision }} účinná od {{ approvalEffective(req) }}.
+                Rozhodnutie sa zaznamená s vaším menom a miestom, ktoré dnes zastávate.</p>
+              <div class="edit-actions span-two">
+                <button class="primary" type="submit">Schváliť</button>
+                <button type="button" class="danger" (click)="decide('reject', req.id)">Zamietnuť</button>
+              </div>
+            </form>
+          } @else if (req.status === 'pending') {
+            <p class="notice">{{ req.requestedById === currentUserId ? 'Toto je vaša žiadosť — schváliť ju musí niekto iný.' : 'O návrhu rozhoduje schvaľovateľ.' }}</p>
+          } @else if (req.decision) {
+            <p class="notice">{{ req.status === 'approved' ? 'Schválené' : 'Zamietnuté' }}: {{ req.decision.by ?? '—' }}{{ req.decision.positions ? ' (' + req.decision.positions + ')' : '' }}
+              · {{ req.decidedAt?.slice(0, 10) }}{{ req.decision.comment ? ' — „' + req.decision.comment + '“' : '' }}</p>
+          }
+        }
+
         @if (publishOpen && viewMode() === 'draft') {
           <form class="publish-form write-action" (ngSubmit)="submitPublish()">
-            <h4>Publikovať v{{ (process.publication?.latestRevision ?? 0) + 1 }}</h4>
+            <h4>{{ publishMode === 'approval' ? 'Odoslať na schválenie' : 'Publikovať' }} v{{ (process.publication?.latestRevision ?? 0) + 1 }}</h4>
             <label>Účinnosť od
               <input type="date" name="effectiveFrom" [(ngModel)]="publishModel.effectiveFrom" [min]="todayLocal()" required>
             </label>
@@ -199,9 +249,14 @@
             @if (publishError()) {
               <p class="error span-two">{{ publishError() }}</p>
             }
-            <p class="muted-small span-two">Publikovaná verzia sa už nedá upraviť. Kým nezačne platiť, čitatelia vidia predchádzajúcu verziu.</p>
+            @if (publishMode === 'approval') {
+              <p class="muted-small span-two">Schvaľovateľ posúdi návrh presne v tomto stave — neskoršie úpravy do žiadosti nevstúpia.
+                Verzia vznikne až jeho schválením; dovtedy čitatelia vidia doterajšiu verziu.</p>
+            } @else {
+              <p class="muted-small span-two">Publikovaná verzia sa už nedá upraviť. Kým nezačne platiť, čitatelia vidia predchádzajúcu verziu.</p>
+            }
             <div class="edit-actions span-two">
-              <button class="primary" type="submit">Publikovať</button>
+              <button class="primary" type="submit">{{ publishMode === 'approval' ? 'Odoslať na schválenie' : 'Publikovať' }}</button>
               <button type="button" (click)="publishOpen = false">Zrušiť</button>
             </div>
           </form>
@@ -622,7 +677,7 @@
         <section class="card diagram-card">
           <header class="card-head">
             <h3>Diagram procesu</h3>
-            <button type="button" class="ghost small" (click)="tab.set('bpmn')">Otvorit editor</button>
+            <button type="button" class="ghost small" (click)="tab.set('bpmn')">{{ readOnlyView() ? 'Zobraziť diagram' : 'Otvorit editor' }}</button>
           </header>
           <div class="diagram-preview">
             @if ((process.diagramType ?? 'NONE') === 'BPMN' && process.bpmnXml) {
@@ -635,7 +690,7 @@
             } @else {
               <div class="diagram-placeholder">
                 <p>Tento proces nema diagram.</p>
-                <button type="button" class="small" (click)="tab.set('bpmn')">Vytvorit diagram</button>
+                <button type="button" class="small write-action" (click)="tab.set('bpmn')">Vytvorit diagram</button>
               </div>
             }
           </div>
@@ -717,7 +772,8 @@
                     </span>
                   </strong>
                   <small>od {{ version.effectiveFrom }}{{ version.effectiveTo ? ' do ' + version.effectiveTo : '' }}
-                    · {{ version.publishedBy ?? '—' }} · {{ version.publishedAt.slice(0, 10) }}</small>
+                    · {{ version.publishedBy ?? '—' }} · {{ version.publishedAt.slice(0, 10) }}
+                    {{ version.approvedBy ? ' · schválené: ' + version.approvedBy : '' }}</small>
                   @if (version.changeReason) { <p>{{ version.changeReason }}</p> }
                   <button type="button" class="small" (click)="openVersion(version)">Zobraziť</button>
                 </article>
@@ -725,6 +781,31 @@
                 <p class="muted">Proces ešte nebol publikovaný.</p>
               }
             </div>
+            <!-- #37 — kto návrh odoslal, kto a z akého miesta rozhodol -->
+            @if (approvals().length > 0) {
+              <div class="panel">
+                <h3>Schvaľovanie</h3>
+                @for (item of approvals(); track item.id) {
+                  <article class="change-row">
+                    <strong>
+                      {{ item.createdAt.slice(0, 10) }} · {{ item.requestedBy ?? '—' }}
+                      <span class="chip" [class.warn]="item.status === 'pending' || item.status === 'rejected'" [class.subtle]="item.status === 'approved'">
+                        {{ approvalStatusLabel(item.status) }}
+                      </span>
+                    </strong>
+                    @if (item.changeReason) { <p>{{ item.changeReason }}</p> }
+                    @if (item.decision) {
+                      <small>{{ item.status === 'approved' ? 'Schválené' : 'Zamietnuté' }}: {{ item.decision.by ?? '—' }}{{ item.decision.positions ? ' (' + item.decision.positions + ')' : '' }}
+                        · {{ item.decidedAt?.slice(0, 10) }}</small>
+                      @if (item.decision.comment) { <p>„{{ item.decision.comment }}“</p> }
+                    } @else if (item.status === 'withdrawn') {
+                      <small>Stiahnutá {{ item.decidedAt?.slice(0, 10) }}</small>
+                    }
+                    <button type="button" class="small" (click)="openApproval(item.id)">Zobraziť obsah</button>
+                  </article>
+                }
+              </div>
+            }
             <div class="panel">
               <h3>Zmeny procesu</h3>
               @for (change of history(); track change.id) {

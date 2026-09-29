@@ -230,8 +230,14 @@ GOV-01 #37 · GOV-02 #38 · LINK-01 #39 · QUAL-01 #40 · IMP-01 #41 · AI-01 #4
 | **CORE-01** #27 | `b898db2` (API), `8e90ca3` (UI) | `process-versions-test` 25/25; v prehliadači publikovanie v1, návrh so zmenami, prepínač návrh/platná verzia, schvaľovateľ vidí predvolene platnú verziu |
 | **CORE-02** #28 | `f43d968` | `quick-process-test` 15/15 — scenár 1 aj celý cez rozhranie: proces bez org. schémy, 3 kroky, miesto Účtovník vytvorené pri procese, zoznam chýbajúcich údajov, publikovanie |
 | **LINK-01** #39 | `9467fcf` | `bpmn-import-test` 17/17 — scenár 13: návrh s pôvodným XML bajt po bajte, bez krokov sa nepublikuje; v prehliadači neprihlásený návštevník → prihlásenie → návrat s diagramom → návrh procesu |
-| **UX-01a** #33 | *(tento commit)* | `my-work-test` 10/10 — scenár 2: Jana do D, Peter od D+1; k D+2 vidí proces Peter, Jana len ako vedúca; zlúčené role z viacerých miest so zdrojom; revízia do 30 dní / po termíne |
+| **UX-01a** #33 | `76ffaa0` | `my-work-test` 10/10 — scenár 2: Jana do D, Peter od D+1; k D+2 vidí proces Peter, Jana len ako vedúca; zlúčené role z viacerých miest so zdrojom; revízia do 30 dní / po termíne |
+| **GOV-01** #37 | `GOV01_HASH` | `approval-test` 26/26 — scenár 3 celý: firma zapne povinné schvaľovanie, editor odošle návrh (priame publikovanie 409), schvaľuje sa obsah zmrazený pri odoslaní, vlastnú žiadosť ani ISO auditor neschváli, zamietnutie len s dôvodom, stiahnutie; rozhodnutie ostáva pripísané Jane s miestom aj po jej odchode z miesta. V prehliadači: Eva odošle → Jana v „Moja práca" → posúdenie → schválenie → v1 platí do D−1, v2 naplánovaná, história so schválením |
 
 **Známe obmedzenia CORE-01:** strom procesov zobrazuje názov návrhu aj čitateľom (obsah detailu je
-z platnej verzie); naplánovanú verziu nemožno zrušiť ani nahradiť skoršou; publikuje každý s
-oprávnením `process:write` (schvaľovanie príde v GOV-01); samostatná rola „čitateľ" zatiaľ nie je.
+z platnej verzie); naplánovanú verziu nemožno zrušiť ani nahradiť skoršou; bez zapnutého schvaľovania
+publikuje každý s oprávnením `process:write`; samostatná rola „čitateľ" zatiaľ nie je.
+
+**Známe obmedzenia GOV-01:** jednokrokové schvaľovanie (rozhoduje ktokoľvek s `approval:approve`,
+okrem žiadateľa) — viac krokov a schvaľovateľ určený miestom zatiaľ nie; o novej žiadosti sa
+schvaľovateľ dozvie len v „Moja práca" (upozornenia sú GOV-02 #38); archív a jednotný audit udalostí
+ostávajú na GOV-02 / QUAL-01.

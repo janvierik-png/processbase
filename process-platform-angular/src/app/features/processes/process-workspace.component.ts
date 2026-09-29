@@ -12,6 +12,7 @@ import { PdfPreviewComponent } from '../../shared/pdf-preview.component';
 import { ProcessStoreService } from '../../core/services/process-store.service';
 import { PositionService } from '../../core/services/position.service';
 import {
+  ApprovalRequestInfo,
   Attachment,
   IsoNorm,
   IsoSuggestion,
@@ -127,7 +128,8 @@ export class ProcessWorkspaceComponent implements OnInit {
       const id = params.get('id');
       if (id) {
         this.store.setActive(id);
-        this.openDetail(id);
+        // #37 — odkaz zo schránky schvaľovateľa otvorí priamo posudzovaný obsah
+        this.openDetail(id, 'draft', this.route.snapshot.queryParamMap.get('approval'));
       }
     });
   }
@@ -200,7 +202,7 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   // --- R3: karta procesu ---
 
-  openDetail(id: string, mode: 'draft' | 'effective' = 'draft'): void {
+  openDetail(id: string, mode: 'draft' | 'effective' = 'draft', approvalId: string | null = null): void {
     this.tab.set('card');
     this.viewedRevision.set(null);
     this.editSection.set(null);
@@ -211,6 +213,10 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.store.detail(id).subscribe({
       next: (detail) => {
         this.ownerPositionDraft = detail.ownerPosition?.id ?? '';
+        if (approvalId) {
+          this.openApproval(approvalId);
+          return;
+        }
         // #27 — kto proces neupravuje, vidí predovšetkým platnú verziu
         if (mode === 'effective' || (!this.canWrite && detail.publication?.effective)) {
           this.showEffective(id);
@@ -221,6 +227,7 @@ export class ProcessWorkspaceComponent implements OnInit {
       error: () => this.detail.set(null)
     });
     this.store.versions(id).subscribe({ next: (versions) => this.versions.set(versions), error: () => this.versions.set([]) });
+    this.store.approvalRequests(id).subscribe({ next: (items) => this.approvals.set(items), error: () => this.approvals.set([]) });
     this.store.history(id).subscribe({
       next: (history) => this.history.set(history),
       error: () => this.history.set([])
@@ -428,7 +435,7 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   // --- #27 verzie procesu ---
 
-  readonly viewMode = signal<'draft' | 'effective'>('draft');
+  readonly viewMode = signal<'draft' | 'effective' | 'approval'>('draft');
   readonly versions = signal<ProcessVersionMeta[]>([]);
   readonly publishError = signal('');
   publishOpen = false;
@@ -441,12 +448,13 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   /** Publikovaná verzia alebo bez oprávnenia — nič sa nedá meniť. */
   readOnlyView(): boolean {
-    return !this.canWrite || this.viewMode() === 'effective';
+    return !this.canWrite || this.viewMode() !== 'draft';
   }
 
   setViewMode(mode: 'draft' | 'effective'): void {
     const id = this.detail()?.id;
     if (!id || mode === this.viewMode()) return;
+    this.clearApprovalParam();
     if (mode === 'effective') {
       this.viewMode.set('effective');
       this.editSection.set(null);
@@ -483,8 +491,9 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.documents.set((detail.documents ?? []).map((document) => ({ id: document.id, name: document.name, type: '', owner: '' })));
   }
 
-  openPublish(): void {
+  openPublish(mode: 'publish' | 'approval' = 'publish'): void {
     this.publishError.set('');
+    this.publishMode = mode;
     this.publishModel = { effectiveFrom: this.todayLocal(), changeReason: '', nextReviewAt: '' };
     this.publishOpen = true;
   }
@@ -492,19 +501,119 @@ export class ProcessWorkspaceComponent implements OnInit {
   submitPublish(): void {
     const detail = this.detail();
     if (!detail) return;
-    this.store.publish(detail.id, {
+    const payload = {
       effectiveFrom: this.publishModel.effectiveFrom,
       changeReason: this.publishModel.changeReason.trim() || undefined,
       nextReviewAt: this.publishModel.nextReviewAt || undefined
-    }).subscribe({
-      next: (version) => {
-        this.publishOpen = false;
-        this.deployState.set(`Publikovaná verzia v${version.revision}, účinná od ${version.effectiveFrom}.`);
-        this.store.loadFromDatabase();
-        this.openDetail(detail.id, 'draft');
-      },
+    };
+    const done = (message: string) => {
+      this.publishOpen = false;
+      this.deployState.set(message);
+      this.store.loadFromDatabase();
+      this.openDetail(detail.id, 'draft');
+    };
+    if (this.publishMode === 'approval') {
+      this.store.submitForApproval(detail.id, payload).subscribe({
+        next: () => done('Návrh je odoslaný na schválenie. Verzia vznikne, keď ho schvaľovateľ schváli.'),
+        error: (error) => this.publishError.set(error?.error?.message ?? 'Návrh sa nepodarilo odoslať na schválenie.')
+      });
+      return;
+    }
+    this.store.publish(detail.id, payload).subscribe({
+      next: (version) => done(`Publikovaná verzia v${version.revision}, účinná od ${version.effectiveFrom}.`),
       error: (error) => this.publishError.set(error?.error?.message ?? 'Proces sa nepodarilo publikovať.')
     });
+  }
+
+  // --- #37 schvaľovanie ---
+
+  readonly approvals = signal<ApprovalRequestInfo[]>([]);
+  readonly decisionError = signal('');
+  publishMode: 'publish' | 'approval' = 'publish';
+  decisionComment = '';
+
+  get currentUserId(): string | undefined {
+    return this.auth.currentUser()?.id;
+  }
+
+  /** Firma zverejňuje verzie len schválením — priame publikovanie sa neponúka. */
+  get requireApproval(): boolean {
+    return Boolean(this.auth.currentOrganization()?.requireApproval);
+  }
+
+  /** Rozhodnúť smie schvaľovateľ, nie ten, kto zmenu navrhol (oddelenie povinností). */
+  canDecide(request: { requestedById: string | null; status?: string } | null | undefined): boolean {
+    return Boolean(request && (request.status ?? 'pending') === 'pending' && this.auth.can('approval:approve')
+      && request.requestedById !== this.auth.currentUser()?.id);
+  }
+
+  /** Stiahnuť smie žiadateľ, alebo vlastník či administrátor firmy — ako na serveri. */
+  canWithdraw(request: { requestedById: string | null; status?: string } | null | undefined): boolean {
+    const user = this.auth.currentUser();
+    if (!request || !user || !this.canWrite || (request.status ?? 'pending') !== 'pending') return false;
+    return request.requestedById === user.id || user.roleId === 'owner' || user.roleId === 'admin';
+  }
+
+  /** Účinnosť, ktorá medzičasom prešla, začne dňom schválenia — nie spätne. */
+  approvalEffective(request: ApprovalRequestInfo): string {
+    const today = this.todayLocal();
+    return request.effectiveFrom && request.effectiveFrom > today ? request.effectiveFrom : today;
+  }
+
+  approvalStatusLabel(status: ApprovalRequestInfo['status']): string {
+    return { pending: 'čaká na schválenie', approved: 'schválená', rejected: 'zamietnutá', withdrawn: 'stiahnutá' }[status];
+  }
+
+  /** Obsah zmrazený pri odoslaní — o tom schvaľovateľ rozhoduje, nie o neskorších úpravách. */
+  openApproval(requestId: string): void {
+    this.store.approvalView(requestId).subscribe({
+      next: (detail) => {
+        this.viewMode.set('approval');
+        this.tab.set('card');
+        this.editSection.set(null);
+        this.publishOpen = false;
+        this.decisionComment = '';
+        this.decisionError.set('');
+        this.applyVersion(detail);
+      },
+      error: (error) => this.store.error.set(error?.error?.message ?? 'Návrh na schválenie sa nepodarilo načítať.')
+    });
+  }
+
+  decide(decision: 'approve' | 'reject' | 'withdraw', requestId: string): void {
+    const id = this.detail()?.id;
+    if (!id) return;
+    const comment = this.decisionComment.trim();
+    if (decision === 'reject' && !comment) {
+      this.decisionError.set('Uveďte dôvod zamietnutia — autor podľa neho návrh upraví.');
+      return;
+    }
+    if (decision === 'withdraw' && !window.confirm('Stiahnuť žiadosť o schválenie? Návrh ostane rozpracovaný.')) return;
+    this.decisionError.set('');
+    this.store.decideApproval(requestId, decision, comment || undefined).subscribe({
+      next: () => {
+        this.deployState.set({
+          approve: 'Návrh je schválený — vznikla nová verzia procesu.',
+          reject: 'Návrh je zamietnutý. Autor vidí dôvod v histórii procesu.',
+          withdraw: 'Žiadosť o schválenie je stiahnutá.'
+        }[decision]);
+        this.clearApprovalParam();
+        this.store.loadFromDatabase();
+        this.openDetail(id, 'draft');
+      },
+      error: (error) => {
+        const message = error?.error?.message ?? 'Rozhodnutie sa nepodarilo uložiť.';
+        if (decision === 'withdraw') this.store.error.set(message);
+        else this.decisionError.set(message);
+      }
+    });
+  }
+
+  /** Po rozhodnutí alebo návrate na návrh už URL nemá ukazovať na žiadosť. */
+  private clearApprovalParam(): void {
+    if (this.route.snapshot.queryParamMap.has('approval')) {
+      this.router.navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl: true });
+    }
   }
 
   /** B7 — co smie prihlaseny menit; server to kontroluje aj tak. */

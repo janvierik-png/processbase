@@ -51,8 +51,10 @@ export interface ProcessDetail extends ProcessNode {
   parentName?: string | null;
   childProcesses?: Array<{ id: string; name: string }>;
   relatedProcesses?: Array<{ id: string; name: string }>;
-  /** #27 — 'draft' = rozpracovaný návrh, 'version' = publikovaná verzia (len na čítanie) */
-  view?: 'draft' | 'version';
+  /** #27 — 'draft' = rozpracovaný návrh, 'version' = publikovaná verzia, 'approval' = návrh na schválenie; posledné dve len na čítanie */
+  view?: 'draft' | 'version' | 'approval';
+  /** #37 — pri view 'approval': žiadosť, ktorej zmrazený obsah sa zobrazuje */
+  approvalRequest?: ApprovalRequestInfo;
   version?: ProcessVersionMeta;
   /** dokumenty v publikovanej verzii (stav pri publikovaní) */
   documents?: Array<{ id: string; name: string }>;
@@ -88,6 +90,26 @@ export interface ProcessPublication {
   latestRevision: number;
   /** návrh sa líši od poslednej publikovanej verzie */
   hasDraftChanges: boolean;
+  /** #37 — žiadosť o schválenie, ktorá čaká na rozhodnutie */
+  pendingApproval?: { id: string; requestedBy: string | null; requestedById: string | null; createdAt: string; effectiveFrom: string | null } | null;
+}
+
+/** #37 — žiadosť o schválenie verzie procesu. */
+export interface ApprovalRequestInfo {
+  id: string;
+  processId: string;
+  processName?: string;
+  status: 'pending' | 'approved' | 'rejected' | 'withdrawn';
+  requestedBy: string | null;
+  requestedById: string | null;
+  createdAt: string;
+  effectiveFrom: string | null;
+  nextReviewAt: string | null;
+  changeReason: string | null;
+  decidedAt: string | null;
+  /** kto rozhodol a aké miesto vtedy zastával */
+  decision: { by: string | null; positions: string | null; comment: string | null } | null;
+  versionId: string | null;
 }
 
 export interface ProcessVersionMeta {
@@ -99,6 +121,9 @@ export interface ProcessVersionMeta {
   changeReason: string | null;
   publishedAt: string;
   publishedBy: string | null;
+  /** #37 — kto verziu schválil (pri priamom publikovaní null) */
+  approvedBy?: string | null;
+  approvedAt?: string | null;
   state: 'effective' | 'scheduled' | 'superseded';
 }
 
