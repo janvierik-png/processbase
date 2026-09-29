@@ -15,6 +15,7 @@ import {
   JobDescriptionStatus,
   ResponsibilityRole
 } from '../generated/prisma/client';
+import { acceptRequestId, logError } from './log';
 import { prisma } from './prisma';
 import { SECRETS_FILE, secret } from './secrets';
 import { APP_URL, emailDeliveryStats, queueEmail } from './mailer';
@@ -61,7 +62,11 @@ const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
  * Bezpecnostne hlavicky (#6). Rucne namiesto helmet, aby pribudnutie zavislosti
  * nevynutilo prestavbu node_modules volume v Dockeri.
  */
-app.use((_request, response, next) => {
+app.use((request, response, next) => {
+  // #32 — ID poziadavky spaja chybu v logu s tym, co nahlasi pouzivatel
+  const requestId = acceptRequestId(request.get('x-request-id'), randomUUID);
+  response.locals['requestId'] = requestId;
+  response.setHeader('X-Request-Id', requestId);
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('X-Frame-Options', 'DENY');
   response.setHeader('Referrer-Policy', 'no-referrer');
@@ -77,7 +82,7 @@ app.use((_request, response, next) => {
  * nikdy obsah poziadavky ani odpovede (moze obsahovat udaje zakaznika).
  */
 const serviceMetrics = { startedAt: new Date(), requests: 0, clientErrors: 0, serverErrors: 0 };
-type Incident = { at: string; method: string; route: string; status: number; error: string | null };
+type Incident = { at: string; method: string; route: string; status: number; error: string | null; requestId: string | null };
 const incidents: Incident[] = [];
 const MAX_INCIDENTS = 50;
 
@@ -101,7 +106,8 @@ app.use((request, response, next) => {
         method: request.method,
         route: routeLabel(request),
         status: response.statusCode,
-        error: (response.locals['errorName'] as string | undefined) ?? null
+        error: (response.locals['errorName'] as string | undefined) ?? null,
+        requestId: (response.locals['requestId'] as string | undefined) ?? null
       });
       incidents.length = Math.min(incidents.length, MAX_INCIDENTS);
     } else if (response.statusCode >= 400) {
@@ -284,7 +290,7 @@ app.use('/api', (request, response, next) => {
   if (!rule) {
     // fail-closed: novy zapisujuci endpoint bez pravidla sa odmietne, kym sa nedoplni
     if (WRITE_METHODS.has(request.method) && !SELF_SERVICE_WRITES.some((pattern) => pattern.test(fullPath))) {
-      console.error(`[opravnenia] chyba pravidlo pre ${request.method} ${fullPath}`);
+      console.error(`[opravnenia] req=${response.locals['requestId']} chyba pravidlo pre ${request.method} ${routeLabel(request)}`);
       response.status(403).json({ message: 'Na tuto akciu nemate opravnenie.' });
       return;
     }
@@ -2355,7 +2361,7 @@ app.post('/api/register', async (request, response, next) => {
 
     const token = await createSession(result.user.id, result.organization.id);
     // #20 — overovaci email; registraciu neblokuje, ak sa nepodari zaradit do fronty
-    await sendVerificationEmail(result.user).catch((error) => console.error('[email] overenie:', error));
+    await sendVerificationEmail(result.user).catch((error) => logError('email', error, response.locals['requestId']));
 
     response.status(201).json({
       token,
@@ -2711,7 +2717,7 @@ app.post('/api/invitations/:token/accept', rateLimitLogin, async (request, respo
     // #1 — bez tokenu by novy kolega po prijati pozvanky dostal hned 401
     const token = await createSession(result.user.id, invitation.organizationId);
     if (!result.user.emailVerifiedAt) {
-      await sendVerificationEmail(result.user).catch((error) => console.error('[email] overenie:', error));
+      await sendVerificationEmail(result.user).catch((error) => logError('email', error, response.locals['requestId']));
     }
     response.json({
       token,
@@ -3712,7 +3718,7 @@ async function autoTranslateProcess(organizationId: string, processId: string): 
       }
     });
   } catch (error) {
-    console.error('Auto-translate zlyhal:', error);
+    logError('preklad', error);
   }
 }
 
@@ -3911,7 +3917,7 @@ async function writeBackofficeAudit(entry: {
       targetId: entry.targetId ?? null,
       detail: (entry.detail ?? undefined) as any
     }
-  }).catch((error) => console.error('[audit] zapis zlyhal:', error));
+  }).catch((error) => logError('audit', error));
 }
 
 /**
@@ -4406,23 +4412,27 @@ const STATIC_DIR = process.env['STATIC_DIR'];
 if (STATIC_DIR) serveSpa(app, STATIC_DIR);
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
-  console.error(error);
+  const requestId = response.locals['requestId'] as string | undefined;
   if (error instanceof HttpError) {
-    if (error.status >= 500) response.locals['errorName'] = `HttpError ${error.status}`;
-    response.status(error.status).json({ message: error.message });
+    // 4xx je odpoved pre pouzivatela (moze obsahovat nazvy z jeho firmy) — do logu nie
+    if (error.status >= 500) {
+      response.locals['errorName'] = `HttpError ${error.status}`;
+      logError('api', error, requestId);
+    }
+    response.status(error.status).json(error.status >= 500 ? { message: error.message, requestId } : { message: error.message });
     return;
   }
-  // telo poziadavky prekrocilo limit express.json
-  if ((error as any)?.type === 'entity.too.large' || (error as any)?.status === 413) {
-    response.status(413).json({
-      message: 'Poziadavka je prilis velka.'
-    });
+  // chyby tela poziadavky z express.json (prilis velke, neplatny JSON) su 4xx
+  const status = (error as { status?: unknown })?.status;
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    response.status(status).json({ message: status === 413 ? 'Poziadavka je prilis velka.' : 'Neplatna poziadavka.' });
     return;
   }
-  // detail len do logu servera — sprava chyby (napr. z Prismy) moze prezradit
-  // strukturu databazy alebo casti dotazu
+  // sprava chyby (napr. z Prismy) moze obsahovat strukturu databazy a casti
+  // dotazu s datami — neide klientovi ani do logu (#32), len druh a ID poziadavky
   response.locals['errorName'] = error instanceof Error ? error.name : typeof error;
-  response.status(500).json({ message: 'Nastala chyba servera. Skuste to znova.' });
+  logError('api', error, requestId);
+  response.status(500).json({ message: 'Nastala chyba servera. Skuste to znova.', requestId });
 });
 
 class HttpError extends Error {
@@ -4455,10 +4465,21 @@ async function ensureFirstBackofficeAdmin(): Promise<void> {
   console.log(`[backoffice] admin "${username}" vytvoreny, docasne heslo je v ${file} — po prihlaseni ho zmente a subor zmazte.`);
 }
 
+// #32 — Node by pri neosetrenej chybe vypisal celu spravu (moze niest data z dotazu);
+// zapiseme len druh a miesto a proces ukoncime ako predtym (Docker ho spusti znova)
+process.on('uncaughtException', (error) => {
+  logError('neosetrena', error);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  logError('neosetrena', reason);
+  process.exit(1);
+});
+
 app.listen(port, host, () => {
   console.log(`API listening on http://${host}:${port}`);
-  reencryptLegacySecrets().catch((error) => console.error('[secrets] presifrovanie zlyhalo:', error));
-  ensureFirstBackofficeAdmin().catch((error) => console.error('[backoffice] prvy admin:', error));
+  reencryptLegacySecrets().catch((error) => logError('secrets', error));
+  ensureFirstBackofficeAdmin().catch((error) => logError('backoffice', error));
 });
 
 /**

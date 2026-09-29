@@ -77,6 +77,14 @@ jobs:
       - name: Testy API (izolacia firiem, ulozisko, organizacia, backoffice)
         run: npm run test:api
 
+      - name: Log API bez udajov z poziadaviek (#32)
+        run: |
+          # testy posielaju oznaceny obsah (LOGMARK-), testovacie e-maily a nazvy firiem
+          # aj do ciest, ktore koncia chybou — v logu servera nesmie byt nic z toho
+          if grep -nE "LOGMARK-|@example\.test|Org Test" api.log; then
+            echo "::error::Log API obsahuje udaje z poziadaviek"; exit 1
+          fi
+
       - name: Log API pri chybe
         if: failure()
         run: cat api.log || true

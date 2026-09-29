@@ -298,7 +298,10 @@ B3, B6 — opravené (#19).
   dokumentov ani mená ľudí. Kapacitu môže zmeniť — zásah ide do auditu so starou a novou hodnotou.
 - Stav služby: dostupnosť a veľkosť DB, súbory na disku vs. prílohy ešte v DB, požiadavky a 5xx od
   štartu, posledných 20 incidentov (metóda, routa, stav, typ chyby — bez obsahu). E-maily: nenakonfigurované (#20).
-- Odpoveď 500 už neposiela klientovi text chyby (mohol prezradiť štruktúru DB); detail je len v logu servera.
+- Odpoveď 500 už neposiela klientovi text chyby (mohol prezradiť štruktúru DB), len ID požiadavky.
+- #32 SEC-01f: ani log servera neobsahuje správu chyby — len druh, kód, miesto v kóde a ID požiadavky
+  (`server/log.ts`); 4xx sa nelogujú. Predtým log obsahoval z chyby Prismy aj názov a popis procesu
+  (overené negatívnou kontrolou). CI po testoch overí, že `api.log` neobsahuje testovacie údaje.
 - Metriky sú v pamäti procesu (od posledného štartu); audit je v DB (`BackofficeAuditLog`).
 
 **Etapa 5 — e-maily (#20), stav:** tokeny (hash v DB, 48 h overenie / 1 h obnova, jednorazové,

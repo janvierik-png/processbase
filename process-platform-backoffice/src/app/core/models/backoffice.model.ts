@@ -45,7 +45,7 @@ export interface ServiceHealth {
   };
   activeSessions: number;
   requests: { total: number; clientErrors: number; serverErrors: number; serverErrorsLastHour: number };
-  incidents: Array<{ at: string; method: string; route: string; status: number; error: string | null }>;
+  incidents: Array<{ at: string; method: string; route: string; status: number; error: string | null; requestId?: string | null }>;
   email: { configured: boolean; transport?: string; queued?: number; sentLastDay?: number; failedLastDay?: number; note: string };
 }
 

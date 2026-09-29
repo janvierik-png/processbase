@@ -67,7 +67,7 @@
       <p class="muted">Žiadne.</p>
     } @else {
       <table>
-        <thead><tr><th>Čas</th><th>Požiadavka</th><th>Stav</th><th>Typ chyby</th></tr></thead>
+        <thead><tr><th>Čas</th><th>Požiadavka</th><th>Stav</th><th>Typ chyby</th><th>ID požiadavky</th></tr></thead>
         <tbody>
           @for (incident of h.incidents; track $index) {
             <tr>
@@ -75,6 +75,8 @@
               <td><code>{{ incident.method }} {{ incident.route }}</code></td>
               <td>{{ incident.status }}</td>
               <td>{{ incident.error ?? '—' }}</td>
+              <!-- #32 — rovnaké ID je v logu servera aj v odpovedi, ktorú videl používateľ -->
+              <td><code>{{ incident.requestId ?? '—' }}</code></td>
             </tr>
           }
         </tbody>

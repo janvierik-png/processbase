@@ -25,6 +25,13 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
         // na verejných stránkach presmerovanie netreba
         if (router.url.startsWith('/app')) router.navigateByUrl('/');
       }
+      // #32 — pri chybe servera ukázať ID požiadavky, podľa ktorého sa nájde v logu
+      if (error instanceof HttpErrorResponse && error.status >= 500) {
+        const body = error.error as { message?: unknown; requestId?: unknown } | null;
+        if (body && typeof body.message === 'string' && typeof body.requestId === 'string' && !body.message.includes(body.requestId)) {
+          body.message = `${body.message} (ID chyby: ${body.requestId})`;
+        }
+      }
       return throwError(() => error);
     })
   );
