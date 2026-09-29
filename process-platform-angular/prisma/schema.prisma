@@ -109,6 +109,7 @@ model Organization {
   assignments        PositionAssignment[]
   jobProfiles        JobProfile[]
   jobDescriptions    JobDescriptionVersion[]
+  processVersions    ProcessVersion[]
 }
 
 /// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
@@ -149,6 +150,7 @@ model User {
   persons        Person[]
   jobDescriptions JobDescriptionVersion[]
   authTokens     AuthToken[]
+  publishedVersions ProcessVersion[] @relation("ProcessVersionPublisher")
   sessions       Session[]
   processChanges ProcessChangeLog[]
 }
@@ -235,8 +237,38 @@ model ProcessNode {
   camundaDeployments CamundaDeployment[]
   positions          ProcessPosition[]
   changeLogs         ProcessChangeLog[]
+  versions           ProcessVersion[]
 
   @@index([organizationId, parentId, sortOrder])
+}
+
+/// Publikovana verzia procesu (#27 CORE-01). Snapshot sa uz nemeni — dalsia
+/// uprava procesu je navrh (ProcessNode) a az publikovanim vznikne nova verzia.
+/// ID procesu ostava rovnake, cita sa verzia ucinna v danom dni.
+model ProcessVersion {
+  id             String       @id @default(uuid())
+  organizationId String
+  processNodeId  String
+  revision       Int
+  /// obsah v case publikovania — texty, diagram, zodpovednosti (ID miest, nie mena),
+  /// dokumenty (ID priloh); meno drzitela sa odvodzuje z obsadenia v case
+  snapshot       Json
+  /// odtlacok obsahu — ci ma navrh zmeny oproti tejto verzii
+  contentHash    String
+  changeReason   String?
+  effectiveFrom  DateTime     @db.Date
+  /// posledny den platnosti (vratane); null = plati, kym ju nenahradi dalsia verzia
+  effectiveTo    DateTime?    @db.Date
+  nextReviewAt   DateTime?    @db.Date
+  publishedById  String?
+  publishedAt    DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  processNode    ProcessNode  @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  publishedBy    User?        @relation("ProcessVersionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@unique([processNodeId, revision])
+  @@index([processNodeId, effectiveFrom])
 }
 
 model ProcessRevision {

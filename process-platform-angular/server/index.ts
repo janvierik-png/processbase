@@ -237,7 +237,7 @@ const PERMISSION_RULES: PermissionRule[] = [
     anyOf: (request) => (isIsoOnlyPatch(request.body) ? ['process:write', 'iso:write'] : ['process:write'])
   },
   { methods: ['DELETE'], pattern: /^\/api\/processes\/[^/]+$/, anyOf: ['process:write'] },
-  { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/(documents|revisions|camunda7\/deploy)$/, anyOf: ['process:write'] },
+  { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/(documents|revisions|camunda7\/deploy|publish)$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/camunda7\/deploy$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/iso-detect$/, anyOf: ['process:write', 'iso:write'] },
   { methods: ['PATCH', 'DELETE'], pattern: /^\/api\/documents\/[^/]+$/, anyOf: ['process:write'] },
@@ -306,6 +306,7 @@ type ProcessTreeNode = {
   ownerPosition?: Responsibility | null;
   vacantResponsibilities?: Responsibility[];
   status?: string;
+  publication?: Publication;
   revision?: string;
   purpose?: string;
   risks?: string;
@@ -448,7 +449,8 @@ function mapNode(node: any): ProcessTreeNode {
     ownerPosition,
     // neobsadena zodpovednost musi byt vidiet (#14, #15)
     vacantResponsibilities: responsibilities.filter((item: any) => item.vacant),
-    status: mapStatusFromDb(node.status),
+    // #27 — stav sa uz nenastavuje rucne, vyplyva z publikovanych verzii
+    ...publicationState(node),
     revision: node.revisions?.[0]?.createdAt?.toISOString().slice(0, 10) ?? node.updatedAt?.toISOString().slice(0, 10),
     purpose: node.description ?? '',
     risks: '',
@@ -498,21 +500,6 @@ function buildProcessTree(nodes: any[]): ProcessTreeNode[] {
   return roots.sort((a, b) => a.sortOrder - b.sortOrder).map(mapNode);
 }
 
-function mapStatusToDb(status?: string): ProcessStatus {
-  const normalized = (status ?? '').toLowerCase();
-  if (normalized.includes('schval')) return ProcessStatus.APPROVED;
-  if (normalized.includes('review') || normalized.includes('kontrol')) return ProcessStatus.IN_REVIEW;
-  if (normalized.includes('arch')) return ProcessStatus.ARCHIVED;
-  return ProcessStatus.DRAFT;
-}
-
-function mapStatusFromDb(status: ProcessStatus): string {
-  if (status === ProcessStatus.APPROVED) return 'Schvalene';
-  if (status === ProcessStatus.IN_REVIEW) return 'Na schvalenie';
-  if (status === ProcessStatus.ARCHIVED) return 'Archiv';
-  return 'Navrh';
-}
-
 function isoLinksFromBody(iso: unknown): string[] {
   if (!Array.isArray(iso)) return [];
   return iso.map((item: any) => `${item.standard ?? ''}:${item.clause ?? ''}`.replace(/:$/, '')).filter(Boolean);
@@ -532,7 +519,8 @@ app.get('/api/organizations/:organizationId/processes', async (request, response
       include: {
         owner: { select: { name: true } },
         revisions: { orderBy: { createdAt: 'desc' } },
-        positions: responsibilityInclude()
+        positions: responsibilityInclude(),
+        ...publicationInclude()
       }
     });
     response.json(buildProcessTree(nodes));
@@ -555,7 +543,8 @@ app.post('/api/organizations/:organizationId/processes', async (request, respons
         type,
         name,
         description: request.body.purpose ?? null,
-        status: mapStatusToDb(request.body.status),
+        // #27 — novy proces je vzdy navrh; platnym sa stane az publikovanim
+        status: ProcessStatus.DRAFT,
         sortOrder: Number(request.body.sortOrder ?? 0),
         bpmnXml: type === ProcessNodeType.PROCESS ? emptyBpmnXml(`process_${Date.now()}`, name) : null,
         isoLinks: isoLinksFromBody(request.body.iso)
@@ -592,9 +581,275 @@ function processInclude() {
     owner: { select: { name: true } },
     revisions: { orderBy: { createdAt: 'desc' as const } },
     children: true,
-    positions: responsibilityInclude()
+    positions: responsibilityInclude(),
+    ...publicationInclude()
   };
 }
+
+/**
+ * #27 — co treba k vypoctu stavu publikovania: verzie (bez snapshotu) a prilohy
+ * (patria do obsahu navrhu, takze menia jeho odtlacok).
+ */
+function publicationInclude() {
+  return {
+    versions: {
+      orderBy: { revision: 'desc' as const },
+      select: { revision: true, effectiveFrom: true, effectiveTo: true, contentHash: true }
+    },
+    attachments: { select: { id: true, fileName: true } }
+  };
+}
+
+// --- #27 CORE-01 verzie procesu: navrh vs. nemenna publikovana verzia ---
+
+type Publication = {
+  effective: { revision: number; effectiveFrom: string } | null;
+  scheduled: { revision: number; effectiveFrom: string } | null;
+  latestRevision: number;
+  /** navrh (ProcessNode) sa lisi od poslednej publikovanej verzie */
+  hasDraftChanges: boolean;
+};
+
+type ProcessSnapshot = {
+  schema: 1;
+  name: string;
+  purpose: string;
+  descriptionText: string;
+  diagramType: string;
+  bpmnXml: string | null;
+  flowchartXml: string | null;
+  isoLinks: string[];
+  relatedProcessIds: string[];
+  /** ID miest, nie mena — kto miesto zastava, sa odvodzuje z obsadenia v case */
+  responsibilities: Array<{ positionId: string; role: string }>;
+  documentIds: string[];
+  documents: Array<{ id: string; name: string }>;
+};
+
+/** Verzia ucinna v dany den; v jeden den s dvoma verziami vyhra vyssia revizia. */
+function pickEffective<T extends { revision: number; effectiveFrom: Date; effectiveTo: Date | null }>(versions: T[], at: Date): T | null {
+  return versions
+    .filter((version) => version.effectiveFrom <= at && (!version.effectiveTo || version.effectiveTo >= at))
+    .sort((a, b) => b.revision - a.revision)[0] ?? null;
+}
+
+/** Obsah procesu v tvare, ktory sa uklada do publikovanej verzie. */
+function buildSnapshot(node: any): ProcessSnapshot {
+  const responsibilities = (node.positions ?? [])
+    .map((link: any) => ({ positionId: link.positionId, role: String(link.role) }))
+    .sort((a: any, b: any) => `${a.role}:${a.positionId}`.localeCompare(`${b.role}:${b.positionId}`));
+  const documents = (node.attachments ?? [])
+    .map((attachment: any) => ({ id: attachment.id, name: attachment.fileName }))
+    .sort((a: any, b: any) => a.id.localeCompare(b.id));
+  return {
+    schema: 1,
+    name: node.name,
+    purpose: node.description ?? '',
+    descriptionText: node.descriptionText ?? '',
+    diagramType: node.diagramType ?? 'NONE',
+    bpmnXml: node.bpmnXml ?? null,
+    flowchartXml: node.flowchartXml ?? null,
+    isoLinks: [...(node.isoLinks ?? [])].sort(),
+    relatedProcessIds: [...(node.relatedProcessIds ?? [])].sort(),
+    responsibilities,
+    documentIds: documents.map((document: any) => document.id),
+    documents
+  };
+}
+
+/** Odtlacok obsahu; premenovanie dokumentu nie je zmena postupu, preto bez nazvov. */
+function snapshotHash(snapshot: ProcessSnapshot): string {
+  const { documents: _names, ...content } = snapshot;
+  return createHash('sha256').update(JSON.stringify(content)).digest('hex');
+}
+
+/** Stav procesu z jeho verzii — rucne nastavit sa neda (predtym sa dal oznacit "schvaleny" bez schvalenia). */
+function publicationState(node: any): { status: string; publication?: Publication } {
+  if (node.type === ProcessNodeType.GROUP) return { status: '' };
+  if (!node.versions) return { status: 'Návrh' };
+  const now = today();
+  const versions = node.versions as Array<{ revision: number; effectiveFrom: Date; effectiveTo: Date | null; contentHash: string }>;
+  const latest = [...versions].sort((a, b) => b.revision - a.revision)[0] ?? null;
+  const effective = pickEffective(versions, now);
+  const scheduled = latest && latest.effectiveFrom > now ? latest : null;
+  return {
+    status: effective ? `Platná v${effective.revision}` : scheduled ? `Naplánovaná v${scheduled.revision}` : 'Návrh',
+    publication: {
+      effective: effective ? { revision: effective.revision, effectiveFrom: day(effective.effectiveFrom)! } : null,
+      scheduled: scheduled ? { revision: scheduled.revision, effectiveFrom: day(scheduled.effectiveFrom)! } : null,
+      latestRevision: latest?.revision ?? 0,
+      hasDraftChanges: latest ? snapshotHash(buildSnapshot(node)) !== latest.contentHash : true
+    }
+  };
+}
+
+function mapVersionMeta(version: any, now = today()) {
+  return {
+    id: version.id,
+    revision: version.revision,
+    effectiveFrom: day(version.effectiveFrom),
+    effectiveTo: day(version.effectiveTo),
+    nextReviewAt: day(version.nextReviewAt),
+    changeReason: version.changeReason ?? null,
+    publishedAt: version.publishedAt.toISOString(),
+    publishedBy: version.publishedBy?.name ?? null,
+    state: version.effectiveFrom > now
+      ? 'scheduled'
+      : !version.effectiveTo || version.effectiveTo >= now ? 'effective' : 'superseded'
+  };
+}
+
+/**
+ * Publikovana verzia v tvare detailu procesu. Zodpovednosti sa zobrazia s ludmi,
+ * ktori miesta zastavali v den `at` — nie s dnesnymi, ak sa pozerame do minulosti.
+ */
+async function versionView(node: any, version: any, at: Date) {
+  const snapshot = version.snapshot as ProcessSnapshot;
+  const positions = await prisma.orgPosition.findMany({
+    where: { id: { in: snapshot.responsibilities.map((item) => item.positionId) }, organizationId: node.organizationId },
+    select: { id: true, name: true, assignments: { where: activeOn(at), select: { person: { select: { name: true } } } } }
+  });
+  const byId = new Map(positions.map((position) => [position.id, position]));
+  const mapped = mapNode({
+    ...node,
+    name: snapshot.name,
+    description: snapshot.purpose,
+    descriptionText: snapshot.descriptionText,
+    diagramType: snapshot.diagramType,
+    bpmnXml: snapshot.bpmnXml,
+    flowchartXml: snapshot.flowchartXml,
+    isoLinks: snapshot.isoLinks,
+    relatedProcessIds: snapshot.relatedProcessIds,
+    positions: snapshot.responsibilities.map((item) => ({
+      positionId: item.positionId,
+      role: item.role,
+      // miesto mohlo byt medzitym zrusene — verzia si ho pamata len podla ID
+      position: byId.get(item.positionId) ?? { id: item.positionId, name: '(zrušené pracovné miesto)', assignments: [] }
+    }))
+  });
+  const related = snapshot.relatedProcessIds.length
+    ? await prisma.processNode.findMany({
+        where: { id: { in: snapshot.relatedProcessIds }, organizationId: node.organizationId },
+        select: { id: true, name: true }
+      })
+    : [];
+  return {
+    ...mapped,
+    // stav a zmeny navrhu sa pocitaju z procesu, nie zo snapshotu
+    ...publicationState(node),
+    view: 'version',
+    version: mapVersionMeta(version),
+    documents: snapshot.documents,
+    relatedProcesses: related
+  };
+}
+
+app.post('/api/processes/:processId/publish', async (request, response, next) => {
+  try {
+    const node = await prisma.processNode.findFirst({
+      where: { id: String(request.params.processId), organizationId: orgScope(request) },
+      include: { positions: true, attachments: { select: { id: true, fileName: true } } }
+    });
+    if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
+    if (node.type === ProcessNodeType.GROUP) throw new HttpError(400, 'Skupinu procesov nemozno publikovat.');
+    if (!node.name.trim()) throw new HttpError(400, 'Proces musi mat nazov.');
+
+    const now = today();
+    const effectiveFrom = parseDay(request.body?.effectiveFrom, now, 'effectiveFrom')!;
+    // spatne datovana ucinnost by prepisala, co ludia v minulosti realne pouzivali
+    if (effectiveFrom < now) throw new HttpError(400, 'Ucinnost nemoze zacat v minulosti.');
+    const nextReviewAt = parseDay(request.body?.nextReviewAt, null, 'nextReviewAt');
+    if (nextReviewAt && nextReviewAt <= effectiveFrom) throw new HttpError(400, 'Termin revizie musi byt po zaciatku ucinnosti.');
+    const changeReason = cleanText(request.body?.changeReason, 1000);
+
+    const snapshot = buildSnapshot(node);
+    const contentHash = snapshotHash(snapshot);
+    const last = await prisma.processVersion.findFirst({ where: { processNodeId: node.id }, orderBy: { revision: 'desc' } });
+    if (last) {
+      if (last.contentHash === contentHash) throw new HttpError(409, `Navrh sa nelisi od verzie v${last.revision}.`);
+      if (!changeReason) throw new HttpError(400, 'Uvedte dovod zmeny oproti predchadzajucej verzii.');
+      if (effectiveFrom < last.effectiveFrom) {
+        throw new HttpError(400, `Ucinnost musi zacat najskor ${day(last.effectiveFrom)} (vtedy zacina v${last.revision}).`);
+      }
+    }
+
+    const userId = auth(request).userId;
+    const version = await prisma.$transaction(async (tx) => {
+      if (last) {
+        // predchadzajuca verzia plati do dna pred novou; v ten isty den vyhra vyssia revizia
+        const dayBefore = new Date(effectiveFrom.getTime() - 24 * 60 * 60 * 1000);
+        await tx.processVersion.update({
+          where: { id: last.id },
+          data: { effectiveTo: dayBefore < last.effectiveFrom ? last.effectiveFrom : dayBefore }
+        });
+      }
+      return tx.processVersion.create({
+        data: {
+          organizationId: node.organizationId,
+          processNodeId: node.id,
+          revision: (last?.revision ?? 0) + 1,
+          snapshot: snapshot as any,
+          contentHash,
+          changeReason,
+          effectiveFrom,
+          nextReviewAt,
+          publishedById: userId
+        },
+        include: { publishedBy: { select: { name: true } } }
+      });
+    });
+
+    await prisma.processChangeLog.create({
+      data: {
+        processNodeId: node.id,
+        userId,
+        changedFields: { publikovanie: { from: last ? `v${last.revision}` : null, to: `v${version.revision} od ${day(effectiveFrom)}` } },
+        description: changeReason
+      }
+    });
+    response.status(201).json(mapVersionMeta(version));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/processes/:processId/versions', async (request, response, next) => {
+  try {
+    const node = await requireProcess(request, request.params.processId);
+    const versions = await prisma.processVersion.findMany({
+      where: { processNodeId: node.id },
+      orderBy: { revision: 'desc' },
+      select: {
+        id: true, revision: true, effectiveFrom: true, effectiveTo: true, nextReviewAt: true,
+        changeReason: true, publishedAt: true, publishedBy: { select: { name: true } }
+      }
+    });
+    const now = today();
+    response.json(versions.map((version) => mapVersionMeta(version, now)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Konkretna publikovana verzia — napr. na porovnanie alebo pre audit. */
+app.get('/api/processes/:processId/versions/:revision', async (request, response, next) => {
+  try {
+    const node = await prisma.processNode.findFirst({
+      where: { id: String(request.params.processId), organizationId: orgScope(request) },
+      include: processInclude()
+    });
+    if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
+    const version = await prisma.processVersion.findUnique({
+      where: { processNodeId_revision: { processNodeId: node.id, revision: Number(request.params.revision) || 0 } },
+      include: { publishedBy: { select: { name: true } } }
+    });
+    if (!version) throw new HttpError(404, 'Verzia sa nenasla.');
+    const at = parseDay(request.query['at'], today(), 'at')!;
+    response.json(await versionView(node, version, at));
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.patch('/api/processes/:processId', async (request, response, next) => {
   try {
@@ -631,7 +886,7 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       name: body.name ?? undefined,
       description: body.purpose ?? undefined,
       descriptionText: body.descriptionText ?? undefined,
-      status: body.status ? mapStatusToDb(body.status) : undefined,
+      // #27 — stav (status) sa ignoruje: vyplyva z publikovanych verzii
       bpmnXml: body.bpmnXml ?? undefined,
       diagramType: body.diagramType ?? undefined,
       flowchartXml: body.flowchartXml !== undefined ? (body.flowchartXml ?? null) : undefined,
@@ -653,7 +908,6 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     track('name', current.name, data.name);
     track('purpose', current.description, data.description);
     track('descriptionText', current.descriptionText, data.descriptionText);
-    track('status', current.status, data.status);
     track('parentId', current.parentId, data.parentId);
     track('relatedProcessIds', current.relatedProcessIds, data.relatedProcessIds);
     track('isoLinks', current.isoLinks, data.isoLinks);
@@ -743,6 +997,24 @@ app.get('/api/processes/:processId', async (request, response, next) => {
       response.status(404).json({ message: 'Process not found' });
       return;
     }
+    const parentAndChildren = {
+      parentName: (node as any).parent?.name ?? null,
+      childProcesses: (node.children ?? []).map((child: any) => ({ id: child.id, name: child.name }))
+    };
+
+    // #27 — platna verzia v dany den (predvolene dnes) namiesto rozpracovaneho navrhu
+    if (request.query['view'] === 'effective') {
+      const at = parseDay(request.query['at'], today(), 'at')!;
+      const versions = await prisma.processVersion.findMany({
+        where: { processNodeId: node.id },
+        include: { publishedBy: { select: { name: true } } }
+      });
+      const version = pickEffective(versions, at);
+      if (!version) throw new HttpError(404, 'Proces zatial nema ucinnu verziu.');
+      response.json({ ...(await versionView(node, version, at)), ...parentAndChildren });
+      return;
+    }
+
     const related = node.relatedProcessIds.length
       ? await prisma.processNode.findMany({
           where: { id: { in: node.relatedProcessIds }, organizationId: node.organizationId },
@@ -751,8 +1023,8 @@ app.get('/api/processes/:processId', async (request, response, next) => {
       : [];
     response.json({
       ...mapNode(node),
-      parentName: (node as any).parent?.name ?? null,
-      childProcesses: (node.children ?? []).map((child: any) => ({ id: child.id, name: child.name })),
+      ...parentAndChildren,
+      view: 'draft',
       relatedProcesses: related
     });
   } catch (error) {
@@ -802,6 +1074,12 @@ app.delete('/api/processes/:processId', async (request, response, next) => {
         }
       }
     }
+    // #27 — publikovane verzie su zaznam o tom, co v firme platilo; mazanim by zmizol
+    const published = await prisma.processVersion.count({ where: { processNodeId: { in: [...subtree] } } });
+    if (published > 0) {
+      throw new HttpError(409, 'Proces alebo jeho podproces ma publikovane verzie — nemozno ho zmazat.');
+    }
+
     const files = await prisma.attachment.findMany({
       where: { processNodeId: { in: [...subtree] } },
       select: { storagePath: true }
@@ -1032,6 +1310,14 @@ app.get('/api/documents/:documentId/download', async (request, response, next) =
 app.delete('/api/documents/:documentId', async (request, response, next) => {
   try {
     const attachment = await requireDocument(request, request.params.documentId);
+    // #27 — publikovana verzia na dokument odkazuje; zmazanie by jej odkaz rozbilo
+    const usedIn = await prisma.processVersion.findFirst({
+      where: { organizationId: attachment.organizationId, snapshot: { path: ['documentIds'], array_contains: [attachment.id] } },
+      select: { revision: true }
+    });
+    if (usedIn) {
+      throw new HttpError(409, `Dokument je sucastou publikovanej verzie v${usedIn.revision} procesu — nemozno ho zmazat.`);
+    }
     await prisma.attachment.delete({ where: { id: attachment.id } });
     // az po zmazani zaznamu — opacne poradie by nechalo zaznam bez suboru
     if (isFileKey(attachment.storagePath)) await removeStored(attachment.storagePath);
