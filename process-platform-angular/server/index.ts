@@ -673,14 +673,14 @@ app.post('/api/organizations/:organizationId/processes/import-bpmn', async (requ
  * Zodpovedne miesta procesu (#15) aj s tym, kto ich DNES zastava — vlastnik
  * procesu sa zobrazuje podla obsadenia miesta, nie podla pevne zapisaneho cloveka.
  */
-function responsibilityInclude() {
+function responsibilityInclude(at: Date = today()) {
   return {
     include: {
       position: {
         select: {
           id: true,
           name: true,
-          assignments: { where: activeOn(today()), select: { person: { select: { name: true } } } }
+          assignments: { where: activeOn(at), select: { person: { select: { name: true } } } }
         }
       }
     }
@@ -705,7 +705,7 @@ function publicationInclude() {
   return {
     versions: {
       orderBy: { revision: 'desc' as const },
-      select: { revision: true, effectiveFrom: true, effectiveTo: true, contentHash: true }
+      select: { revision: true, effectiveFrom: true, effectiveTo: true, contentHash: true, nextReviewAt: true }
     },
     attachments: { select: { id: true, fileName: true } },
     // #28 — kroky patria do obsahu navrhu, #29 aj s RACI
@@ -803,7 +803,7 @@ function mapStepResponsibility(item: any) {
 }
 
 /** Co treba nacitat ku krokom — pre navrh s dnesnym obsadenim. */
-function activityInclude() {
+function activityInclude(at: Date = today()) {
   return {
     orderBy: { sortOrder: 'asc' as const },
     select: {
@@ -815,7 +815,7 @@ function activityInclude() {
           role: true,
           positionId: true,
           personId: true,
-          position: { select: { id: true, name: true, assignments: { where: activeOn(today()), select: { person: { select: { name: true } } } } } },
+          position: { select: { id: true, name: true, assignments: { where: activeOn(at), select: { person: { select: { name: true } } } } } },
           person: { select: { id: true, name: true, active: true } }
         }
       }
@@ -3389,6 +3389,81 @@ app.get('/api/me/work', async (request, response, next) => {
         validTo: day(assignment.validTo)
       })),
       processes: [...byProcess.values()].sort((a, b) => a.name.localeCompare(b.name, 'sk'))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- #34 UX-01b prehlad: co treba vo firme napravit ---
+
+type OverviewItem = { id: string; name: string; code: string; detail: string; overdue?: boolean };
+const OVERVIEW_KEYS = ['review', 'pendingApproval', 'ownerless', 'vacant', 'incomplete', 'unpublished', 'pendingChanges'] as const;
+
+/**
+ * Kazda kategoria je zoznam procesov s konkretnym problemom a popisom, co
+ * chyba — pocet na karte je dlzka zoznamu, nie odhad ani skore. „Zdravie
+ * procesu“ = co mu chyba, nie percento zhody s normou.
+ */
+app.get('/api/overview', async (request, response, next) => {
+  try {
+    const { organizationId } = auth(request);
+    const at = parseDay(request.query['at'], today(), 'at')!;
+    const soon = new Date(at.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const nodes = await prisma.processNode.findMany({
+      where: { organizationId, type: ProcessNodeType.PROCESS },
+      include: { positions: responsibilityInclude(at), ...publicationInclude(), activities: activityInclude(at) },
+      orderBy: { name: 'asc' }
+    });
+
+    const categories = Object.fromEntries(OVERVIEW_KEYS.map((key) => [key, [] as OverviewItem[]])) as Record<(typeof OVERVIEW_KEYS)[number], OverviewItem[]>;
+    for (const node of nodes) {
+      const base = { id: node.id, name: node.name, code: node.code ?? '' };
+      const publication = publicationState(node).publication!;
+      const effective = pickEffective(node.versions, at);
+
+      // revizia platnej verzie: po termine alebo do 30 dni
+      if (effective?.nextReviewAt && effective.nextReviewAt <= soon) {
+        const overdue = effective.nextReviewAt < at;
+        categories.review.push({ ...base, overdue, detail: `${overdue ? 'Revízia po termíne' : 'Revízia do'} ${day(effective.nextReviewAt)} (v${effective.revision})` });
+      }
+      if (publication.pendingApproval) {
+        categories.pendingApproval.push({ ...base, detail: `Návrh odoslal(a) ${publication.pendingApproval.requestedBy ?? '—'} ${publication.pendingApproval.createdAt.slice(0, 10)}` });
+      }
+      const owner = node.positions.find((link) => link.role === ResponsibilityRole.OWNER);
+      if (!owner) categories.ownerless.push({ ...base, detail: 'Nikto nezodpovedá za proces — určte miesto vlastníka' });
+
+      // neobsadene miesta, na ktorych proces zavisi (vlastnik, vykonavatelia, kroky)
+      const vacant = new Map<string, string[]>();
+      const note = (positionName: string, where: string) => vacant.set(positionName, [...(vacant.get(positionName) ?? []), where]);
+      for (const link of node.positions) {
+        if ((link.position?.assignments ?? []).length === 0) note(link.position?.name ?? '', link.role === ResponsibilityRole.OWNER ? 'vlastník' : 'vykonávateľ');
+      }
+      node.activities.forEach((activity, index) => {
+        for (const item of activity.responsibilities) {
+          if (item.position && item.position.assignments.length === 0) note(item.position.name, `krok ${index + 1} (${RACI_CODE[item.role]})`);
+        }
+      });
+      if (vacant.size > 0) {
+        categories.vacant.push({ ...base, detail: `Neobsadené: ${[...vacant].map(([name, where]) => `${name} — ${[...new Set(where)].join(', ')}`).join('; ')}` });
+      }
+
+      const missing = publishReadiness(node).filter((item) => item.required && !item.ok);
+      if (missing.length > 0) {
+        categories.incomplete.push({ ...base, detail: `Chýba: ${missing.map((item) => item.label.split(' — ')[0].toLowerCase()).join(', ')}` });
+      }
+      if (!effective) {
+        const scheduled = publication.scheduled;
+        categories.unpublished.push({ ...base, detail: scheduled ? `v${scheduled.revision} začne platiť ${scheduled.effectiveFrom}` : 'Zatiaľ nepublikovaný — kolegovia ho nevidia ako platný postup' });
+      } else if (publication.hasDraftChanges && !publication.pendingApproval) {
+        categories.pendingChanges.push({ ...base, detail: `Návrh sa líši od v${publication.latestRevision} — zmeny ešte neplatia` });
+      }
+    }
+
+    response.json({
+      at: day(at),
+      processCount: nodes.length,
+      categories: OVERVIEW_KEYS.map((key) => ({ key, count: categories[key].length, items: categories[key] }))
     });
   } catch (error) {
     next(error);

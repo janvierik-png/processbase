@@ -1,0 +1,113 @@
+:host {
+  display: grid;
+  gap: 16px;
+  max-width: 1040px;
+}
+
+.page-head h2 { margin: 0; }
+
+.lead {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+}
+
+.muted { color: var(--muted); }
+
+.message.error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+// #34 — karty: číslo = počet riadkov v zozname pod nimi
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.card {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
+  padding: 12px 14px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  color: var(--ink);
+
+  .count {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--accent-strong);
+  }
+
+  strong { font-size: 14px; }
+  small { color: var(--muted); font-size: 12.5px; line-height: 1.4; font-weight: 400; }
+
+  &:hover:not(:disabled) { border-color: var(--accent); background: var(--panel); }
+  &.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); background: var(--panel); }
+  &.warn .count { color: var(--warn); }
+  &.zero .count { color: var(--muted); }
+}
+
+.panel {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+
+    small { font-weight: 400; }
+  }
+
+  &.empty p { margin: 0; color: var(--ink-soft); line-height: 1.5; }
+  &.ok { border-color: #bfe0cb; background: var(--green-soft); }
+  a { color: var(--accent-strong); }
+}
+
+.issue-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-alt);
+
+  > div { display: grid; gap: 2px; min-width: 0; }
+  small { color: var(--ink-soft); }
+  &.overdue { border-color: var(--warn); background: var(--warn-soft); }
+
+  .fix {
+    flex: none;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+}
+
+.code {
+  margin-right: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+
+  &:empty { display: none; }
+}
+
+@media (max-width: 640px) {
+  .issue-row { flex-direction: column; align-items: flex-start; }
+}

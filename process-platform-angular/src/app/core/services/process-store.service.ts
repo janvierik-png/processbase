@@ -9,6 +9,7 @@ import {
   ApprovalRequestInfo,
   RaciCode,
   MyWork,
+  Overview,
   ProcessNode,
   ProcessVersionMeta
 } from '../models/process.model';
@@ -117,6 +118,11 @@ export class ProcessStoreService {
   /** Obsah zmrazený v žiadosti — to, o čom schvaľovateľ rozhoduje. */
   approvalView(requestId: string): Observable<ProcessDetail> {
     return this.http.get<ProcessDetail>(`${API_BASE_URL}/approval-requests/${requestId}/view`);
+  }
+
+  /** #34 — čo treba vo firme napraviť (predvolene dnes). */
+  overview(at?: string): Observable<Overview> {
+    return this.http.get<Overview>(`${API_BASE_URL}/overview${at ? `?at=${encodeURIComponent(at)}` : ''}`);
   }
 
   /** #33 — procesy podľa miest, ktoré prihlásený v daný deň zastáva. */

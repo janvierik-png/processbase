@@ -1,0 +1,58 @@
+<header class="page-head">
+  <p class="eyebrow">Prehľad</p>
+  <h2>Čo treba napraviť</h2>
+  @if (overview(); as o) {
+    <p class="lead">{{ processesLabel(o.processCount) }} ·
+      stav k {{ o.at }}. Nie je to hodnotenie zhody s normou — len zoznam toho, čo procesom chýba.</p>
+  }
+</header>
+
+@if (error()) {
+  <p class="message error">{{ error() }}</p>
+}
+
+@if (overview(); as o) {
+  @if (o.processCount === 0) {
+    <section class="panel empty">
+      <strong>Firma zatiaľ nemá procesy.</strong>
+      <p>Začnite v časti <a routerLink="/app/processes">Procesy</a> — stačí názov, účel, pár krokov a vlastník.</p>
+    </section>
+  } @else {
+    <section class="cards" aria-label="Kategórie">
+      @for (category of o.categories; track category.key) {
+        <button type="button" class="card" [class.active]="selected() === category.key"
+          [class.warn]="meta[category.key].warn && category.count > 0" [class.zero]="category.count === 0"
+          [attr.aria-pressed]="selected() === category.key" (click)="select(category.key)">
+          <span class="count">{{ category.count }}</span>
+          <strong>{{ meta[category.key].title }}</strong>
+          <small>{{ meta[category.key].hint }}</small>
+        </button>
+      }
+    </section>
+
+    @if (allClear()) {
+      <section class="panel empty ok">
+        <strong>Všetko v poriadku.</strong>
+        <p>Žiadny proces teraz nepotrebuje zásah.</p>
+      </section>
+    }
+    @if (!allClear() && current(); as category) {
+      <section class="panel">
+        <h3>{{ meta[category.key].title }} <small class="muted">({{ category.count }})</small></h3>
+        @for (item of category.items; track item.id) {
+          <div class="issue-row" [class.overdue]="item.overdue">
+            <div>
+              <strong><span class="code">{{ item.code }}</span>{{ item.name }}</strong>
+              <small>{{ item.detail }}</small>
+            </div>
+            <a class="fix" [routerLink]="fixLink(category.key, item.id)">{{ meta[category.key].fix }} →</a>
+          </div>
+        } @empty {
+          <p class="muted">V tejto kategórii nie je žiadny proces.</p>
+        }
+      </section>
+    }
+  }
+} @else if (!error()) {
+  <p class="muted">Načítavam...</p>
+}

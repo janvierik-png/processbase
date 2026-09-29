@@ -33,6 +33,11 @@ export const appRoutes: Routes = [
     loadComponent: () => import('./features/workspace/workspace-shell.component').then((m) => m.WorkspaceShellComponent),
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'processes' },
+      // #34 UX-01b — čo treba vo firme napraviť
+      {
+        path: 'prehlad',
+        loadComponent: () => import('./features/overview/overview-page.component').then((m) => m.OverviewPageComponent)
+      },
       {
         path: 'moja-praca',
         loadComponent: () => import('./features/my-work/my-work-page.component').then((m) => m.MyWorkPageComponent)

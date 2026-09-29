@@ -213,3 +213,21 @@ export interface ProcessRevision {
   diagramSvg?: string;
   snapshot?: Partial<ProcessNode>;
 }
+
+/** #34 — prehľad firmy: každá karta je zoznam procesov s konkrétnym problémom. */
+export type OverviewKey = 'review' | 'pendingApproval' | 'ownerless' | 'vacant' | 'incomplete' | 'unpublished' | 'pendingChanges';
+
+export interface OverviewItem {
+  id: string;
+  name: string;
+  code: string;
+  /** čo chýba alebo čo treba urobiť — nie skóre */
+  detail: string;
+  overdue?: boolean;
+}
+
+export interface Overview {
+  at: string;
+  processCount: number;
+  categories: Array<{ key: OverviewKey; count: number; items: OverviewItem[] }>;
+}
