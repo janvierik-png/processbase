@@ -20,7 +20,21 @@
       <a class="attention-row" [routerLink]="['/app/processes', item.processId]" [queryParams]="{ approval: item.id }">
         <span class="chip warn">Návrh na schválenie</span>
         <strong>{{ item.processName ?? 'Proces' }}</strong>
-        <span class="muted">{{ item.requestedBy ?? '—' }} · {{ item.createdAt.slice(0, 10) }}{{ item.changeReason ? ' · ' + item.changeReason : '' }}</span>
+        <span class="muted">{{ item.requestedBy ?? '—' }} · {{ localDay(item.createdAt) }}{{ item.changeReason ? ' · ' + item.changeReason : '' }}</span>
+      </a>
+    }
+  </section>
+}
+
+<!-- #36 — podnety kolegov k procesom, za ktoré zodpovedám -->
+@if (feedback().length > 0) {
+  <section class="panel attention">
+    <h3>Podnety k mojim procesom <small class="muted">({{ feedback().length }})</small></h3>
+    @for (item of feedback(); track item.id) {
+      <a class="attention-row" [routerLink]="['/app/processes', item.processId]">
+        <span class="chip" [class.warn]="item.kind === 'error'">{{ item.kind === 'error' ? 'Chyba' : 'Návrh zlepšenia' }}</span>
+        <strong>{{ item.processName ?? 'Proces' }}</strong>
+        <span class="muted">{{ item.author ?? '—' }} · {{ localDay(item.createdAt) }}{{ item.status === 'accepted' ? ' · prijatý, čaká na zapracovanie' : '' }}</span>
       </a>
     }
   </section>

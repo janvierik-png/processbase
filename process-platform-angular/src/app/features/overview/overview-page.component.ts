@@ -25,6 +25,7 @@ export class OverviewPageComponent implements OnInit {
   readonly meta: Record<OverviewKey, CardMeta> = {
     review: { title: 'Na revíziu', hint: 'Platná verzia má termín revízie po termíne alebo do 30 dní.', fix: 'Skontrolovať proces', warn: true, target: 'process' },
     pendingApproval: { title: 'Čaká na schválenie', hint: 'Návrh je odoslaný schvaľovateľovi a čaká na rozhodnutie.', fix: 'Posúdiť návrh', warn: false, target: 'process' },
+    feedback: { title: 'Nevybavené podnety', hint: 'Kolegovia nahlásili chybu alebo navrhli zlepšenie.', fix: 'Posúdiť podnety', warn: false, target: 'process' },
     ownerless: { title: 'Bez vlastníka', hint: 'Za proces nezodpovedá žiadne pracovné miesto.', fix: 'Určiť vlastníka', warn: true, target: 'process' },
     vacant: { title: 'Neobsadené miesta', hint: 'Proces závisí od miesta, ktoré dnes nikto nezastáva.', fix: 'Obsadiť v Organizácii', warn: true, target: 'organization' },
     incomplete: { title: 'Neúplné', hint: 'Chýbajú povinné údaje na publikovanie.', fix: 'Doplniť údaje', warn: false, target: 'process' },

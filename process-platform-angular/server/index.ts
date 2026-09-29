@@ -13,6 +13,8 @@ import {
   ApprovalStatus,
   AuthTokenType,
   JobDescriptionStatus,
+  FeedbackKind,
+  FeedbackStatus,
   RaciRole,
   ResponsibilityRole
 } from '../generated/prisma/client';
@@ -275,7 +277,13 @@ const PERMISSION_RULES: PermissionRule[] = [
 ];
 
 /** Zapis bez pravidla, ktory smie kazdy prihlaseny (vlastna relacia a ucet). */
-const SELF_SERVICE_WRITES = [/^\/api\/logout$/, /^\/api\/auth\/resend-verification$/];
+const SELF_SERVICE_WRITES = [
+  /^\/api\/logout$/,
+  /^\/api\/auth\/resend-verification$/,
+  // #36 — podnet k procesu smie poslat kazdy clen firmy; o vybaveni rozhoduje handler (vlastnik miesta alebo editor)
+  /^\/api\/processes\/[^/]+\/feedback$/,
+  /^\/api\/feedback\/[^/]+\/decide$/
+];
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -3395,10 +3403,184 @@ app.get('/api/me/work', async (request, response, next) => {
   }
 });
 
+// --- #36 UX-01d podnety k procesu ---
+
+const FEEDBACK_KIND: Record<string, FeedbackKind> = { error: FeedbackKind.ERROR, improvement: FeedbackKind.IMPROVEMENT };
+const FEEDBACK_DECISION: Record<string, FeedbackStatus> = {
+  accepted: FeedbackStatus.ACCEPTED,
+  rejected: FeedbackStatus.REJECTED,
+  done: FeedbackStatus.DONE
+};
+const MAX_OPEN_FEEDBACK_PER_AUTHOR = 20;
+
+/** Miesta vlastnika procesu, ktore prihlaseny dnes zastava. */
+async function ownsProcessToday(organizationId: string, userId: string, processNodeId: string): Promise<boolean> {
+  const count = await prisma.positionAssignment.count({
+    where: {
+      organizationId,
+      ...activeOn(today()),
+      person: { userId },
+      position: { processes: { some: { processNodeId, role: ResponsibilityRole.OWNER } } }
+    }
+  });
+  return count > 0;
+}
+
+/** O podnete rozhoduje vlastnik procesu (podla miesta) alebo editor procesov. */
+async function canDecideFeedback(request: express.Request, processNodeId: string): Promise<boolean> {
+  if (hasPermission(request, 'process:write')) return true;
+  const { organizationId, userId } = auth(request);
+  return ownsProcessToday(organizationId, userId, processNodeId);
+}
+
+function mapFeedback(item: any, userId: string) {
+  return {
+    id: item.id,
+    processId: item.processNodeId,
+    processName: item.processNode?.name ?? undefined,
+    kind: item.kind === FeedbackKind.ERROR ? 'error' : 'improvement',
+    text: item.text,
+    status: String(item.status).toLowerCase(),
+    author: item.author?.name ?? null,
+    mine: item.authorId === userId,
+    createdAt: item.createdAt.toISOString(),
+    revision: item.version?.revision ?? null,
+    stepTitle: item.stepTitle ?? null,
+    decisionNote: item.decisionNote ?? null,
+    decidedBy: item.decidedBy?.name ?? null,
+    decidedAt: item.decidedAt ? item.decidedAt.toISOString() : null
+  };
+}
+
+const FEEDBACK_INCLUDE = {
+  author: { select: { name: true } },
+  decidedBy: { select: { name: true } },
+  version: { select: { revision: true } },
+  processNode: { select: { name: true } }
+};
+
+app.post('/api/processes/:processId/feedback', async (request, response, next) => {
+  try {
+    const node = await requireProcess(request, request.params.processId);
+    if (node.type === ProcessNodeType.GROUP) throw new HttpError(400, 'Podnet sa tyka procesu, nie skupiny.');
+    const { organizationId, userId } = auth(request);
+    const kind = FEEDBACK_KIND[String(request.body?.kind)];
+    if (!kind) throw new HttpError(400, 'Zvoľte, či ide o chybu alebo návrh zlepšenia.');
+    const text = cleanText(request.body?.text, 2000);
+    if (!text) throw new HttpError(400, 'Napíšte, čo je zle alebo čo navrhujete.');
+    // ochrana pred zahltenim — nevybavene podnety jedneho autora
+    const open = await prisma.processFeedback.count({ where: { organizationId, authorId: userId, status: FeedbackStatus.OPEN } });
+    if (open >= MAX_OPEN_FEEDBACK_PER_AUTHOR) throw new HttpError(429, 'Máte veľa nevybavených podnetov — počkajte, kým ich vlastníci posúdia.');
+
+    // krok len z tohto procesu; verzia = ta, ktoru autor cital (inak platna)
+    const activityId = typeof request.body?.activityId === 'string' && request.body.activityId ? request.body.activityId : null;
+    const activity = activityId
+      ? await prisma.processActivity.findFirst({ where: { id: activityId, processNodeId: node.id }, select: { id: true, title: true } })
+      : null;
+    if (activityId && !activity) throw new HttpError(404, 'Krok sa nenasiel.');
+    const versions = await prisma.processVersion.findMany({
+      where: { processNodeId: node.id },
+      select: { id: true, revision: true, effectiveFrom: true, effectiveTo: true }
+    });
+    const revision = Number(request.body?.revision);
+    const version = Number.isInteger(revision) && revision > 0
+      ? versions.find((item) => item.revision === revision)
+      : pickEffective(versions, today());
+    if (Number.isInteger(revision) && revision > 0 && !version) throw new HttpError(404, 'Verzia sa nenasla.');
+
+    const created = await prisma.processFeedback.create({
+      data: {
+        organizationId,
+        processNodeId: node.id,
+        versionId: version?.id ?? null,
+        activityId: activity?.id ?? null,
+        stepTitle: activity?.title ?? null,
+        kind,
+        text,
+        authorId: userId
+      },
+      include: FEEDBACK_INCLUDE
+    });
+    response.status(201).json(mapFeedback(created, userId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Vlastnik a editori vidia vsetky podnety k procesu, ostatni len svoje. */
+app.get('/api/processes/:processId/feedback', async (request, response, next) => {
+  try {
+    const node = await requireProcess(request, request.params.processId);
+    const { userId } = auth(request);
+    const canDecide = await canDecideFeedback(request, node.id);
+    const items = await prisma.processFeedback.findMany({
+      where: { processNodeId: node.id, ...(canDecide ? {} : { authorId: userId }) },
+      include: FEEDBACK_INCLUDE,
+      orderBy: { createdAt: 'desc' }
+    });
+    response.json({ canDecide, items: items.map((item) => mapFeedback(item, userId)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/feedback/:feedbackId/decide', async (request, response, next) => {
+  try {
+    const { organizationId, userId } = auth(request);
+    const item = await prisma.processFeedback.findFirst({ where: { id: String(request.params.feedbackId), organizationId } });
+    if (!item) throw new HttpError(404, 'Podnet sa nenasiel.');
+    if (!(await canDecideFeedback(request, item.processNodeId))) {
+      throw new HttpError(403, 'O podnete rozhoduje vlastník procesu alebo editor.');
+    }
+    const status = FEEDBACK_DECISION[String(request.body?.status)];
+    if (!status) throw new HttpError(400, 'Neznámy stav podnetu.');
+    // vybaveny alebo zamietnuty podnet sa uz neotvara — autor dostal odpoved
+    if (item.status === FeedbackStatus.REJECTED || item.status === FeedbackStatus.DONE) throw new HttpError(409, 'Podnet je už vybavený.');
+    if (status === FeedbackStatus.ACCEPTED && item.status !== FeedbackStatus.OPEN) throw new HttpError(409, 'Podnet je už prijatý.');
+    const note = cleanText(request.body?.note, 2000);
+    if (status === FeedbackStatus.REJECTED && !note) throw new HttpError(400, 'Napíšte autorovi, prečo podnet zamietate.');
+    const updated = await prisma.processFeedback.update({
+      where: { id: item.id },
+      data: { status, decisionNote: note ?? item.decisionNote, decidedById: userId, decidedAt: new Date() },
+      include: FEEDBACK_INCLUDE
+    });
+    response.json(mapFeedback(updated, userId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Moja praca: nevybavene podnety k procesom, ktorych miesto vlastnika dnes zastavam. */
+app.get('/api/me/feedback', async (request, response, next) => {
+  try {
+    const { organizationId, userId } = auth(request);
+    const items = await prisma.processFeedback.findMany({
+      where: {
+        organizationId,
+        status: { in: [FeedbackStatus.OPEN, FeedbackStatus.ACCEPTED] },
+        processNode: {
+          positions: {
+            some: {
+              role: ResponsibilityRole.OWNER,
+              position: { assignments: { some: { ...activeOn(today()), person: { userId } } } }
+            }
+          }
+        }
+      },
+      include: FEEDBACK_INCLUDE,
+      orderBy: { createdAt: 'desc' },
+      take: 100
+    });
+    response.json(items.map((item) => mapFeedback(item, userId)));
+  } catch (error) {
+    next(error);
+  }
+});
+
 // --- #34 UX-01b prehlad: co treba vo firme napravit ---
 
 type OverviewItem = { id: string; name: string; code: string; detail: string; overdue?: boolean };
-const OVERVIEW_KEYS = ['review', 'pendingApproval', 'ownerless', 'vacant', 'incomplete', 'unpublished', 'pendingChanges'] as const;
+const OVERVIEW_KEYS = ['review', 'pendingApproval', 'feedback', 'ownerless', 'vacant', 'incomplete', 'unpublished', 'pendingChanges'] as const;
 
 /**
  * Kazda kategoria je zoznam procesov s konkretnym problemom a popisom, co
@@ -3416,6 +3598,20 @@ app.get('/api/overview', async (request, response, next) => {
       orderBy: { name: 'asc' }
     });
 
+    // #36 — nevybavene podnety (otvorene aj prijate, kym nie su hotove)
+    const feedback = await prisma.processFeedback.groupBy({
+      by: ['processNodeId', 'kind'],
+      where: { organizationId, status: { in: [FeedbackStatus.OPEN, FeedbackStatus.ACCEPTED] } },
+      _count: { _all: true }
+    });
+    const feedbackByProcess = new Map<string, { errors: number; improvements: number }>();
+    for (const row of feedback) {
+      const entry = feedbackByProcess.get(row.processNodeId) ?? { errors: 0, improvements: 0 };
+      if (row.kind === FeedbackKind.ERROR) entry.errors += row._count._all;
+      else entry.improvements += row._count._all;
+      feedbackByProcess.set(row.processNodeId, entry);
+    }
+
     const categories = Object.fromEntries(OVERVIEW_KEYS.map((key) => [key, [] as OverviewItem[]])) as Record<(typeof OVERVIEW_KEYS)[number], OverviewItem[]>;
     for (const node of nodes) {
       const base = { id: node.id, name: node.name, code: node.code ?? '' };
@@ -3428,7 +3624,12 @@ app.get('/api/overview', async (request, response, next) => {
         categories.review.push({ ...base, overdue, detail: `${overdue ? 'Revízia po termíne' : 'Revízia do'} ${day(effective.nextReviewAt)} (v${effective.revision})` });
       }
       if (publication.pendingApproval) {
-        categories.pendingApproval.push({ ...base, detail: `Návrh odoslal(a) ${publication.pendingApproval.requestedBy ?? '—'} ${publication.pendingApproval.createdAt.slice(0, 10)}` });
+        categories.pendingApproval.push({ ...base, detail: `Návrh odoslal(a) ${publication.pendingApproval.requestedBy ?? '—'} ${new Intl.DateTimeFormat('sv-SE', { timeZone: BUSINESS_TIMEZONE }).format(new Date(publication.pendingApproval.createdAt))}` });
+      }
+      const open = feedbackByProcess.get(node.id);
+      if (open) {
+        const parts = [open.errors ? `chyby: ${open.errors}` : '', open.improvements ? `návrhy zlepšenia: ${open.improvements}` : ''].filter(Boolean);
+        categories.feedback.push({ ...base, detail: `Nevybavené podnety — ${parts.join(', ')}` });
       }
       const owner = node.positions.find((link) => link.role === ResponsibilityRole.OWNER);
       if (!owner) categories.ownerless.push({ ...base, detail: 'Nikto nezodpovedá za proces — určte miesto vlastníka' });

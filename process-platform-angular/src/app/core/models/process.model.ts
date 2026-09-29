@@ -215,7 +215,7 @@ export interface ProcessRevision {
 }
 
 /** #34 — prehľad firmy: každá karta je zoznam procesov s konkrétnym problémom. */
-export type OverviewKey = 'review' | 'pendingApproval' | 'ownerless' | 'vacant' | 'incomplete' | 'unpublished' | 'pendingChanges';
+export type OverviewKey = 'review' | 'pendingApproval' | 'feedback' | 'ownerless' | 'vacant' | 'incomplete' | 'unpublished' | 'pendingChanges';
 
 export interface OverviewItem {
   id: string;
@@ -230,4 +230,23 @@ export interface Overview {
   at: string;
   processCount: number;
   categories: Array<{ key: OverviewKey; count: number; items: OverviewItem[] }>;
+}
+
+/** #36 — podnet k procesu: chyba alebo návrh zlepšenia. */
+export interface ProcessFeedback {
+  id: string;
+  processId: string;
+  processName?: string;
+  kind: 'error' | 'improvement';
+  text: string;
+  status: 'open' | 'accepted' | 'rejected' | 'done';
+  author: string | null;
+  mine: boolean;
+  createdAt: string;
+  /** verzia, ktorú autor čítal */
+  revision: number | null;
+  stepTitle: string | null;
+  decisionNote: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
 }

@@ -156,6 +156,8 @@ model User {
   authTokens     AuthToken[]
   publishedVersions ProcessVersion[] @relation("ProcessVersionPublisher")
   approvedVersions  ProcessVersion[] @relation("ProcessVersionApprover")
+  authoredFeedback  ProcessFeedback[] @relation("FeedbackAuthor")
+  decidedFeedback   ProcessFeedback[] @relation("FeedbackDecider")
   sessions       Session[]
   processChanges ProcessChangeLog[]
 }
@@ -249,6 +251,7 @@ model ProcessNode {
   positions          ProcessPosition[]
   changeLogs         ProcessChangeLog[]
   versions           ProcessVersion[]
+  feedback           ProcessFeedback[]
   activities         ProcessActivity[]
 
   @@unique([organizationId, code])
@@ -269,6 +272,7 @@ model ProcessActivity {
 
   processNode    ProcessNode @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
   responsibilities ActivityResponsibility[]
+  feedback         ProcessFeedback[]
 
   @@index([processNodeId, sortOrder])
 }
@@ -330,6 +334,7 @@ model ProcessVersion {
   processNode    ProcessNode  @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
   publishedBy    User?        @relation("ProcessVersionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
   approvedBy     User?        @relation("ProcessVersionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  feedback       ProcessFeedback[]
 
   @@unique([processNodeId, revision])
   @@index([processNodeId, effectiveFrom])
@@ -677,4 +682,48 @@ model CamundaDeployment {
 
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   processNode    ProcessNode  @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+}
+
+/// #36 UX-01d — podnet k procesu od hocikoho vo firme: chyba v postupe alebo navrh zlepsenia.
+enum FeedbackKind {
+  ERROR
+  IMPROVEMENT
+}
+
+/// OPEN → ACCEPTED (zapracuje sa) → DONE; alebo REJECTED s dovodom.
+enum FeedbackStatus {
+  OPEN
+  ACCEPTED
+  REJECTED
+  DONE
+}
+
+/// Vlastnik procesu (kto dnes zastava jeho miesto) alebo editor podnet vybavi;
+/// autor vidi svoje podnety a ich vysledok.
+model ProcessFeedback {
+  id             String          @id @default(uuid())
+  organizationId String
+  processNodeId  String
+  /// verzia, ktoru autor cital (null = proces este nebol publikovany)
+  versionId      String?
+  /// krok, ktoreho sa podnet tyka; nazov sa pamata aj po zmazani kroku
+  activityId     String?
+  stepTitle      String?
+  kind           FeedbackKind
+  text           String
+  status         FeedbackStatus  @default(OPEN)
+  authorId       String?
+  decisionNote   String?
+  decidedById    String?
+  decidedAt      DateTime?
+  createdAt      DateTime        @default(now())
+
+  processNode    ProcessNode     @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  version        ProcessVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  activity       ProcessActivity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  author         User?           @relation("FeedbackAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  decidedBy      User?           @relation("FeedbackDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([processNodeId, createdAt])
 }

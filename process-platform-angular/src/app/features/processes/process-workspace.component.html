@@ -136,7 +136,7 @@
             @if (process.view === 'approval' && process.approvalRequest; as req) {
               <!-- #37 — posudzuje sa obsah zmrazený pri odoslaní -->
               <strong>Návrh v{{ process.version?.revision }} — {{ approvalStatusLabel(req.status) }}</strong>
-              <span>odoslal(a) {{ req.requestedBy ?? '—' }} {{ req.createdAt.slice(0, 10) }}
+              <span>odoslal(a) {{ req.requestedBy ?? '—' }} {{ localDay(req.createdAt) }}
                 · účinnosť od {{ req.status === 'pending' ? approvalEffective(req) : (req.effectiveFrom ?? '—') }}</span>
               @if (req.changeReason) {
                 <span>Dôvod zmeny: {{ req.changeReason }}</span>
@@ -161,7 +161,7 @@
               <span class="chip warn">Návrh má zmeny oproti v{{ process.publication?.latestRevision }}</span>
             }
             @if (process.view !== 'approval' && process.publication?.pendingApproval; as pending) {
-              <span class="chip warn">Čaká na schválenie · odoslal(a) {{ pending.requestedBy ?? '—' }} {{ pending.createdAt.slice(0, 10) }}</span>
+              <span class="chip warn">Čaká na schválenie · odoslal(a) {{ pending.requestedBy ?? '—' }} {{ localDay(pending.createdAt) }}</span>
             }
           </div>
           <div class="pub-actions">
@@ -232,7 +232,7 @@
             <p class="notice">{{ req.requestedById === currentUserId ? 'Toto je vaša žiadosť — schváliť ju musí niekto iný.' : 'O návrhu rozhoduje schvaľovateľ.' }}</p>
           } @else if (req.decision) {
             <p class="notice">{{ req.status === 'approved' ? 'Schválené' : 'Zamietnuté' }}: {{ req.decision.by ?? '—' }}{{ req.decision.positions ? ' (' + req.decision.positions + ')' : '' }}
-              · {{ req.decidedAt?.slice(0, 10) }}{{ req.decision.comment ? ' — „' + req.decision.comment + '“' : '' }}</p>
+              · {{ localDay(req.decidedAt) }}{{ req.decision.comment ? ' — „' + req.decision.comment + '“' : '' }}</p>
           }
         }
 
@@ -513,6 +513,83 @@
               }
             </div>
           }
+        </section>
+        }
+
+        <!-- #36 — podnet smie poslať každý; vlastník procesu (podľa miesta) alebo editor rozhodne -->
+        @if (process.type === 'process' && process.view !== 'approval') {
+        <section class="card feedback-card">
+          <header class="card-head">
+            <h3>Podnety <span class="count">({{ feedback().items.length }})</span></h3>
+            @if (!feedbackOpen) {
+              <button type="button" class="ghost small" (click)="openFeedback()">Nahlásiť chybu / navrhnúť zlepšenie</button>
+            }
+          </header>
+          <div class="card-body">
+            @if (feedbackNotice()) {
+              <p class="notice">{{ feedbackNotice() }}</p>
+            }
+            @if (feedbackOpen) {
+              <form class="feedback-form" (ngSubmit)="submitFeedback()">
+                <div class="kind-switch" role="radiogroup" aria-label="Druh podnetu">
+                  <label><input type="radio" name="feedbackKind" value="error" [(ngModel)]="feedbackModel.kind"> Chyba v postupe</label>
+                  <label><input type="radio" name="feedbackKind" value="improvement" [(ngModel)]="feedbackModel.kind"> Návrh zlepšenia</label>
+                </div>
+                @if ((process.activities ?? []).length > 0) {
+                  <label>Týka sa kroku (voliteľné)
+                    <select name="feedbackStep" [(ngModel)]="feedbackModel.activityId">
+                      <option value="">— celého procesu —</option>
+                      @for (step of process.activities; track step.id; let index = $index) {
+                        <option [value]="step.id">{{ index + 1 }}. {{ step.title }}</option>
+                      }
+                    </select>
+                  </label>
+                }
+                <label>Čo je zle alebo čo navrhujete
+                  <textarea name="feedbackText" [(ngModel)]="feedbackModel.text" rows="3" maxlength="2000" required
+                    placeholder="Napr. dodací list sa v skutočnosti kontroluje až po naskladnení"></textarea>
+                </label>
+                @if (feedbackError()) {
+                  <p class="error">{{ feedbackError() }}</p>
+                }
+                <div class="edit-actions">
+                  <button class="primary" type="submit" [disabled]="!feedbackModel.text.trim()">Odoslať vlastníkovi procesu</button>
+                  <button type="button" (click)="feedbackOpen = false">Zrušiť</button>
+                </div>
+              </form>
+            }
+            @for (item of feedback().items; track item.id) {
+              <article class="feedback-row" [class.closed]="item.status === 'done' || item.status === 'rejected'">
+                <div class="feedback-head">
+                  <span class="chip" [class.warn]="item.kind === 'error'">{{ item.kind === 'error' ? 'Chyba' : 'Návrh zlepšenia' }}</span>
+                  <span class="chip" [class.subtle]="item.status === 'done'">{{ feedbackStatusLabel(item.status) }}</span>
+                  <small>{{ item.mine ? 'vy' : (item.author ?? '—') }} · {{ localDay(item.createdAt) }}
+                    {{ item.revision ? ' · k v' + item.revision : '' }}{{ item.stepTitle ? ' · krok „' + item.stepTitle + '“' : '' }}</small>
+                </div>
+                <p>{{ item.text }}</p>
+                @if (item.decidedBy) {
+                  <small class="decision">{{ item.decidedBy }} · {{ localDay(item.decidedAt) }}{{ item.decisionNote ? ': ' + item.decisionNote : '' }}</small>
+                }
+                @if (feedback().canDecide && item.status !== 'done' && item.status !== 'rejected') {
+                  <div class="feedback-actions">
+                    <input [name]="'note-' + item.id" [(ngModel)]="feedbackNotes[item.id]" placeholder="Odpoveď autorovi (pri zamietnutí povinná)">
+                    @if (item.status === 'open') {
+                      <button type="button" class="small" (click)="decideFeedback(item, 'accepted')">Prijať</button>
+                    }
+                    <button type="button" class="small" (click)="decideFeedback(item, 'done')">Vybavené</button>
+                    <button type="button" class="small danger-text" (click)="decideFeedback(item, 'rejected')">Zamietnuť</button>
+                  </div>
+                }
+              </article>
+            } @empty {
+              @if (!feedbackOpen) {
+                <p class="muted-small">{{ feedback().canDecide ? 'K procesu zatiaľ nikto nič nenahlásil.' : 'Vidíte tu svoje podnety a ich výsledok.' }}</p>
+              }
+            }
+            @if (feedbackError() && !feedbackOpen) {
+              <p class="error">{{ feedbackError() }}</p>
+            }
+          </div>
         </section>
         }
 
@@ -853,7 +930,7 @@
                     </span>
                   </strong>
                   <small>od {{ version.effectiveFrom }}{{ version.effectiveTo ? ' do ' + version.effectiveTo : '' }}
-                    · {{ version.publishedBy ?? '—' }} · {{ version.publishedAt.slice(0, 10) }}
+                    · {{ version.publishedBy ?? '—' }} · {{ localDay(version.publishedAt) }}
                     {{ version.approvedBy ? ' · schválené: ' + version.approvedBy : '' }}</small>
                   @if (version.changeReason) { <p>{{ version.changeReason }}</p> }
                   <button type="button" class="small" (click)="openVersion(version)">Zobraziť</button>
@@ -869,7 +946,7 @@
                 @for (item of approvals(); track item.id) {
                   <article class="change-row">
                     <strong>
-                      {{ item.createdAt.slice(0, 10) }} · {{ item.requestedBy ?? '—' }}
+                      {{ localDay(item.createdAt) }} · {{ item.requestedBy ?? '—' }}
                       <span class="chip" [class.warn]="item.status === 'pending' || item.status === 'rejected'" [class.subtle]="item.status === 'approved'">
                         {{ approvalStatusLabel(item.status) }}
                       </span>
@@ -877,10 +954,10 @@
                     @if (item.changeReason) { <p>{{ item.changeReason }}</p> }
                     @if (item.decision) {
                       <small>{{ item.status === 'approved' ? 'Schválené' : 'Zamietnuté' }}: {{ item.decision.by ?? '—' }}{{ item.decision.positions ? ' (' + item.decision.positions + ')' : '' }}
-                        · {{ item.decidedAt?.slice(0, 10) }}</small>
+                        · {{ localDay(item.decidedAt) }}</small>
                       @if (item.decision.comment) { <p>„{{ item.decision.comment }}“</p> }
                     } @else if (item.status === 'withdrawn') {
-                      <small>Stiahnutá {{ item.decidedAt?.slice(0, 10) }}</small>
+                      <small>Stiahnutá {{ localDay(item.decidedAt) }}</small>
                     }
                     <button type="button" class="small" (click)="openApproval(item.id)">Zobraziť obsah</button>
                   </article>

@@ -17,6 +17,7 @@ import {
   IsoNorm,
   IsoSuggestion,
   ProcessChange,
+  ProcessFeedback,
   ProcessDetail,
   ProcessNode,
   ProcessRevision,
@@ -242,6 +243,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     });
     this.store.versions(id).subscribe({ next: (versions) => this.versions.set(versions), error: () => this.versions.set([]) });
     this.store.approvalRequests(id).subscribe({ next: (items) => this.approvals.set(items), error: () => this.approvals.set([]) });
+    this.loadFeedback(id);
     this.store.history(id).subscribe({
       next: (history) => this.history.set(history),
       error: () => this.history.set([])
@@ -398,6 +400,66 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.stepsDraft = [...this.stepsDraft, { key: `s${this.stepKey++}`, id: null, title: '', description: '', raci: [], newRole: 'R', newHolder: '' }];
   }
 
+  // --- #36 podnety k procesu ---
+
+  readonly feedback = signal<{ canDecide: boolean; items: ProcessFeedback[] }>({ canDecide: false, items: [] });
+  readonly feedbackError = signal('');
+  readonly feedbackNotice = signal('');
+  feedbackOpen = false;
+  feedbackModel: { kind: 'error' | 'improvement'; text: string; activityId: string } = { kind: 'error', text: '', activityId: '' };
+  /** rozpísaná odpoveď vlastníka pri každom podnete */
+  feedbackNotes: Record<string, string> = {};
+
+  private loadFeedback(id: string): void {
+    this.store.processFeedback(id).subscribe({
+      next: (feedback) => this.feedback.set(feedback),
+      error: () => this.feedback.set({ canDecide: false, items: [] })
+    });
+  }
+
+  openFeedback(): void {
+    this.feedbackError.set('');
+    this.feedbackNotice.set('');
+    this.feedbackModel = { kind: 'error', text: '', activityId: '' };
+    this.feedbackOpen = true;
+  }
+
+  submitFeedback(): void {
+    const detail = this.detail();
+    if (!detail) return;
+    this.store.submitFeedback(detail.id, {
+      kind: this.feedbackModel.kind,
+      text: this.feedbackModel.text.trim(),
+      activityId: this.feedbackModel.activityId || undefined,
+      // podnet sa viaže na verziu, ktorú človek práve číta
+      revision: detail.view === 'version' ? detail.version?.revision : undefined
+    }).subscribe({
+      next: () => {
+        this.feedbackOpen = false;
+        this.feedbackNotice.set('Ďakujeme — vlastník procesu podnet posúdi. Výsledok uvidíte tu.');
+        this.loadFeedback(detail.id);
+      },
+      error: (error) => this.feedbackError.set(error?.error?.message ?? 'Podnet sa nepodarilo odoslať.')
+    });
+  }
+
+  decideFeedback(item: ProcessFeedback, status: 'accepted' | 'rejected' | 'done'): void {
+    const detail = this.detail();
+    if (!detail) return;
+    this.feedbackError.set('');
+    this.store.decideFeedback(item.id, status, this.feedbackNotes[item.id]?.trim() || undefined).subscribe({
+      next: () => {
+        delete this.feedbackNotes[item.id];
+        this.loadFeedback(detail.id);
+      },
+      error: (error) => this.feedbackError.set(error?.error?.message ?? 'Rozhodnutie sa nepodarilo uložiť.')
+    });
+  }
+
+  feedbackStatusLabel(status: ProcessFeedback['status']): string {
+    return { open: 'nový', accepted: 'prijatý — zapracuje sa', rejected: 'zamietnutý', done: 'vybavený' }[status];
+  }
+
   // --- #29 RACI na kroku ---
 
   readonly people = signal<Person[]>([]);
@@ -542,6 +604,11 @@ export class ProcessWorkspaceComponent implements OnInit {
   readonly publishError = signal('');
   publishOpen = false;
   publishModel = { effectiveFrom: '', changeReason: '', nextReviewAt: '' };
+
+  /** Deň udalosti v miestnom čase (slice ISO reťazca by po polnoci ukázal včerajšok v UTC). */
+  localDay(iso: string | null | undefined): string {
+    return iso ? new Date(iso).toLocaleDateString('sv-SE') : '';
+  }
 
   /** Miestny dnešok (toISOString by dal UTC — po polnoci ešte včerajšok). */
   todayLocal(): string {

@@ -1,7 +1,7 @@
 import { Component, OnInit, computed, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { ApprovalRequestInfo, MyWork } from '../../core/models/process.model';
+import { ApprovalRequestInfo, MyWork, ProcessFeedback } from '../../core/models/process.model';
 import { AuthService } from '../../core/services/auth.service';
 import { ProcessStoreService } from '../../core/services/process-store.service';
 
@@ -24,6 +24,8 @@ export class MyWorkPageComponent implements OnInit {
   readonly error = signal('');
   /** #37 — návrhy, o ktorých môžem rozhodnúť (nie moje vlastné) */
   readonly approvals = signal<ApprovalRequestInfo[]>([]);
+  /** #36 — nevybavené podnety k procesom, ktorých miesto vlastníka zastávam */
+  readonly feedback = signal<ProcessFeedback[]>([]);
 
   /** zodpovedám = som vlastník procesu; vykonávam = len vykonávateľ */
   readonly owned = computed(() => (this.work()?.processes ?? []).filter((item) => item.roles.some((role) => role.role === 'OWNER')));
@@ -41,9 +43,15 @@ export class MyWorkPageComponent implements OnInit {
       next: (work) => this.work.set(work),
       error: () => this.error.set('Prehľad sa nepodarilo načítať.')
     });
+    this.store.myFeedback().subscribe({ next: (items) => this.feedback.set(items), error: () => this.feedback.set([]) });
     if (this.auth.can('approval:approve')) {
       this.store.myApprovals().subscribe({ next: (items) => this.approvals.set(items), error: () => this.approvals.set([]) });
     }
+  }
+
+  /** Deň udalosti v miestnom čase (nie UTC). */
+  localDay(iso: string): string {
+    return new Date(iso).toLocaleDateString('sv-SE');
   }
 
   roleLabel(role: 'OWNER' | 'PERFORMER'): string {

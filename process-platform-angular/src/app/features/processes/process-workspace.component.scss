@@ -1195,3 +1195,56 @@ button.small {
 }
 
 .raci-legend b { font-family: var(--font-mono, ui-monospace, monospace); }
+
+// #36 — podnety k procesu
+.feedback-card .card-body { display: grid; gap: 10px; }
+
+.feedback-form {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+
+  label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+  .error { margin: 0; color: var(--warn); }
+}
+
+.kind-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+
+  label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+}
+
+.feedback-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-alt);
+
+  p { margin: 0; white-space: pre-wrap; }
+  small { color: var(--muted); }
+  .decision { color: var(--ink-soft); }
+  &.closed { opacity: 0.75; }
+}
+
+.feedback-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  input { flex: 1 1 220px; min-height: 30px; font-size: 13px; }
+}
+
+.danger-text { color: var(--warn); }

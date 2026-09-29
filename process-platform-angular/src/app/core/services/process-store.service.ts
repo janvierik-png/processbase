@@ -10,6 +10,7 @@ import {
   RaciCode,
   MyWork,
   Overview,
+  ProcessFeedback,
   ProcessNode,
   ProcessVersionMeta
 } from '../models/process.model';
@@ -118,6 +119,25 @@ export class ProcessStoreService {
   /** Obsah zmrazený v žiadosti — to, o čom schvaľovateľ rozhoduje. */
   approvalView(requestId: string): Observable<ProcessDetail> {
     return this.http.get<ProcessDetail>(`${API_BASE_URL}/approval-requests/${requestId}/view`);
+  }
+
+  // --- #36 podnety k procesu ---
+
+  processFeedback(id: string): Observable<{ canDecide: boolean; items: ProcessFeedback[] }> {
+    return this.http.get<{ canDecide: boolean; items: ProcessFeedback[] }>(`${API_BASE_URL}/processes/${id}/feedback`);
+  }
+
+  submitFeedback(id: string, payload: { kind: 'error' | 'improvement'; text: string; activityId?: string; revision?: number }): Observable<ProcessFeedback> {
+    return this.http.post<ProcessFeedback>(`${API_BASE_URL}/processes/${id}/feedback`, payload);
+  }
+
+  decideFeedback(feedbackId: string, status: 'accepted' | 'rejected' | 'done', note?: string): Observable<ProcessFeedback> {
+    return this.http.post<ProcessFeedback>(`${API_BASE_URL}/feedback/${feedbackId}/decide`, { status, note });
+  }
+
+  /** Nevybavené podnety k procesom, ktorých miesto vlastníka zastávam. */
+  myFeedback(): Observable<ProcessFeedback[]> {
+    return this.http.get<ProcessFeedback[]>(`${API_BASE_URL}/me/feedback`);
   }
 
   /** #34 — čo treba vo firme napraviť (predvolene dnes). */
