@@ -58,6 +58,36 @@
           <option value="en">EN</option>
         </select>
 
+        <!-- #38 — upozornenia z udalostí (nová verzia, schválenie, podnet, revízia, obsadenie) -->
+        <div class="notifications">
+          <button type="button" class="ghost bell" (click)="toggleNotifications()" [attr.aria-expanded]="notificationsOpen()"
+            [attr.aria-label]="'Upozornenia' + (notifications.unread() ? ' — neprečítané: ' + notifications.unread() : '')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+            @if (notifications.unread() > 0) {
+              <span class="badge">{{ notifications.unread() > 99 ? '99+' : notifications.unread() }}</span>
+            }
+          </button>
+          @if (notificationsOpen()) {
+            <div class="notification-panel" role="dialog" aria-label="Upozornenia">
+              <header>
+                <strong>Upozornenia</strong>
+                @if (notifications.unread() > 0) {
+                  <button type="button" class="link" (click)="markAllRead()">Označiť všetko ako prečítané</button>
+                }
+              </header>
+              @for (item of notifications.items(); track item.id) {
+                <button type="button" class="notification" [class.unread]="!item.read" (click)="openNotification(item)">
+                  <strong>{{ item.title }}</strong>
+                  @if (item.body) { <span>{{ item.body }}</span> }
+                  <small>{{ localDay(item.createdAt) }}</small>
+                </button>
+              } @empty {
+                <p class="empty">Zatiaľ žiadne upozornenia.</p>
+              }
+            </div>
+          }
+        </div>
+
         <div class="user-chip" [title]="auth.currentUser()?.email || ''">
           <span class="avatar">{{ userInitials() }}</span>
           <span class="user-name">{{ auth.currentUser()?.name }}</span>

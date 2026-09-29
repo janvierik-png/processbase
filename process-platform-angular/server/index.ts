@@ -282,7 +282,9 @@ const SELF_SERVICE_WRITES = [
   /^\/api\/auth\/resend-verification$/,
   // #36 — podnet k procesu smie poslat kazdy clen firmy; o vybaveni rozhoduje handler (vlastnik miesta alebo editor)
   /^\/api\/processes\/[^/]+\/feedback$/,
-  /^\/api\/feedback\/[^/]+\/decide$/
+  /^\/api\/feedback\/[^/]+\/decide$/,
+  // #38 — vlastne upozornenia (handler meni len upozornenia prihlaseneho)
+  /^\/api\/me\/notifications\/read$/
 ];
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -1126,7 +1128,7 @@ async function createVersion(input: {
   publishedById: string | null;
   approvedById?: string | null;
 }) {
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const last = await tx.processVersion.findFirst({ where: { processNodeId: input.processNodeId }, orderBy: { revision: 'desc' } });
     if (last && input.effectiveFrom < last.effectiveFrom) {
       throw new HttpError(409, `Medzitym vznikla verzia v${last.revision} s ucinnostou od ${day(last.effectiveFrom)}.`);
@@ -1138,7 +1140,7 @@ async function createVersion(input: {
         data: { effectiveTo: dayBefore < last.effectiveFrom ? last.effectiveFrom : dayBefore }
       });
     }
-    return tx.processVersion.create({
+    const version = await tx.processVersion.create({
       data: {
         organizationId: input.organizationId,
         processNodeId: input.processNodeId,
@@ -1154,7 +1156,22 @@ async function createVersion(input: {
       },
       include: { publishedBy: { select: { name: true } }, approvedBy: { select: { name: true } } }
     });
+    // #38 — dotknutym ludom: nova verzia a odkedy plati
+    await emitEvent(tx, {
+      organizationId: input.organizationId,
+      type: 'ProcessPublished',
+      processNodeId: input.processNodeId,
+      actorId: input.approvedById ?? input.publishedById,
+      payload: { name: input.snapshot.name, revision: version.revision, effectiveFrom: day(version.effectiveFrom), changeReason: input.changeReason }
+    });
+    return version;
   });
+  kickDispatcher();
+  // termin revizie do 30 dni — vlastnik sa to dozvie hned, nie az pri hodinovej kontrole
+  if (created.nextReviewAt && created.nextReviewAt.getTime() - today().getTime() <= 30 * 24 * 60 * 60 * 1000) {
+    scanReviewDue().catch((error) => logError('revizie', error));
+  }
+  return created;
 }
 
 app.post('/api/processes/:processId/publish', async (request, response, next) => {
@@ -1256,6 +1273,15 @@ app.post('/api/processes/:processId/approval-requests', async (request, response
     });
     await prisma.processChangeLog.create({
       data: { processNodeId: node.id, userId, changedFields: { schvalovanie: { from: null, to: 'odoslane na schvalenie' } }, description: prepared.changeReason }
+    });
+    // #38 — schvalovatelom (okrem ziadatela)
+    const latest = await prisma.processVersion.findFirst({ where: { processNodeId: node.id }, orderBy: { revision: 'desc' }, select: { revision: true } });
+    await emitEvent(prisma, {
+      organizationId: node.organizationId,
+      type: 'ApprovalRequested',
+      processNodeId: node.id,
+      actorId: userId,
+      payload: { name: node.name, requestId: created.id, revision: (latest?.revision ?? 0) + 1, requestedBy: created.requestedBy?.name ?? null, changeReason: prepared.changeReason }
     });
     response.status(201).json(mapApprovalRequest(created));
   } catch (error) {
@@ -1380,7 +1406,17 @@ async function decide(request: express.Request, approve: boolean) {
         description: comment
       }
     });
+    // #38 — ziadatelovi vysledok
+    const decider = await tx.user.findUnique({ where: { id: userId }, select: { name: true } });
+    await emitEvent(tx, {
+      organizationId,
+      type: 'ApprovalDecided',
+      processNodeId: item.processNodeId,
+      actorId: userId,
+      payload: { name: item.processNode?.name ?? item.title, approved: approve, comment, decidedBy: decider?.name ?? null, requestedById: item.requestedById }
+    });
   });
+  kickDispatcher();
   return requireApprovalRequest(request, item.id);
 }
 
@@ -3403,6 +3439,270 @@ app.get('/api/me/work', async (request, response, next) => {
   }
 });
 
+// --- #38 GOV-02 domenove udalosti a upozornenia ---
+
+type EventClient = Pick<typeof prisma, 'domainEvent'>;
+type DomainEventInput = {
+  organizationId: string;
+  type: 'ProcessPublished' | 'ReviewDue' | 'PositionAssignmentChanged' | 'ApprovalRequested' | 'ApprovalDecided' | 'FeedbackSubmitted' | 'FeedbackDecided';
+  processNodeId?: string | null;
+  actorId?: string | null;
+  payload: Record<string, unknown>;
+  dedupeKey?: string;
+};
+
+/** Zapis udalosti — v tej istej transakcii ako zmena, aby sa nestratila ani nezdvojila. */
+async function emitEvent(client: EventClient, input: DomainEventInput): Promise<void> {
+  await client.domainEvent.create({
+    data: {
+      organizationId: input.organizationId,
+      type: input.type,
+      processNodeId: input.processNodeId ?? null,
+      actorId: input.actorId ?? null,
+      payload: input.payload as any,
+      dedupeKey: input.dedupeKey ?? null
+    }
+  });
+  // v transakcii by dispecer udalost este nevidel — volajuci ho spusti po commite
+  if (client === prisma) kickDispatcher();
+}
+
+/** Pouzivatelia firmy, ktori v dany den zastavaju niektore z miest. */
+async function usersOnPositions(organizationId: string, positionIds: string[], at = today()): Promise<string[]> {
+  if (positionIds.length === 0) return [];
+  const rows = await prisma.positionAssignment.findMany({
+    where: { organizationId, positionId: { in: positionIds }, ...activeOn(at), person: { userId: { not: null } } },
+    select: { person: { select: { userId: true } } }
+  });
+  return rows.flatMap((row) => row.person.userId ?? []);
+}
+
+/** Kto je procesom dotknuty: vlastnik, vykonavatelia a RACI krokov (miesta aj priame osoby). */
+async function processStakeholders(organizationId: string, processNodeId: string): Promise<string[]> {
+  const [links, steps] = await Promise.all([
+    prisma.processPosition.findMany({ where: { processNodeId }, select: { positionId: true } }),
+    prisma.activityResponsibility.findMany({
+      where: { activity: { processNodeId } },
+      select: { positionId: true, person: { select: { userId: true } } }
+    })
+  ]);
+  const positionIds = [...links.map((link) => link.positionId), ...steps.flatMap((step) => step.positionId ?? [])];
+  return [...await usersOnPositions(organizationId, positionIds), ...steps.flatMap((step) => step.person?.userId ?? [])];
+}
+
+async function processOwners(organizationId: string, processNodeId: string): Promise<string[]> {
+  const links = await prisma.processPosition.findMany({ where: { processNodeId, role: ResponsibilityRole.OWNER }, select: { positionId: true } });
+  return usersOnPositions(organizationId, links.map((link) => link.positionId));
+}
+
+/** Clenovia firmy s danym opravnenim (podla roly). */
+async function usersWithPermission(organizationId: string, permission: Permission): Promise<string[]> {
+  const roles = (Object.keys(ROLE_PERMISSIONS) as OrganizationRole[]).filter((role) => ROLE_PERMISSIONS[role].includes(permission));
+  const members = await prisma.organizationUser.findMany({ where: { organizationId, role: { in: roles } }, select: { userId: true } });
+  return members.map((member) => member.userId);
+}
+
+type NotificationDraft = { title: string; body?: string | null; link?: string | null; recipients: string[] };
+
+/** Z udalosti vyrobi upozornenia — komu a co. Autor zmeny upozornenie o nej nedostane. */
+async function notificationsFor(event: { organizationId: string; type: string; processNodeId: string | null; actorId: string | null; payload: any }): Promise<NotificationDraft | null> {
+  const p = event.payload ?? {};
+  const processLink = event.processNodeId ? `/app/processes/${event.processNodeId}` : null;
+  const orgId = event.organizationId;
+  switch (event.type) {
+    case 'ProcessPublished':
+      return {
+        title: `Nová verzia procesu „${p.name}“`,
+        body: `v${p.revision} platí od ${p.effectiveFrom}.${p.changeReason ? ` Zmena: ${p.changeReason}` : ''}`,
+        link: processLink,
+        recipients: await processStakeholders(orgId, event.processNodeId!)
+      };
+    case 'ReviewDue': {
+      const owners = await processOwners(orgId, event.processNodeId!);
+      return {
+        title: p.overdue ? `Revízia procesu „${p.name}“ je po termíne` : `Blíži sa revízia procesu „${p.name}“`,
+        body: `Termín ${p.nextReviewAt} (v${p.revision}).`,
+        link: processLink,
+        // bez vlastnika sa o reviziu postaraju editori
+        recipients: owners.length > 0 ? owners : await usersWithPermission(orgId, 'process:write')
+      };
+    }
+    case 'ApprovalRequested':
+      return {
+        title: `Návrh na schválenie: „${p.name}“`,
+        body: `${p.requestedBy ?? 'Kolega'} odoslal(a) návrh v${p.revision}${p.changeReason ? ` — ${p.changeReason}` : ''}.`,
+        link: `${processLink}?approval=${p.requestId}`,
+        recipients: await usersWithPermission(orgId, 'approval:approve')
+      };
+    case 'ApprovalDecided':
+      return {
+        title: `Návrh „${p.name}“ bol ${p.approved ? 'schválený' : 'zamietnutý'}`,
+        body: `${p.decidedBy ?? '—'}${p.comment ? `: ${p.comment}` : ''}`,
+        link: processLink,
+        recipients: p.requestedById ? [p.requestedById] : []
+      };
+    case 'FeedbackSubmitted': {
+      const owners = await processOwners(orgId, event.processNodeId!);
+      return {
+        title: `${p.kind === 'error' ? 'Nahlásená chyba' : 'Návrh zlepšenia'} k „${p.name}“`,
+        body: String(p.text ?? '').slice(0, 200),
+        link: processLink,
+        recipients: owners.length > 0 ? owners : await usersWithPermission(orgId, 'process:write')
+      };
+    }
+    case 'FeedbackDecided':
+      return {
+        title: `Váš podnet k „${p.name}“: ${({ accepted: 'prijatý', rejected: 'zamietnutý', done: 'vybavený' } as Record<string, string>)[p.status] ?? p.status}`,
+        body: p.note ?? null,
+        link: processLink,
+        recipients: p.authorId ? [p.authorId] : []
+      };
+    case 'PositionAssignmentChanged':
+      return {
+        title: p.validTo ? `Pôsobenie na mieste „${p.positionName}“: ${p.validFrom} – ${p.validTo}` : `Zastávate miesto „${p.positionName}“ od ${p.validFrom}`,
+        body: 'Procesy tohto miesta nájdete v časti Moja práca.',
+        link: '/app/moja-praca',
+        recipients: p.userId ? [p.userId] : []
+      };
+    default:
+      return null;
+  }
+}
+
+let dispatching = false;
+let dispatchAgain = false;
+
+/**
+ * Dispecer outboxu: neodoslane udalosti → upozornenia. Udalost si najprv
+ * „zaberie“ (processedAt), takze ju ani viac behov naraz nespracuje dvakrat.
+ */
+async function dispatchEvents(): Promise<void> {
+  if (dispatching) {
+    dispatchAgain = true;
+    return;
+  }
+  dispatching = true;
+  try {
+    do {
+      dispatchAgain = false;
+      const events = await prisma.domainEvent.findMany({ where: { processedAt: null }, orderBy: { createdAt: 'asc' }, take: 50 });
+      for (const event of events) {
+        const claimed = await prisma.domainEvent.updateMany({ where: { id: event.id, processedAt: null }, data: { processedAt: new Date() } });
+        if (claimed.count === 0) continue;
+        try {
+          const draft = await notificationsFor(event);
+          if (!draft) continue;
+          // len clenovia tejto firmy, bez autora zmeny, kazdy raz
+          const members = new Set((await prisma.organizationUser.findMany({ where: { organizationId: event.organizationId }, select: { userId: true } })).map((m) => m.userId));
+          const recipients = [...new Set(draft.recipients)].filter((userId) => members.has(userId) && userId !== event.actorId);
+          if (recipients.length === 0) continue;
+          await prisma.notification.createMany({
+            data: recipients.map((userId) => ({
+              organizationId: event.organizationId,
+              userId,
+              eventId: event.id,
+              type: event.type,
+              title: draft.title.slice(0, 300),
+              body: draft.body ? draft.body.slice(0, 1000) : null,
+              link: draft.link ?? null
+            })),
+            skipDuplicates: true
+          });
+        } catch (error) {
+          logError('udalosti', error);
+        }
+      }
+      if (events.length === 50) dispatchAgain = true;
+    } while (dispatchAgain);
+  } finally {
+    dispatching = false;
+  }
+}
+
+function kickDispatcher(): void {
+  setImmediate(() => dispatchEvents().catch((error) => logError('udalosti', error)));
+}
+
+/**
+ * ReviewDue — platne verzie s terminom revizie do 30 dni alebo po termine.
+ * Kluc udalosti (verzia + „blizi sa“/„po termine“) zabrani opakovanym upozorneniam.
+ */
+async function scanReviewDue(): Promise<void> {
+  const now = today();
+  const soon = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const versions = await prisma.processVersion.findMany({
+    where: { nextReviewAt: { not: null, lte: soon }, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
+    select: { id: true, organizationId: true, processNodeId: true, revision: true, nextReviewAt: true, snapshot: true }
+  });
+  // len verzia, ktora dnes naozaj plati (nie nahradena v ten isty den vyssou reviziou)
+  const siblings = await prisma.processVersion.findMany({
+    where: { processNodeId: { in: [...new Set(versions.map((version) => version.processNodeId))] } },
+    select: { id: true, processNodeId: true, revision: true, effectiveFrom: true, effectiveTo: true }
+  });
+  const effectiveIds = new Set(
+    [...new Set(siblings.map((item) => item.processNodeId))]
+      .map((processNodeId) => pickEffective(siblings.filter((item) => item.processNodeId === processNodeId), now)?.id)
+      .filter(Boolean)
+  );
+  for (const version of versions) {
+    if (!effectiveIds.has(version.id)) continue;
+    const overdue = version.nextReviewAt! < now;
+    const dedupeKey = `ReviewDue:${version.id}:${overdue ? 'po-termine' : 'blizi-sa'}`;
+    const exists = await prisma.domainEvent.findUnique({ where: { dedupeKey }, select: { id: true } });
+    if (exists) continue;
+    await emitEvent(prisma, {
+      organizationId: version.organizationId,
+      type: 'ReviewDue',
+      processNodeId: version.processNodeId,
+      payload: { name: (version.snapshot as unknown as ProcessSnapshot).name, revision: version.revision, nextReviewAt: day(version.nextReviewAt), overdue },
+      dedupeKey
+    }).catch((error) => {
+      // subeh dvoch prehladani — druhe narazi na unikatny kluc, to je v poriadku
+      if ((error as { code?: string })?.code !== 'P2002') throw error;
+    });
+  }
+}
+
+app.get('/api/me/notifications', async (request, response, next) => {
+  try {
+    const { organizationId, userId } = auth(request);
+    const [items, unread] = await Promise.all([
+      prisma.notification.findMany({ where: { organizationId, userId }, orderBy: { createdAt: 'desc' }, take: 30 }),
+      prisma.notification.count({ where: { organizationId, userId, readAt: null } })
+    ]);
+    response.json({
+      unread,
+      items: items.map((item) => ({
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        body: item.body,
+        link: item.link,
+        read: Boolean(item.readAt),
+        createdAt: item.createdAt.toISOString()
+      }))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Oznacit ako precitane — len vlastne upozornenia (ids), alebo vsetky. */
+app.post('/api/me/notifications/read', async (request, response, next) => {
+  try {
+    const { organizationId, userId } = auth(request);
+    const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((id: unknown) => typeof id === 'string').slice(0, 200) : null;
+    if (!ids && request.body?.all !== true) throw new HttpError(400, 'Uvedte ids alebo all.');
+    const result = await prisma.notification.updateMany({
+      where: { organizationId, userId, readAt: null, ...(ids ? { id: { in: ids } } : {}) },
+      data: { readAt: new Date() }
+    });
+    response.json({ marked: result.count });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // --- #36 UX-01d podnety k procesu ---
 
 const FEEDBACK_KIND: Record<string, FeedbackKind> = { error: FeedbackKind.ERROR, improvement: FeedbackKind.IMPROVEMENT };
@@ -3501,6 +3801,14 @@ app.post('/api/processes/:processId/feedback', async (request, response, next) =
       },
       include: FEEDBACK_INCLUDE
     });
+    // #38 — vlastnikovi procesu (bez vlastnika editorom)
+    await emitEvent(prisma, {
+      organizationId,
+      type: 'FeedbackSubmitted',
+      processNodeId: node.id,
+      actorId: userId,
+      payload: { name: node.name, kind: kind === FeedbackKind.ERROR ? 'error' : 'improvement', text, feedbackId: created.id }
+    });
     response.status(201).json(mapFeedback(created, userId));
   } catch (error) {
     next(error);
@@ -3543,6 +3851,14 @@ app.post('/api/feedback/:feedbackId/decide', async (request, response, next) => 
       where: { id: item.id },
       data: { status, decisionNote: note ?? item.decisionNote, decidedById: userId, decidedAt: new Date() },
       include: FEEDBACK_INCLUDE
+    });
+    // #38 — autorovi vysledok jeho podnetu
+    await emitEvent(prisma, {
+      organizationId,
+      type: 'FeedbackDecided',
+      processNodeId: item.processNodeId,
+      actorId: userId,
+      payload: { name: updated.processNode?.name ?? '', status: String(status).toLowerCase(), note: updated.decisionNote, authorId: item.authorId }
     });
     response.json(mapFeedback(updated, userId));
   } catch (error) {
@@ -3810,11 +4126,27 @@ app.post('/api/positions/:positionId/assignments', async (request, response, nex
     const assignment = await prisma.positionAssignment.create({
       data: { organizationId: position.organizationId, positionId: position.id, personId: person.id, validFrom, validTo }
     });
+    await emitAssignmentChanged(request, assignment.id);
     response.status(201).json({ id: assignment.id, validFrom: day(assignment.validFrom), validTo: day(assignment.validTo) });
   } catch (error) {
     next(error);
   }
 });
+
+/** #38 — cloveku s uctom: odkedy (a dokedy) zastava miesto — jeho procesy su v Moja praca. */
+async function emitAssignmentChanged(request: express.Request, assignmentId: string): Promise<void> {
+  const assignment = await prisma.positionAssignment.findUnique({
+    where: { id: assignmentId },
+    select: { organizationId: true, validFrom: true, validTo: true, position: { select: { name: true } }, person: { select: { userId: true } } }
+  });
+  if (!assignment?.person.userId) return;
+  await emitEvent(prisma, {
+    organizationId: assignment.organizationId,
+    type: 'PositionAssignmentChanged',
+    actorId: auth(request).userId,
+    payload: { positionName: assignment.position.name, validFrom: day(assignment.validFrom), validTo: day(assignment.validTo), userId: assignment.person.userId }
+  });
+}
 
 /** Zmena obdobia — typicky ukoncenie (validTo), alebo oprava zaciatku. */
 app.patch('/api/assignments/:assignmentId', async (request, response, next) => {
@@ -3829,6 +4161,9 @@ app.patch('/api/assignments/:assignmentId', async (request, response, next) => {
       where: { id: current.id },
       data: { validFrom, validTo }
     });
+    if (assignment.validFrom.getTime() !== current.validFrom.getTime() || (assignment.validTo?.getTime() ?? null) !== (current.validTo?.getTime() ?? null)) {
+      await emitAssignmentChanged(request, assignment.id);
+    }
     response.json({ id: assignment.id, validFrom: day(assignment.validFrom), validTo: day(assignment.validTo) });
   } catch (error) {
     next(error);
@@ -4971,6 +5306,11 @@ process.on('unhandledRejection', (reason) => {
 
 app.listen(port, host, () => {
   console.log(`API listening on http://${host}:${port}`);
+  // #38 — dispecer upozorneni (aj udalosti, ktore ostali po restarte) a terminy revizii
+  dispatchEvents().catch((error) => logError('udalosti', error));
+  scanReviewDue().catch((error) => logError('revizie', error));
+  setInterval(() => dispatchEvents().catch((error) => logError('udalosti', error)), 15_000).unref();
+  setInterval(() => scanReviewDue().catch((error) => logError('revizie', error)), 60 * 60 * 1000).unref();
   reencryptLegacySecrets().catch((error) => logError('secrets', error));
   ensureFirstBackofficeAdmin().catch((error) => logError('backoffice', error));
 });

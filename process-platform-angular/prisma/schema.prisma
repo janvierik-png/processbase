@@ -114,6 +114,8 @@ model Organization {
   jobProfiles        JobProfile[]
   jobDescriptions    JobDescriptionVersion[]
   processVersions    ProcessVersion[]
+  domainEvents       DomainEvent[]
+  notifications      Notification[]
 }
 
 /// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
@@ -158,6 +160,7 @@ model User {
   approvedVersions  ProcessVersion[] @relation("ProcessVersionApprover")
   authoredFeedback  ProcessFeedback[] @relation("FeedbackAuthor")
   decidedFeedback   ProcessFeedback[] @relation("FeedbackDecider")
+  notifications     Notification[]
   sessions       Session[]
   processChanges ProcessChangeLog[]
 }
@@ -726,4 +729,47 @@ model ProcessFeedback {
 
   @@index([organizationId, status])
   @@index([processNodeId, createdAt])
+}
+
+/// #38 GOV-02 — domenova udalost (outbox). Zapisuje sa spolu so zmenou; upozornenia
+/// z nej vyrobi dispecer. E-mail sa doplni z tej istej udalosti po #20.
+model DomainEvent {
+  id             String         @id @default(uuid())
+  organizationId String
+  /// ProcessPublished, ReviewDue, PositionAssignmentChanged, ApprovalRequested,
+  /// ApprovalDecided, FeedbackSubmitted, FeedbackDecided
+  type           String
+  processNodeId  String?
+  actorId        String?
+  payload        Json
+  /// proti duplicitam udalosti, ktore vznikaju opakovanym prehladanim (ReviewDue)
+  dedupeKey      String?        @unique
+  createdAt      DateTime       @default(now())
+  processedAt    DateTime?
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  notifications  Notification[]
+
+  @@index([processedAt, createdAt])
+}
+
+/// Upozornenie pre konkretneho pouzivatela v aplikacii.
+model Notification {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  eventId        String
+  type           String
+  title          String
+  body           String?
+  link           String?
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event          DomainEvent  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([userId, readAt, createdAt])
 }

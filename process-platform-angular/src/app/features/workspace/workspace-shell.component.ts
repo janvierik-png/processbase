@@ -1,6 +1,7 @@
-import { Component, signal } from '@angular/core';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
+import { AppNotification, NotificationService } from '../../core/services/notification.service';
 import { StorageService } from '../../core/services/storage.service';
 import { TranslationService } from '../../core/services/translation.service';
 import { LanguageCode } from '../../core/models/translation.model';
@@ -12,15 +13,51 @@ import { LanguageCode } from '../../core/models/translation.model';
   templateUrl: './workspace-shell.component.html',
   styleUrl: './workspace-shell.component.scss'
 })
-export class WorkspaceShellComponent {
+export class WorkspaceShellComponent implements OnInit, OnDestroy {
   readonly collapsed = signal(this.storage.readString('ngNavCollapsed', '0') === '1');
   readonly resendState = signal<'idle' | 'sending' | 'sent'>('idle');
+  /** #38 — panel upozornení */
+  readonly notificationsOpen = signal(false);
+  private notificationTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     readonly auth: AuthService,
     readonly i18n: TranslationService,
-    private readonly storage: StorageService
+    readonly notifications: NotificationService,
+    private readonly storage: StorageService,
+    private readonly router: Router
   ) {}
+
+  ngOnInit(): void {
+    this.notifications.refresh();
+    // bez push kanála: raz za minútu stačí (udalosti nie sú urgentné)
+    this.notificationTimer = setInterval(() => this.notifications.refresh(), 60_000);
+  }
+
+  ngOnDestroy(): void {
+    if (this.notificationTimer) clearInterval(this.notificationTimer);
+  }
+
+  toggleNotifications(): void {
+    const open = !this.notificationsOpen();
+    this.notificationsOpen.set(open);
+    if (open) this.notifications.refresh();
+  }
+
+  openNotification(item: AppNotification): void {
+    this.notificationsOpen.set(false);
+    if (!item.read) this.notifications.markRead([item.id]).subscribe({ error: () => undefined });
+    // odkaz je vždy cesta v aplikácii (zostavuje ho server), nie cudzia adresa
+    if (item.link?.startsWith('/app/')) this.router.navigateByUrl(item.link);
+  }
+
+  markAllRead(): void {
+    this.notifications.markRead().subscribe({ error: () => undefined });
+  }
+
+  localDay(iso: string): string {
+    return new Date(iso).toLocaleDateString('sv-SE');
+  }
 
   setLanguage(value: string): void {
     this.i18n.setLanguage(value as LanguageCode);
