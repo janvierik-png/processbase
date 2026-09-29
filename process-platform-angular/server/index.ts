@@ -13,6 +13,7 @@ import {
   ApprovalStatus,
   AuthTokenType,
   JobDescriptionStatus,
+  DocumentStatus,
   FeedbackKind,
   FeedbackStatus,
   RaciRole,
@@ -256,6 +257,8 @@ const PERMISSION_RULES: PermissionRule[] = [
   { methods: ['POST'], pattern: /^\/api\/camunda7\/deploy$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/iso-detect$/, anyOf: ['process:write', 'iso:write'] },
   { methods: ['PATCH', 'DELETE'], pattern: /^\/api\/documents\/[^/]+$/, anyOf: ['process:write'] },
+  // #31 — nova verzia riadeneho dokumentu
+  { methods: ['POST'], pattern: /^\/api\/documents\/[^/]+\/versions$/, anyOf: ['process:write'] },
 
   // firma, pozvanky (aj ich citanie — obsahuju tokeny), nastavenia
   { methods: ['PATCH'], pattern: /^\/api\/organizations\/[^/]+$/, anyOf: ['organization:write'] },
@@ -356,14 +359,22 @@ type ProcessTreeNode = {
   history?: string[];
 };
 
-function mapAttachment(attachment: any) {
+function mapAttachment(attachment: any, versions?: { count: number; next: any | null }) {
   return {
     id: attachment.id,
     name: attachment.fileName,
+    // #31 — verzia riadeneho dokumentu
+    documentId: attachment.documentId ?? attachment.id,
+    version: attachment.version ?? 1,
+    effectiveFrom: day(attachment.effectiveFrom ?? null),
+    changeNote: attachment.changeNote ?? null,
+    versionCount: versions?.count ?? 1,
+    nextVersion: versions?.next ? { id: versions.next.id, version: versions.next.version, effectiveFrom: day(versions.next.effectiveFrom) } : null,
     type: attachment.mimeType,
     owner: attachment.uploadedBy?.name ?? '',
     size: attachment.sizeBytes,
-    createdAt: attachment.createdAt.toISOString().slice(0, 10),
+    // den nahratia v case firmy (UTC by po polnoci ukazal vcerajsok)
+    createdAt: new Intl.DateTimeFormat('sv-SE', { timeZone: BUSINESS_TIMEZONE }).format(attachment.createdAt),
     // obsah suboru sa vo vypisoch neposiela — na stiahnutie sluzi /api/documents/:id/download
     processId: attachment.processNodeId ?? undefined,
     processName: attachment.processNode?.name ?? undefined,
@@ -377,11 +388,56 @@ function mapAttachment(attachment: any) {
 
 // len stlpce, ktore mapAttachment potrebuje — plny proces by tahal BPMN XML
 // ku kazdemu dokumentu a plny pouzivatel aj hash hesla
+// --- #31 DOC-02 verzie riadenych dokumentov ---
+
+/** Co treba o verzii dokumentu vediet pre snapshot procesu. */
+const DOCUMENT_VERSION_SELECT = { id: true, fileName: true, documentId: true, version: true, effectiveFrom: true } as const;
+
+type DocumentVersionLike = { id: string; documentId?: string | null; version?: number | null; effectiveFrom?: Date | null };
+
+/** Z verzii dokumentov ta, ktora v dany den plati: najvyssia verzia s ucinnostou do toho dna. */
+function currentDocumentVersions<T extends DocumentVersionLike>(attachments: T[], at = today()): T[] {
+  const byDocument = new Map<string, T>();
+  for (const item of attachments) {
+    if (item.effectiveFrom && item.effectiveFrom > at) continue;
+    const key = item.documentId ?? item.id;
+    const best = byDocument.get(key);
+    if (!best || (item.version ?? 1) > (best.version ?? 1)) byDocument.set(key, item);
+  }
+  return [...byDocument.values()];
+}
+
 const ATTACHMENT_INCLUDE = {
   processNode: { select: { name: true } },
   uploadedBy: { select: { name: true } },
   positions: { include: { position: { select: { id: true, name: true } } } }
 };
+
+/**
+ * Zoznam dokumentov: za kazdy dokument jeho platna verzia (ak este ziadna
+ * neplati, naplanovana), pocet verzii a najblizsia naplanovana verzia.
+ */
+async function listCurrentDocuments(where: Record<string, unknown>) {
+  const attachments = await prisma.attachment.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    include: ATTACHMENT_INCLUDE,
+    omit: { storagePath: true }
+  });
+  const now = today();
+  const groups = new Map<string, typeof attachments>();
+  for (const item of attachments) {
+    const key = item.documentId ?? item.id;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return [...groups.values()].map((versions) => {
+    const current = currentDocumentVersions(versions, now)[0] ?? null;
+    const future = versions
+      .filter((item) => item.effectiveFrom && item.effectiveFrom > now && (!current || item.version > current.version))
+      .sort((a, b) => a.version - b.version);
+    return mapAttachment(current ?? future[0], { count: versions.length, next: current ? future[0] ?? null : future[1] ?? null });
+  });
+}
 
 function emptyBpmnXml(id: string, name: string): string {
   const escapedName = escapeXml(name);
@@ -715,9 +771,9 @@ function publicationInclude() {
   return {
     versions: {
       orderBy: { revision: 'desc' as const },
-      select: { revision: true, effectiveFrom: true, effectiveTo: true, contentHash: true, nextReviewAt: true }
+      select: { id: true, revision: true, effectiveFrom: true, effectiveTo: true, contentHash: true, nextReviewAt: true }
     },
-    attachments: { select: { id: true, fileName: true } },
+    attachments: { select: DOCUMENT_VERSION_SELECT },
     // #28 — kroky patria do obsahu navrhu, #29 aj s RACI
     activities: activityInclude(),
     // #37 — cakajuca ziadost o schvalenie
@@ -760,7 +816,8 @@ type ProcessSnapshot = {
   /** ID miest, nie mena — kto miesto zastava, sa odvodzuje z obsadenia v case */
   responsibilities: Array<{ positionId: string; role: string }>;
   documentIds: string[];
-  documents: Array<{ id: string; name: string }>;
+  /** #31 — ktora verzia dokumentu platila pri publikovani (mimo odtlacku) */
+  documents: Array<{ id: string; name: string; documentId?: string; version?: number }>;
 };
 
 // --- #29 CORE-03 RACI na kroku ---
@@ -845,8 +902,9 @@ function buildSnapshot(node: any): ProcessSnapshot {
   const responsibilities = (node.positions ?? [])
     .map((link: any) => ({ positionId: link.positionId, role: String(link.role) }))
     .sort((a: any, b: any) => `${a.role}:${a.positionId}`.localeCompare(`${b.role}:${b.positionId}`));
-  const documents = (node.attachments ?? [])
-    .map((attachment: any) => ({ id: attachment.id, name: attachment.fileName }))
+  // #31 — k navrhu patri verzia dokumentu, ktora dnes plati; starsie a naplanovane nie
+  const documents = currentDocumentVersions(node.attachments ?? [])
+    .map((attachment: any) => ({ id: attachment.id, name: attachment.fileName, documentId: attachment.documentId ?? attachment.id, version: attachment.version ?? 1 }))
     .sort((a: any, b: any) => a.id.localeCompare(b.id));
   return {
     schema: 1,
@@ -1010,13 +1068,26 @@ async function versionView(node: any, version: any, at: Date) {
         select: { id: true, name: true }
       })
     : [];
+  // #31 — verzia dokumentu, ktoru verzia procesu ma, a ci uz plati novsia
+  const snapshotDocuments = (snapshot.documents ?? []).map((item) => ({ ...item, documentId: item.documentId ?? item.id, version: item.version ?? 1 }));
+  const documentVersions = snapshotDocuments.length
+    ? await prisma.attachment.findMany({
+        where: { organizationId: node.organizationId, documentId: { in: snapshotDocuments.map((item) => item.documentId) } },
+        select: DOCUMENT_VERSION_SELECT
+      })
+    : [];
+  const currentByDocument = new Map(currentDocumentVersions(documentVersions).map((item) => [item.documentId ?? item.id, item]));
+  const documents = snapshotDocuments.map((item) => {
+    const current = currentByDocument.get(item.documentId);
+    return { ...item, newerVersion: current && current.id !== item.id && (current.version ?? 1) > item.version ? current.version : null };
+  });
   return {
     ...mapped,
     // stav a zmeny navrhu sa pocitaju z procesu, nie zo snapshotu
     ...publicationState(node),
     view: 'version',
     version: mapVersionMeta(version),
-    documents: snapshot.documents,
+    documents,
     relatedProcesses: related
   };
 }
@@ -1027,7 +1098,7 @@ async function loadDraftForPublication(request: express.Request, processId: stri
     where: { id: processId, organizationId: orgScope(request) },
     include: {
       positions: true,
-      attachments: { select: { id: true, fileName: true } },
+      attachments: { select: DOCUMENT_VERSION_SELECT },
       activities: activityInclude()
     }
   });
@@ -1907,13 +1978,7 @@ app.get('/api/organizations/:organizationId/storage', async (request, response, 
 app.get('/api/organizations/:organizationId/documents', async (request, response, next) => {
   try {
     const organization = await ensureOrganization(orgScope(request));
-    const attachments = await prisma.attachment.findMany({
-      where: { organizationId: organization.id },
-      orderBy: { createdAt: 'desc' },
-      include: ATTACHMENT_INCLUDE,
-      omit: { storagePath: true }
-    });
-    response.json(attachments.map(mapAttachment));
+    response.json(await listCurrentDocuments({ organizationId: organization.id }));
   } catch (error) {
     next(error);
   }
@@ -1921,14 +1986,8 @@ app.get('/api/organizations/:organizationId/documents', async (request, response
 
 app.get('/api/processes/:processId/documents', async (request, response, next) => {
   try {
-    await requireProcess(request, request.params.processId);
-    const attachments = await prisma.attachment.findMany({
-      where: { processNodeId: request.params.processId },
-      orderBy: { createdAt: 'desc' },
-      include: ATTACHMENT_INCLUDE,
-      omit: { storagePath: true }
-    });
-    response.json(attachments.map(mapAttachment));
+    const node = await requireProcess(request, request.params.processId);
+    response.json(await listCurrentDocuments({ processNodeId: node.id, organizationId: node.organizationId }));
   } catch (error) {
     next(error);
   }
@@ -1942,20 +2001,19 @@ app.get('/api/processes/:processId/documents', async (request, response, next) =
  *
  * Starsi format (JSON s data URL) sa este prijima, ale tiez sa uklada na disk.
  */
-app.post('/api/processes/:processId/documents', async (request, response, next) => {
-  let writtenKey: string | null = null;
+/**
+ * Prijme subor z tela poziadavky rovno na disk (#10); kvota (#9) sa overuje
+ * pred zapisom aj so skutocnou velkostou. Pri chybe po zapise subor zmaze.
+ */
+async function receiveUpload(request: express.Request, organizationId: string, attachmentId: string) {
+  const key = fileKey(organizationId, attachmentId);
+  const tooLarge = () =>
+    new HttpError(413, `Subor je prilis velky. Maximalna velkost je ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
+  let written = false;
   try {
-    const processNode = await requireProcess(request, request.params.processId);
-    const organizationId = processNode.organizationId;
-    const attachmentId = randomUUID();
-    const key = fileKey(organizationId, attachmentId);
-    const tooLarge = () =>
-      new HttpError(413, `Subor je prilis velky. Maximalna velkost je ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
-
     let fileName: string;
     let mimeType: string;
     let sizeBytes: number;
-
     if (request.is('application/json')) {
       const parsed = parseDataUrl(String(request.body?.dataUrl ?? ''));
       if (!parsed) throw new HttpError(400, 'Chyba obsah suboru.');
@@ -1963,7 +2021,6 @@ app.post('/api/processes/:processId/documents', async (request, response, next) 
       mimeType = cleanMimeType(request.body?.mimeType ?? parsed.mimeType);
       sizeBytes = parsed.data.length;
       if (sizeBytes > MAX_UPLOAD_BYTES) throw tooLarge();
-      // #9 — kvota sa overuje PRED zapisom
       await assertStorageAvailable(organizationId, sizeBytes);
       await storeBuffer(key, parsed.data);
     } else {
@@ -1975,29 +2032,145 @@ app.post('/api/processes/:processId/documents', async (request, response, next) 
       await assertStorageAvailable(organizationId, Number.isFinite(declared) ? declared : 0);
       sizeBytes = await storeStream(key, request, MAX_UPLOAD_BYTES, tooLarge);
     }
-    writtenKey = key;
-
+    written = true;
     // znova so skutocnou velkostou — medzitym mohlo prebehnut ine nahravanie
     await assertStorageAvailable(organizationId, sizeBytes);
+    return { key, fileName, mimeType, sizeBytes };
+  } catch (error) {
+    if (written) await removeStored(key).catch(() => undefined);
+    throw error;
+  }
+}
 
-    const attachment = await prisma.attachment.create({
-      data: {
-        id: attachmentId,
-        organizationId,
-        processNodeId: processNode.id,
-        uploadedById: auth(request).userId,
-        fileName,
-        mimeType,
-        sizeBytes,
-        storagePath: key
-      },
-      include: ATTACHMENT_INCLUDE
+app.post('/api/processes/:processId/documents', async (request, response, next) => {
+  let writtenKey: string | null = null;
+  try {
+    const processNode = await requireProcess(request, request.params.processId);
+    const organizationId = processNode.organizationId;
+    const attachmentId = randomUUID();
+    const file = await receiveUpload(request, organizationId, attachmentId);
+    writtenKey = file.key;
+
+    // #31 — novy subor = novy riadeny dokument s verziou 1, ucinny od dnes
+    const attachment = await prisma.$transaction(async (tx) => {
+      const document = await tx.controlledDocument.create({
+        data: { organizationId, processNodeId: processNode.id, title: file.fileName }
+      });
+      return tx.attachment.create({
+        data: {
+          id: attachmentId,
+          organizationId,
+          processNodeId: processNode.id,
+          uploadedById: auth(request).userId,
+          fileName: file.fileName,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+          storagePath: file.key,
+          documentId: document.id,
+          version: 1,
+          effectiveFrom: today()
+        },
+        include: ATTACHMENT_INCLUDE
+      });
     });
     writtenKey = null;
     response.status(201).json(mapAttachment(attachment));
   } catch (error) {
     // subor bez zaznamu v DB by zaberal miesto a nikto by ho nevidel
     if (writtenKey) await removeStored(writtenKey).catch(() => undefined);
+    next(error);
+  }
+});
+
+/** #31 — dokument (riadeny) podla ktorejkolvek jeho verzie; stare prilohy bez dokumentu su samostatne. */
+async function requireDocumentOf(request: express.Request, attachmentId: string) {
+  const attachment = await requireDocument(request, attachmentId);
+  if (!attachment.documentId) throw new HttpError(409, 'Priloha nie je riadeny dokument.');
+  const document = await prisma.controlledDocument.findFirst({
+    where: { id: attachment.documentId, organizationId: attachment.organizationId },
+    include: {
+      ownerPosition: { select: { id: true, name: true } },
+      versions: { orderBy: { version: 'desc' }, include: ATTACHMENT_INCLUDE, omit: { storagePath: true } }
+    }
+  });
+  if (!document) throw new HttpError(404, 'Dokument sa nenasiel.');
+  return document;
+}
+
+/**
+ * Nova verzia dokumentu. Telo = subor ako pri nahrati; X-Effective-From (den,
+ * nie spatne) a X-Change-Note (URI-kodovane). Publikovane verzie procesov
+ * ostavaju pri verzii, ktoru mali — navrh procesu dostane novu verziu.
+ */
+app.post('/api/documents/:documentId/versions', async (request, response, next) => {
+  let writtenKey: string | null = null;
+  try {
+    const document = await requireDocumentOf(request, String(request.params.documentId));
+    if (document.status === DocumentStatus.ARCHIVED) throw new HttpError(409, 'Archivovany dokument uz nove verzie nedostava.');
+    const now = today();
+    const effectiveFrom = parseDay(decodeHeader(request.get('x-effective-from')) || undefined, now, 'effectiveFrom')!;
+    if (effectiveFrom < now) throw new HttpError(400, 'Ucinnost verzie nemoze zacat v minulosti.');
+    const latest = document.versions[0];
+    if (latest?.effectiveFrom && effectiveFrom < latest.effectiveFrom) {
+      throw new HttpError(400, `Ucinnost musi zacat najskor ${day(latest.effectiveFrom)} (vtedy zacina v${latest.version}).`);
+    }
+    const changeNote = cleanText(decodeHeader(request.get('x-change-note')), 1000);
+
+    const attachmentId = randomUUID();
+    const file = await receiveUpload(request, document.organizationId, attachmentId);
+    writtenKey = file.key;
+    const attachment = await prisma.attachment.create({
+      data: {
+        id: attachmentId,
+        organizationId: document.organizationId,
+        processNodeId: document.processNodeId,
+        uploadedById: auth(request).userId,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        storagePath: file.key,
+        documentId: document.id,
+        version: (latest?.version ?? 0) + 1,
+        effectiveFrom,
+        changeNote
+      },
+      include: ATTACHMENT_INCLUDE
+    });
+    writtenKey = null;
+    // #38 — platna verzia procesu mohla odkazovat na nahradenu verziu
+    if (effectiveFrom <= now) scanDocumentVersions().catch((error) => logError('dokumenty', error));
+    response.status(201).json(mapAttachment(attachment, { count: document.versions.length + 1, next: null }));
+  } catch (error) {
+    if (writtenKey) await removeStored(writtenKey).catch(() => undefined);
+    next(error);
+  }
+});
+
+/** Verzie dokumentu so stavom a tym, ktore publikovane verzie procesov na ne odkazuju. */
+app.get('/api/documents/:documentId/versions', async (request, response, next) => {
+  try {
+    const document = await requireDocumentOf(request, String(request.params.documentId));
+    const now = today();
+    const current = currentDocumentVersions(document.versions, now)[0];
+    const versionIds = document.versions.map((item) => item.id);
+    const usedIn = versionIds.length
+      ? await prisma.$queryRaw<Array<{ attachmentId: string; revision: number; name: string }>>`
+          SELECT d.id AS "attachmentId", v.revision, v.snapshot->>'name' AS name
+          FROM "ProcessVersion" v, jsonb_array_elements_text(v.snapshot->'documentIds') AS d(id)
+          WHERE v."organizationId" = ${document.organizationId} AND d.id = ANY(${versionIds})`
+      : [];
+    response.json({
+      id: document.id,
+      title: document.title,
+      status: String(document.status).toLowerCase(),
+      ownerPosition: document.ownerPosition ?? null,
+      versions: document.versions.map((item) => ({
+        ...mapAttachment(item),
+        state: item.id === current?.id ? 'current' : item.effectiveFrom && item.effectiveFrom > now ? 'scheduled' : 'superseded',
+        usedIn: usedIn.filter((row) => row.attachmentId === item.id).map((row) => ({ revision: row.revision, processName: row.name }))
+      }))
+    });
+  } catch (error) {
     next(error);
   }
 });
@@ -2032,6 +2205,21 @@ app.patch('/api/documents/:documentId', async (request, response, next) => {
 
     if (fileName !== undefined) {
       await prisma.attachment.update({ where: { id: documentId }, data: { fileName } });
+    }
+
+    // #31 — vlastnik (pracovne miesto) a stav riadeneho dokumentu
+    if (existing.documentId && (request.body?.ownerPositionId !== undefined || request.body?.status !== undefined)) {
+      const [ownerPositionId = null] = request.body?.ownerPositionId === undefined
+        ? [undefined]
+        : await assertOwnedIds('orgPosition', existing.organizationId, [request.body.ownerPositionId]);
+      const status = request.body?.status === undefined
+        ? undefined
+        : ({ active: DocumentStatus.ACTIVE, archived: DocumentStatus.ARCHIVED } as Record<string, DocumentStatus>)[String(request.body.status)];
+      if (request.body?.status !== undefined && !status) throw new HttpError(400, 'Neznamy stav dokumentu.');
+      await prisma.controlledDocument.update({
+        where: { id: existing.documentId },
+        data: { ...(ownerPositionId !== undefined ? { ownerPositionId } : {}), ...(status ? { status } : {}) }
+      });
     }
 
     if (Array.isArray(request.body?.positionIds)) {
@@ -2119,6 +2307,10 @@ app.delete('/api/documents/:documentId', async (request, response, next) => {
       throw new HttpError(409, `Dokument je sucastou publikovanej verzie v${usedIn.revision} procesu — nemozno ho zmazat.`);
     }
     await prisma.attachment.delete({ where: { id: attachment.id } });
+    // #31 — dokument bez jedinej verzie nema zmysel; platnou sa stane predchadzajuca verzia
+    if (attachment.documentId && (await prisma.attachment.count({ where: { documentId: attachment.documentId } })) === 0) {
+      await prisma.controlledDocument.delete({ where: { id: attachment.documentId } }).catch(() => undefined);
+    }
     // az po zmazani zaznamu — opacne poradie by nechalo zaznam bez suboru
     if (isFileKey(attachment.storagePath)) await removeStored(attachment.storagePath);
     response.status(204).end();
@@ -3444,7 +3636,7 @@ app.get('/api/me/work', async (request, response, next) => {
 type EventClient = Pick<typeof prisma, 'domainEvent'>;
 type DomainEventInput = {
   organizationId: string;
-  type: 'ProcessPublished' | 'ReviewDue' | 'PositionAssignmentChanged' | 'ApprovalRequested' | 'ApprovalDecided' | 'FeedbackSubmitted' | 'FeedbackDecided';
+  type: 'ProcessPublished' | 'ReviewDue' | 'PositionAssignmentChanged' | 'ApprovalRequested' | 'ApprovalDecided' | 'FeedbackSubmitted' | 'FeedbackDecided' | 'DocumentSuperseded';
   processNodeId?: string | null;
   actorId?: string | null;
   payload: Record<string, unknown>;
@@ -3557,6 +3749,15 @@ async function notificationsFor(event: { organizationId: string; type: string; p
         link: processLink,
         recipients: p.authorId ? [p.authorId] : []
       };
+    case 'DocumentSuperseded': {
+      const owners = await processOwners(orgId, event.processNodeId!);
+      return {
+        title: `Nová verzia dokumentu „${p.documentName}“`,
+        body: `Platí v${p.version}, no platná verzia v${p.revision} procesu „${p.processName}“ odkazuje na v${p.oldVersion}. Novú verziu prevezmete publikovaním procesu.`,
+        link: processLink,
+        recipients: owners.length > 0 ? owners : await usersWithPermission(orgId, 'process:write')
+      };
+    }
     case 'PositionAssignmentChanged':
       return {
         title: p.validTo ? `Pôsobenie na mieste „${p.positionName}“: ${p.validFrom} – ${p.validTo}` : `Zastávate miesto „${p.positionName}“ od ${p.validFrom}`,
@@ -3658,6 +3859,46 @@ async function scanReviewDue(): Promise<void> {
       dedupeKey
     }).catch((error) => {
       // subeh dvoch prehladani — druhe narazi na unikatny kluc, to je v poriadku
+      if ((error as { code?: string })?.code !== 'P2002') throw error;
+    });
+  }
+}
+
+/**
+ * DocumentSuperseded (#31/#38) — nova verzia dokumentu zacala platit, no platna
+ * verzia procesu odkazuje na starsiu. Hlada sa v poslednych 60 dnoch; kluc
+ * udalosti (verzia dokumentu) zabrani opakovaniu.
+ */
+async function scanDocumentVersions(): Promise<void> {
+  const now = today();
+  const since = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+  const fresh = await prisma.attachment.findMany({
+    where: { documentId: { not: null }, version: { gt: 1 }, effectiveFrom: { lte: now, gte: since } },
+    select: { id: true, organizationId: true, documentId: true, version: true, fileName: true, uploadedById: true, document: { select: { processNodeId: true } } }
+  });
+  for (const item of fresh) {
+    const dedupeKey = `DocumentSuperseded:${item.id}`;
+    const processNodeId = item.document?.processNodeId;
+    if (!processNodeId || (await prisma.domainEvent.findUnique({ where: { dedupeKey }, select: { id: true } }))) continue;
+    const versions = await prisma.attachment.findMany({ where: { documentId: item.documentId }, select: DOCUMENT_VERSION_SELECT });
+    // plati tato verzia naozaj (nenahradila ju hned dalsia)?
+    if (currentDocumentVersions(versions, now)[0]?.id !== item.id) continue;
+    const processVersions = await prisma.processVersion.findMany({
+      where: { processNodeId },
+      select: { id: true, revision: true, effectiveFrom: true, effectiveTo: true, snapshot: true }
+    });
+    const effective = pickEffective(processVersions, now);
+    const snapshot = effective?.snapshot as unknown as ProcessSnapshot | undefined;
+    const old = versions.find((version) => version.version < item.version && (snapshot?.documentIds ?? []).includes(version.id));
+    if (!effective || !snapshot || !old) continue;
+    await emitEvent(prisma, {
+      organizationId: item.organizationId,
+      type: 'DocumentSuperseded',
+      processNodeId,
+      actorId: item.uploadedById,
+      payload: { documentName: item.fileName, version: item.version, oldVersion: old.version, processName: snapshot.name, revision: effective.revision },
+      dedupeKey
+    }).catch((error) => {
       if ((error as { code?: string })?.code !== 'P2002') throw error;
     });
   }
@@ -4041,7 +4282,7 @@ app.get('/api/search', async (request, response, next) => {
 // --- #34 UX-01b prehlad: co treba vo firme napravit ---
 
 type OverviewItem = { id: string; name: string; code: string; detail: string; overdue?: boolean };
-const OVERVIEW_KEYS = ['review', 'pendingApproval', 'feedback', 'ownerless', 'vacant', 'incomplete', 'unpublished', 'pendingChanges'] as const;
+const OVERVIEW_KEYS = ['review', 'pendingApproval', 'feedback', 'staleDocuments', 'ownerless', 'vacant', 'incomplete', 'unpublished', 'pendingChanges'] as const;
 
 /**
  * Kazda kategoria je zoznam procesov s konkretnym problemom a popisom, co
@@ -4073,6 +4314,19 @@ app.get('/api/overview', async (request, response, next) => {
       feedbackByProcess.set(row.processNodeId, entry);
     }
 
+    // #31 — platne verzie, ktore odkazuju na nahradenu verziu dokumentu
+    const effectiveIds = nodes.flatMap((node) => pickEffective(node.versions, at)?.id ?? []);
+    const effectiveSnapshots = effectiveIds.length
+      ? await prisma.processVersion.findMany({ where: { id: { in: effectiveIds } }, select: { id: true, snapshot: true } })
+      : [];
+    const snapshotById = new Map(effectiveSnapshots.map((item) => [item.id, item.snapshot as unknown as ProcessSnapshot]));
+    const referencedDocuments = [...new Set(effectiveSnapshots.flatMap((item) =>
+      ((item.snapshot as unknown as ProcessSnapshot).documents ?? []).map((document) => document.documentId ?? document.id)))];
+    const documentVersions = referencedDocuments.length
+      ? await prisma.attachment.findMany({ where: { organizationId, documentId: { in: referencedDocuments } }, select: DOCUMENT_VERSION_SELECT })
+      : [];
+    const currentDocument = new Map(currentDocumentVersions(documentVersions, at).map((item) => [item.documentId ?? item.id, item]));
+
     const categories = Object.fromEntries(OVERVIEW_KEYS.map((key) => [key, [] as OverviewItem[]])) as Record<(typeof OVERVIEW_KEYS)[number], OverviewItem[]>;
     for (const node of nodes) {
       const base = { id: node.id, name: node.name, code: node.code ?? '' };
@@ -4086,6 +4340,16 @@ app.get('/api/overview', async (request, response, next) => {
       }
       if (publication.pendingApproval) {
         categories.pendingApproval.push({ ...base, detail: `Návrh odoslal(a) ${publication.pendingApproval.requestedBy ?? '—'} ${new Intl.DateTimeFormat('sv-SE', { timeZone: BUSINESS_TIMEZONE }).format(new Date(publication.pendingApproval.createdAt))}` });
+      }
+      const effectiveSnapshot = effective ? snapshotById.get((effective as { id?: string }).id ?? '') : undefined;
+      const stale = (effectiveSnapshot?.documents ?? []).flatMap((document) => {
+        const current = currentDocument.get(document.documentId ?? document.id);
+        return current && current.id !== document.id && (current.version ?? 1) > (document.version ?? 1)
+          ? [`${document.name} (v${document.version ?? 1}, platí v${current.version})`]
+          : [];
+      });
+      if (stale.length > 0) {
+        categories.staleDocuments.push({ ...base, detail: `Platná v${effective!.revision} odkazuje na nahradený dokument: ${stale.join('; ')}` });
       }
       const open = feedbackByProcess.get(node.id);
       if (open) {
@@ -5454,8 +5718,13 @@ app.listen(port, host, () => {
   // #38 — dispecer upozorneni (aj udalosti, ktore ostali po restarte) a terminy revizii
   dispatchEvents().catch((error) => logError('udalosti', error));
   scanReviewDue().catch((error) => logError('revizie', error));
+  scanDocumentVersions().catch((error) => logError('dokumenty', error));
   setInterval(() => dispatchEvents().catch((error) => logError('udalosti', error)), 15_000).unref();
-  setInterval(() => scanReviewDue().catch((error) => logError('revizie', error)), 60 * 60 * 1000).unref();
+  setInterval(() => {
+    scanReviewDue().catch((error) => logError('revizie', error));
+    // naplanovane verzie dokumentov zacinaju platit o polnoci
+    scanDocumentVersions().catch((error) => logError('dokumenty', error));
+  }, 60 * 60 * 1000).unref();
   reencryptLegacySecrets().catch((error) => logError('secrets', error));
   ensureFirstBackofficeAdmin().catch((error) => logError('backoffice', error));
 });

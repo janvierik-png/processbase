@@ -14,6 +14,7 @@ import { PositionService } from '../../core/services/position.service';
 import {
   ApprovalRequestInfo,
   Attachment,
+  DocumentVersions,
   IsoNorm,
   IsoSuggestion,
   ProcessChange,
@@ -657,7 +658,74 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   private applyVersion(detail: ProcessDetail): void {
     this.detail.set(detail);
-    this.documents.set((detail.documents ?? []).map((document) => ({ id: document.id, name: document.name, type: '', owner: '' })));
+    // #31 — verzia dokumentu, ktorú publikovaná verzia procesu má (a či platí novšia)
+    this.documents.set((detail.documents ?? []).map((document) => ({
+      id: document.id, name: document.name, type: '', owner: '', version: document.version, newerVersion: document.newerVersion ?? null
+    })));
+  }
+
+  // --- #31 verzie riadených dokumentov ---
+
+  readonly documentVersions = signal<Record<string, DocumentVersions>>({});
+  versionsOpenFor: string | null = null;
+  versionFormFor: string | null = null;
+  versionFile: File | null = null;
+  versionModel = { effectiveFrom: '', note: '' };
+
+  toggleDocumentVersions(document: Attachment): void {
+    if (this.versionsOpenFor === document.id) {
+      this.versionsOpenFor = null;
+      return;
+    }
+    this.versionsOpenFor = document.id;
+    this.documentsApi.versions(document.id).subscribe({
+      next: (info) => this.documentVersions.update((all) => ({ ...all, [document.id]: info })),
+      error: (error) => this.store.error.set(error?.error?.message ?? 'Verzie dokumentu sa nepodarilo načítať.')
+    });
+  }
+
+  openVersionForm(document: Attachment): void {
+    this.versionFormFor = document.id;
+    this.versionFile = null;
+    this.versionModel = { effectiveFrom: this.todayLocal(), note: '' };
+  }
+
+  pickVersionFile(event: Event): void {
+    this.versionFile = (event.target as HTMLInputElement).files?.[0] ?? null;
+  }
+
+  uploadDocumentVersion(document: Attachment): void {
+    const detail = this.detail();
+    const file = this.versionFile;
+    if (!detail || !file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      this.store.error.set(`Súbor „${file.name}" má ${formatBytes(file.size)} a prekračuje limit ${MAX_UPLOAD_LABEL}.`);
+      return;
+    }
+    this.uploading.set(true);
+    this.documentsApi.uploadVersion(document.id, file, this.versionModel.effectiveFrom || undefined, this.versionModel.note).subscribe({
+      next: (created) => {
+        this.uploading.set(false);
+        this.versionFormFor = null;
+        this.versionsOpenFor = null;
+        this.deployState.set(created.effectiveFrom && created.effectiveFrom > this.todayLocal()
+          ? `Verzia v${created.version} dokumentu začne platiť ${created.effectiveFrom}.`
+          : `Nahraná verzia v${created.version}. Publikované verzie procesu ostávajú pri doterajšej verzii — prevezmete ju publikovaním.`);
+        this.openDetail(detail.id);
+      },
+      error: (error) => {
+        this.uploading.set(false);
+        this.store.error.set(error?.error?.message ?? 'Novú verziu sa nepodarilo nahrať.');
+      }
+    });
+  }
+
+  versionStateLabel(state: 'current' | 'scheduled' | 'superseded'): string {
+    return { current: 'platí', scheduled: 'naplánovaná', superseded: 'nahradená' }[state];
+  }
+
+  usedInLabel(item: { usedIn: Array<{ revision: number; processName: string }> }): string {
+    return item.usedIn.map((use) => `${use.processName} v${use.revision}`).join(', ');
   }
 
   openPublish(mode: 'publish' | 'approval' = 'publish'): void {

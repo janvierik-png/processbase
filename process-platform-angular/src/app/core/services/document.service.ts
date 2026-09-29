@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, map } from 'rxjs';
-import { Attachment } from '../models/process.model';
+import { Attachment, DocumentVersions } from '../models/process.model';
 import { AuthService } from './auth.service';
 import { API_BASE_URL } from './api-url';
 
@@ -66,6 +66,23 @@ export class DocumentService {
   /** Stiahne subor pod jeho nazvom. */
   download(id: string, fileName: string): Observable<void> {
     return this.fetchFile(id).pipe(map((blob) => saveBlob(blob, fileName)));
+  }
+
+  /** #31 — všetky verzie dokumentu (podľa ktorejkoľvek jeho verzie). */
+  versions(id: string) {
+    return this.http.get<DocumentVersions>(`${API_BASE_URL}/documents/${id}/versions`);
+  }
+
+  /** #31 — nová verzia dokumentu; účinnosť (deň) a poznámka idú v hlavičkách ako pri nahratí. */
+  uploadVersion(id: string, file: File, effectiveFrom?: string, changeNote?: string) {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/octet-stream',
+      'X-File-Name': encodeURIComponent(file.name),
+      'X-File-Type': file.type || 'application/octet-stream'
+    };
+    if (effectiveFrom) headers['X-Effective-From'] = effectiveFrom;
+    if (changeNote?.trim()) headers['X-Change-Note'] = encodeURIComponent(changeNote.trim());
+    return this.http.post<Attachment>(`${API_BASE_URL}/documents/${id}/versions`, file, { headers });
   }
 
   update(id: string, patch: { name?: string; positionIds?: string[] }) {

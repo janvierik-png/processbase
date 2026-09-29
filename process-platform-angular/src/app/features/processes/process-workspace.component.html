@@ -790,16 +790,58 @@
                     <a class="doc-name" [href]="documentUrl(document)" (click)="downloadDocument(document, $event)" [title]="'Stiahnut ' + document.name">
                       {{ document.name }}
                     </a>
-                    <small>Pridane {{ document.createdAt }} · {{ formatSize(document.size) }}</small>
+                    <!-- #31 — verzia riadeného dokumentu -->
+                    @if (document.version) {
+                      <small>
+                        <span class="doc-version">v{{ document.version }}</span>
+                        @if (document.effectiveFrom) { platí od {{ document.effectiveFrom }} · }
+                        @if (document.createdAt) { pridané {{ document.createdAt }} · {{ formatSize(document.size) }} }
+                        @if (document.nextVersion) { · <em>v{{ document.nextVersion.version }} od {{ document.nextVersion.effectiveFrom }}</em> }
+                        @if (document.newerVersion) { · <em class="warn-text">platí už novšia v{{ document.newerVersion }} — táto verzia procesu ju ešte neprevzala</em> }
+                      </small>
+                    } @else {
+                      <small>Pridane {{ document.createdAt }} · {{ formatSize(document.size) }}</small>
+                    }
                   </div>
                   <div class="doc-actions">
                     @if (canPreview(document)) {
                       <button type="button" class="doc-download" (click)="openPreview(document)" title="Zobrazit nahlad">Nahlad</button>
                     }
                     <a class="doc-download" [href]="documentUrl(document)" (click)="downloadDocument(document, $event)" title="Stiahnut">Stiahnut</a>
+                    @if ((document.versionCount ?? 1) > 1) {
+                      <button type="button" class="ghost small" (click)="toggleDocumentVersions(document)">Verzie ({{ document.versionCount }})</button>
+                    }
+                    @if (document.versionCount) {
+                      <button type="button" class="ghost small write-action" (click)="openVersionForm(document)">Nová verzia</button>
+                    }
                     <button type="button" class="ghost small write-action" (click)="startDocumentEdit(document)">Premenovat</button>
                     <button type="button" class="ghost small write-action" (click)="deleteDocument(document)">Vymazat</button>
                   </div>
+                }
+
+                @if (versionFormFor === document.id) {
+                  <div class="version-form write-action">
+                    <label>Súbor novej verzie <input type="file" (change)="pickVersionFile($event)"></label>
+                    <label>Platí od <input type="date" [name]="'ver-from-' + document.id" [(ngModel)]="versionModel.effectiveFrom" [min]="todayLocal()"></label>
+                    <label class="wide">Čo sa zmenilo (voliteľné) <input [name]="'ver-note-' + document.id" [(ngModel)]="versionModel.note" maxlength="1000"></label>
+                    <p class="muted-small wide">Publikované verzie procesu ostanú pri doterajšej verzii dokumentu; návrh procesu dostane novú, keď začne platiť.</p>
+                    <div class="edit-actions wide">
+                      <button type="button" class="primary small" (click)="uploadDocumentVersion(document)" [disabled]="!versionFile || uploading()">Nahrať novú verziu</button>
+                      <button type="button" class="small" (click)="versionFormFor = null">Zrušiť</button>
+                    </div>
+                  </div>
+                }
+
+                @if (versionsOpenFor === document.id && documentVersions()[document.id]; as info) {
+                  <ol class="version-list">
+                    @for (item of info.versions; track item.id) {
+                      <li>
+                        <span class="chip" [class.subtle]="item.state === 'current'">{{ versionStateLabel(item.state) }}</span>
+                        <a [href]="documentUrl(item)" (click)="downloadDocument(item, $event)">v{{ item.version }} · {{ item.name }}</a>
+                        <small>od {{ item.effectiveFrom ?? '—' }}{{ item.changeNote ? ' · ' + item.changeNote : '' }}{{ item.usedIn.length ? ' · v procese: ' + usedInLabel(item) : '' }}</small>
+                      </li>
+                    }
+                  </ol>
                 }
 
                 <div class="doc-positions">
@@ -807,14 +849,14 @@
                     @for (position of document.positions ?? []; track position.id) {
                       <span class="chip">
                         {{ position.name }}
-                        <button type="button" class="chip-remove" (click)="toggleDocumentPosition(document, position.id)">×</button>
+                        <button type="button" class="chip-remove write-action" (click)="toggleDocumentPosition(document, position.id)">×</button>
                       </span>
                     } @empty {
                       <span class="muted-small">Bez priradenej pozicie</span>
                     }
                   </div>
                   @if (positions().length > 0) {
-                    <select class="doc-position-select"
+                    <select class="doc-position-select write-action"
                       [ngModel]="''" [name]="'docpos-' + document.id"
                       (ngModelChange)="addDocumentPosition(document, $event)">
                       <option value="">+ Priradit poziciu...</option>

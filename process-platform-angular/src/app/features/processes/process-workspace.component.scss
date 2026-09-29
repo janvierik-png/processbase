@@ -734,7 +734,10 @@ button.small {
 
 .doc-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 5px;
+  max-width: 340px;
   opacity: 0;
   transition: opacity .12s;
 }
@@ -1248,3 +1251,47 @@ button.small {
 }
 
 .danger-text { color: var(--warn); }
+
+// #31 — verzie riadených dokumentov
+.doc-version {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.warn-text { color: var(--warn); font-style: normal; }
+
+.version-form {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+
+  label { display: grid; gap: 4px; color: var(--muted); font-size: 12.5px; }
+  .wide { grid-column: 1 / -1; }
+}
+
+.version-list {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+
+  li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; font-size: 13px; }
+  small { color: var(--muted); }
+}
+
+@media (max-width: 640px) {
+  .version-form { grid-template-columns: minmax(0, 1fr); }
+}

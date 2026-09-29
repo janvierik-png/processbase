@@ -59,7 +59,7 @@ export interface ProcessDetail extends ProcessNode {
   approvalRequest?: ApprovalRequestInfo;
   version?: ProcessVersionMeta;
   /** dokumenty v publikovanej verzii (stav pri publikovaní) */
-  documents?: Array<{ id: string; name: string }>;
+  documents?: Array<{ id: string; name: string; version?: number; newerVersion?: number | null }>;
 }
 
 /** #33 — „Moja práca": procesy podľa miest, ktoré prihlásený zastáva. */
@@ -203,6 +203,15 @@ export interface Attachment {
   processName?: string;
   positionIds?: string[];
   positions?: ProcessPositionRef[];
+  /** #31 — verzia riadeného dokumentu */
+  documentId?: string;
+  version?: number;
+  effectiveFrom?: string | null;
+  changeNote?: string | null;
+  versionCount?: number;
+  nextVersion?: { id: string; version: number; effectiveFrom: string | null } | null;
+  /** v publikovanej verzii procesu: platí už novšia verzia dokumentu */
+  newerVersion?: number | null;
 }
 
 export interface ProcessRevision {
@@ -215,7 +224,7 @@ export interface ProcessRevision {
 }
 
 /** #34 — prehľad firmy: každá karta je zoznam procesov s konkrétnym problémom. */
-export type OverviewKey = 'review' | 'pendingApproval' | 'feedback' | 'ownerless' | 'vacant' | 'incomplete' | 'unpublished' | 'pendingChanges';
+export type OverviewKey = 'review' | 'pendingApproval' | 'feedback' | 'staleDocuments' | 'ownerless' | 'vacant' | 'incomplete' | 'unpublished' | 'pendingChanges';
 
 export interface OverviewItem {
   id: string;
@@ -264,4 +273,13 @@ export interface SearchResult {
   processes: Array<{ id: string; name: string; code: string; matches: SearchMatch[] }>;
   positions: Array<{ id: string; name: string }>;
   documents: Array<{ id: string; fileName: string; processId: string | null; processName: string | null }>;
+}
+
+/** #31 — riadený dokument so všetkými verziami. */
+export interface DocumentVersions {
+  id: string;
+  title: string;
+  status: 'active' | 'archived';
+  ownerPosition: { id: string; name: string } | null;
+  versions: Array<Attachment & { state: 'current' | 'scheduled' | 'superseded'; usedIn: Array<{ revision: number; processName: string }> }>;
 }

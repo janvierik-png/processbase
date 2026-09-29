@@ -239,6 +239,10 @@ GOV-01 #37 · GOV-02 #38 · LINK-01 #39 · QUAL-01 #40 · IMP-01 #41 · AI-01 #4
 | **UX-01d** #36 | `c0d61ca` | `feedback-test` 26/26 — čitateľka bez práva upravovať nahlási chybu ku kroku platnej verzie; iná čitateľka cudzí podnet nevidí; vlastník podľa miesta (bez práva upravovať) vidí a rozhoduje, po odchode z miesta už nie (403); zamietnutie len s dôvodom; vybavený sa neotvára; autorka vidí výsledok; „Moja práca" vlastníka a karta v Prehľade. V prehliadači: Jana nahlási návrh ku kroku, vlastník firmy ho z Prehľadu prijme s odpoveďou; dátumy udalostí v miestnom čase |
 | **GOV-02** #38 | `d581e45` | `notifications-test` 26/26 — outbox `DomainEvent` v transakcii so zmenou, dispečer → `Notification`: nová verzia (vlastník, vykonávatelia, RACI krokov), revízia do 30 dní / po termíne (vlastník, bez vlastníka editori; bez opakovania), žiadosť o schválenie (schvaľovatelia s odkazom na posúdenie), rozhodnutie (žiadateľ), podnet a jeho vybavenie, obsadenie miesta; nikdy autor zmeny, nikdy mimo firmy; označenie len vlastných. V prehliadači: zvonček s počtom, panel, klik otvorí proces a označí prečítané |
 | **UX-01c** #35 | `83ec905` | `search-test` 17/17 — scenár 7: z inej firmy s rovnakými slovami sa nevráti proces, názov, kód, miesto ani dokument; výsledky rozlišujú platnú (v2), naplánovanú, návrh a archív (v1); bez diakritiky, podľa začiatku slova, podľa kódu (DB funkcia `pb_search_vector`), pracovné miesta, názvy dokumentov, úryvok so zhodou; špeciálne znaky nerozbijú dopyt. V prehliadači: pole v hornej lište → výsledky s filtrom Platné/Návrhy/Archív |
+| **DOC-02** #31 | `DOC02_HASH` | `document-versions-test` 27/27 — akceptácia: nová verzia dokumentu nezmení snapshot v1 procesu (v1 odkazuje na v1 dokumentu, stiahnutie dá obsah v1, vie o novšej v2); návrh dostane platnú verziu a zmenu na publikovanie, naplánovaná verzia až od účinnosti; zoznam verzií so stavom a použitím vo verziách procesov; kvóta = všetky verzie; verziu v publikovanom procese nemožno zmazať; archivácia a vlastník; prenos existujúcich príloh ako v1 (ID zachované, odtlačky bez zmeny). Nadväzuje: karta Prehľadu „Dokument po účinnosti" (#34) a upozornenie `DocumentSuperseded` (#38). V prehliadači: v2 s „Verzie (2)", platná verzia procesu ukazuje v1 s upozornením na novšiu |
+
+**Známe obmedzenia DOC-02:** dokument patrí jednému procesu (zdieľanie medzi procesmi a samostatný register
+dokumentov sú na neskôr); stránka Dokumenty zatiaľ nenahráva novú verziu (len karta procesu).
 
 **Známe obmedzenia UX-01c:** bez indexu (pre stovky procesov stačí; pri raste GIN index nad `pb_search_vector`);
 odkaz na archívnu verziu otvorí proces — konkrétnu verziu treba otvoriť v Histórii.
@@ -246,8 +250,8 @@ odkaz na archívnu verziu otvorí proces — konkrétnu verziu treba otvoriť v 
 **Známe obmedzenia GOV-02:** len v aplikácii — e-mail z tých istých udalostí po výbere poskytovateľa (#20);
 `DocumentSuperseded` príde s DOC-02 (#31); nové upozornenia sa načítajú raz za minútu (bez push kanála).
 
-**Známe obmedzenia UX-01b:** karta „dokument po účinnosti" príde s riadenými dokumentmi (DOC-02 #31) —
-dnes dokumenty nemajú účinnosť. Prehľad počíta obsadenie k zvolenému dňu, stav publikovania k dnešku.
+**Známe obmedzenia UX-01b:** karta „dokument po účinnosti" (platná verzia odkazuje na nahradený dokument) pribudla s DOC-02.
+Prehľad počíta obsadenie k zvolenému dňu, stav publikovania k dnešku.
 
 **Známe obmedzenia CORE-01:** strom procesov zobrazuje názov návrhu aj čitateľom (obsah detailu je
 z platnej verzie); naplánovanú verziu nemožno zrušiť ani nahradiť skoršou; bez zapnutého schvaľovania

@@ -116,6 +116,7 @@ model Organization {
   processVersions    ProcessVersion[]
   domainEvents       DomainEvent[]
   notifications      Notification[]
+  controlledDocuments ControlledDocument[]
 }
 
 /// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
@@ -255,6 +256,7 @@ model ProcessNode {
   changeLogs         ProcessChangeLog[]
   versions           ProcessVersion[]
   feedback           ProcessFeedback[]
+  controlledDocuments ControlledDocument[]
   activities         ProcessActivity[]
 
   @@unique([organizationId, code])
@@ -376,7 +378,15 @@ model Attachment {
   processNode    ProcessNode?   @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
   uploadedBy     User?          @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   positions      AttachmentPosition[]
+  /// #31 DOC-02 — verzia riadeneho dokumentu (subor = jedna verzia)
+  documentId     String?
+  version        Int            @default(1)
+  /// odkedy verzia plati (den); nova verzia moze byt naplanovana dopredu
+  effectiveFrom  DateTime?      @db.Date
+  changeNote     String?
+  document       ControlledDocument? @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
+  @@unique([documentId, version])
   @@index([organizationId, processNodeId])
 }
 
@@ -494,6 +504,7 @@ model OrgPosition {
   assignments    PositionAssignment[]
   processes      ProcessPosition[]
   activityResponsibilities ActivityResponsibility[]
+  ownedDocuments  ControlledDocument[]
   documents      AttachmentPosition[]
 
   @@unique([organizationId, name])
@@ -772,4 +783,30 @@ model Notification {
 
   @@unique([eventId, userId])
   @@index([userId, readAt, createdAt])
+}
+
+/// #31 DOC-02 — stav riadeneho dokumentu; archivovany sa uz nenavrhuje k procesom.
+enum DocumentStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+/// Riadeny dokument: nazov, vlastnik (pracovne miesto), stav. Subory su jeho verzie
+/// (Attachment.documentId) — publikovana verzia procesu odkazuje na konkretnu verziu.
+model ControlledDocument {
+  id              String         @id @default(uuid())
+  organizationId  String
+  processNodeId   String?
+  title           String
+  ownerPositionId String?
+  status          DocumentStatus @default(ACTIVE)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  processNode     ProcessNode?   @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  ownerPosition   OrgPosition?   @relation(fields: [ownerPositionId], references: [id], onDelete: SetNull)
+  versions        Attachment[]
+
+  @@index([organizationId, processNodeId])
 }
