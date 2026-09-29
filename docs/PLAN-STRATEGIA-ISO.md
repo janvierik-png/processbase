@@ -248,7 +248,7 @@ dokumentov sú na neskôr); stránka Dokumenty zatiaľ nenahráva novú verziu (
 odkaz na archívnu verziu otvorí proces — konkrétnu verziu treba otvoriť v Histórii.
 
 **Známe obmedzenia GOV-02:** len v aplikácii — e-mail z tých istých udalostí po výbere poskytovateľa (#20);
-`DocumentSuperseded` príde s DOC-02 (#31); nové upozornenia sa načítajú raz za minútu (bez push kanála).
+`DocumentSuperseded` pribudol s DOC-02 (#31); nové upozornenia sa načítajú raz za minútu (bez push kanála).
 
 **Známe obmedzenia UX-01b:** karta „dokument po účinnosti" (platná verzia odkazuje na nahradený dokument) pribudla s DOC-02.
 Prehľad počíta obsadenie k zvolenému dňu, stav publikovania k dnešku.
