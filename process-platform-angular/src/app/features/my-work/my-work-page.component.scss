@@ -81,3 +81,13 @@
   &.neutral { background: var(--surface-alt); border-color: var(--line); color: var(--muted); }
   &.warn { background: var(--warn-soft); border-color: #f1c9b1; color: var(--warn); }
 }
+
+// #30 — kód procesu pred názvom
+.code {
+  &:empty { display: none; }
+
+  margin-right: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}

@@ -217,6 +217,8 @@ model ProcessNode {
   ownerId            String?
   type               ProcessNodeType
   name               String
+  /// #30 — kod procesu (napr. PR-07), velkymi pismenami, jedinecny vo firme
+  code               String?
   description        String?
   descriptionText    String?
   /// #28 — kedy sa proces spusti (napr. „prisla faktura“)
@@ -249,6 +251,7 @@ model ProcessNode {
   versions           ProcessVersion[]
   activities         ProcessActivity[]
 
+  @@unique([organizationId, code])
   @@index([organizationId, parentId, sortOrder])
 }
 

@@ -57,7 +57,7 @@
               <path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>
             }
           </svg>
-          <button type="button" class="tree-select" (click)="select(row.node)">{{ row.node.name }}</button>
+          <button type="button" class="tree-select" (click)="select(row.node)"><span class="tree-code">{{ row.node.code }}</span>{{ row.node.name }}</button>
           <span class="tree-row-actions">
             <button type="button" class="icon-btn write-action" title="Premenovat" (click)="rename(row.node, $event)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16z"/></svg>
@@ -75,7 +75,7 @@
         @if (row.kind === 'process') {
           <div class="tree-row simple" [class.active]="row.node.id === store.activeProcessId()" [style.--level]="row.level">
             <svg class="tree-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>
-            <button type="button" class="tree-select" (click)="select(row.node)">{{ row.node.name }}</button>
+            <button type="button" class="tree-select" (click)="select(row.node)"><span class="tree-code">{{ row.node.code }}</span>{{ row.node.name }}</button>
           </div>
         } @else {
           <div class="tree-row heading" [class.norm]="row.kind === 'norm'" [style.--level]="row.level">
@@ -88,7 +88,7 @@
         @for (process of unassignedProcesses(); track process.id) {
           <div class="tree-row simple unassigned" [class.active]="process.id === store.activeProcessId()" [style.--level]="1">
             <svg class="tree-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>
-            <button type="button" class="tree-select" (click)="select(process)">{{ process.name }}</button>
+            <button type="button" class="tree-select" (click)="select(process)"><span class="tree-code">{{ process.code }}</span>{{ process.name }}</button>
           </div>
         }
       }
@@ -109,6 +109,9 @@
               <p class="breadcrumb">{{ process.parentName }} <span>/</span></p>
             }
             <div class="title-row">
+              @if (process.code) {
+                <span class="process-code">{{ process.code }}</span>
+              }
               <h2>{{ process.name }}</h2>
               <span [class]="'badge ' + statusClass(process.status)">{{ process.status }}</span>
             </div>
@@ -278,6 +281,10 @@
           @if (editSection() === 'basic') {
             <form class="card-body edit-grid" (ngSubmit)="saveDetail()">
               <label>Nazov procesu <input name="name" [(ngModel)]="process.name"></label>
+              <!-- #30 — kód je súčasť návrhu, jedinečný vo firme -->
+              <label>Kód procesu (voliteľné)
+                <input name="code" [(ngModel)]="process.code" maxlength="32" placeholder="napr. PR-07" class="code-input">
+              </label>
               <!-- #27 — stav sa nenastavuje rucne; vyplyva z publikovanych verzii (lista nad kartou) -->
               <div class="info-item">
                 <span>Stav</span>
@@ -294,6 +301,9 @@
               <label>Popis zmeny (audit)
                 <input name="changeDescription" [(ngModel)]="changeDescription" placeholder="Co sa zmenilo a preco">
               </label>
+              @if (saveError()) {
+                <p class="error save-error span-two">{{ saveError() }}</p>
+              }
               <div class="edit-actions span-two">
                 <button class="primary" type="submit">Ulozit</button>
                 <button type="button" (click)="cancelEdit()">Zrusit</button>
@@ -301,6 +311,10 @@
             </form>
           } @else {
             <div class="card-body info-grid">
+              <div class="info-item">
+                <span>Kód</span>
+                <strong>{{ process.code || '—' }}</strong>
+              </div>
               <div class="info-item">
                 <span>Stav</span>
                 <strong><span [class]="'badge ' + statusClass(process.status)">{{ process.status }}</span></strong>
@@ -358,6 +372,9 @@
               <label>Popis zmeny (audit)
                 <input name="changeDescription" [(ngModel)]="changeDescription" placeholder="Co sa zmenilo a preco">
               </label>
+              @if (saveError()) {
+                <p class="error save-error">{{ saveError() }}</p>
+              }
               <div class="edit-actions">
                 <button class="primary" type="submit">Ulozit</button>
                 <button type="button" (click)="cancelEdit()">Zrusit</button>
@@ -595,6 +612,9 @@
           </section>
 
           @if (editSection() === 'relations') {
+            @if (saveError()) {
+              <p class="error save-error">{{ saveError() }}</p>
+            }
             <div class="edit-actions">
               <button class="primary" type="submit">Ulozit</button>
               <button type="button" (click)="cancelEdit()">Zrusit</button>

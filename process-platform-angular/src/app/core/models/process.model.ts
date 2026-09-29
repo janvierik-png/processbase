@@ -1,6 +1,8 @@
 export interface ProcessNode {
   id: string;
   name: string;
+  /** #30 — kód procesu (napr. PR-07); prázdny, ak nie je zadaný */
+  code?: string;
   type: 'folder' | 'process';
   parentId?: string | null;
   children?: ProcessNode[];
@@ -68,6 +70,7 @@ export interface MyWork {
   processes: Array<{
     id: string;
     name: string;
+    code?: string;
     effective: { revision: number; effectiveFrom: string; nextReviewAt: string | null } | null;
     /** termín revízie: po termíne / do 30 dní */
     review: 'overdue' | 'soon' | null;

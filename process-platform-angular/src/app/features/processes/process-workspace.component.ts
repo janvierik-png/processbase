@@ -203,6 +203,7 @@ export class ProcessWorkspaceComponent implements OnInit {
   // --- R3: karta procesu ---
 
   openDetail(id: string, mode: 'draft' | 'effective' = 'draft', approvalId: string | null = null): void {
+    this.saveError.set('');
     this.tab.set('card');
     this.viewedRevision.set(null);
     this.editSection.set(null);
@@ -300,6 +301,7 @@ export class ProcessWorkspaceComponent implements OnInit {
   // --- karta procesu: rezim upravy po sekciach ---
 
   startEdit(section: Exclude<EditSection, null>): void {
+    this.saveError.set('');
     this.editSection.set(section);
   }
 
@@ -345,7 +347,8 @@ export class ProcessWorkspaceComponent implements OnInit {
     if (!query) return rows;
     // pri hladani zobraz plochy zoznam zhod — bez hierarchie, aby bolo vidno vsetko
     return rows
-      .filter((row) => row.kind === 'process' && row.node.name.toLowerCase().includes(query))
+      .filter((row) => row.kind === 'process'
+        && (row.node.name.toLowerCase().includes(query) || (row.node.code ?? '').toLowerCase().includes(query)))
       .map((row) => ({ ...row, level: 0 }));
   }
 
@@ -640,6 +643,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     }
     this.store.updateProcess(detail.id, {
       name: detail.name,
+      code: detail.code ?? '',
       purpose: detail.purpose,
       trigger: detail.trigger ?? '',
       outcome: detail.outcome ?? '',
@@ -651,12 +655,11 @@ export class ProcessWorkspaceComponent implements OnInit {
       ownerPositionId: this.ownerPositionDraft || null,
       iso: detail.iso ?? [],
       changeDescription: this.changeDescription
-    }, () => {
-      this.changeDescription = '';
-      this.editSection.set(null);
-      this.openDetail(detail.id);
-    });
+    }, done, (message) => this.saveError.set(message));
   }
+
+  /** Chyba ukladania pri otvorenej sekcii (napr. #30 obsadený kód) — formulár ostáva otvorený. */
+  readonly saveError = signal('');
 
   saveBpmn(xml: string): void {
     const process = this.active();

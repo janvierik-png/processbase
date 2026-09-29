@@ -80,7 +80,7 @@
 <ng-template #row let-item>
   <a class="work-row" [routerLink]="['/app/processes', item.id]">
     <div>
-      <strong>{{ item.name }}</strong>
+      <strong><span class="code">{{ item.code }}</span>{{ item.name }}</strong>
       <small class="muted">{{ sources(item) }}</small>
     </div>
     @if (item.effective) {

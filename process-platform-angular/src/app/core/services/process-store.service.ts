@@ -165,7 +165,7 @@ export class ProcessStoreService {
     this.createNode('folder', 'Nova skupina');
   }
 
-  updateProcess(id: string, patch: ProcessPatch, onDone?: (updated: ProcessNode) => void): void {
+  updateProcess(id: string, patch: ProcessPatch, onDone?: (updated: ProcessNode) => void, onError?: (message: string) => void): void {
     const { positionIds, ownerPositionId, changeDescription, ...nodePatch } = patch;
     this.tree.set(this.walk(this.tree(), (node) => node.id === id ? { ...node, ...nodePatch } : node));
     this.persist();
@@ -177,7 +177,13 @@ export class ProcessStoreService {
         if (patch.parentId !== undefined) this.loadFromDatabase();
         onDone?.(updated);
       },
-      error: (error) => this.error.set(error?.error?.message ?? 'Proces sa nepodarilo ulozit do databazy.')
+      error: (error) => {
+        const message = error?.error?.message ?? 'Proces sa nepodarilo ulozit do databazy.';
+        // strom bol zmeneny vopred — vratit ho do stavu, ktory naozaj ulozil server
+        this.loadFromDatabase();
+        if (onError) onError(message);
+        else this.error.set(message);
+      }
     });
   }
 

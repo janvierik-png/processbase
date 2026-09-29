@@ -305,6 +305,8 @@ type Responsibility = { id: string; name: string; role: string; holders: string[
 type ProcessTreeNode = {
   id: string;
   name: string;
+  /** #30 — kod procesu, prazdny ak nie je zadany */
+  code?: string;
   type: 'folder' | 'process';
   parentId?: string | null;
   children?: ProcessTreeNode[];
@@ -452,6 +454,7 @@ function mapNode(node: any): ProcessTreeNode {
   return {
     id: node.id,
     name: node.name,
+    code: node.code ?? '',
     type: node.type === ProcessNodeType.GROUP ? 'folder' : 'process',
     parentId: node.parentId ?? null,
     // vlastnik = kto DNES zastava miesto vlastnika; bez miesta povodny vlastnik-ucet
@@ -555,12 +558,15 @@ app.post('/api/organizations/:organizationId/processes', async (request, respons
     const type = request.body.type === 'folder' ? ProcessNodeType.GROUP : ProcessNodeType.PROCESS;
     const name = request.body.name ?? (type === ProcessNodeType.GROUP ? 'Nova skupina' : 'Novy proces');
     const [parentId = null] = await assertOwnedIds('processNode', organization.id, [request.body.parentId]);
+    const code = type === ProcessNodeType.PROCESS ? normalizeProcessCode(request.body.code) : null;
+    if (code) await assertCodeFree(organization.id, '', code);
     const processNode = await prisma.processNode.create({
       data: {
         organizationId: organization.id,
         parentId,
         type,
         name,
+        code,
         description: request.body.purpose ?? null,
         // #27 — novy proces je vzdy navrh; platnym sa stane az publikovanim
         status: ProcessStatus.DRAFT,
@@ -716,6 +722,8 @@ type Publication = {
 type ProcessSnapshot = {
   schema: 1;
   name: string;
+  /** #30 — len ak je kod zadany (starsie verzie a procesy bez kodu ho nemaju) */
+  code?: string;
   purpose: string;
   descriptionText: string;
   diagramType: string;
@@ -751,6 +759,8 @@ function buildSnapshot(node: any): ProcessSnapshot {
   return {
     schema: 1,
     name: node.name,
+    // bez kodu kluc chyba — odtlacok existujucich verzii ostava rovnaky
+    ...(node.code ? { code: node.code } : {}),
     purpose: node.description ?? '',
     descriptionText: node.descriptionText ?? '',
     diagramType: node.diagramType ?? 'NONE',
@@ -860,6 +870,7 @@ async function versionView(node: any, version: any, at: Date) {
   const mapped = mapNode({
     ...node,
     name: snapshot.name,
+    code: snapshot.code ?? null,
     description: snapshot.purpose,
     descriptionText: snapshot.descriptionText,
     diagramType: snapshot.diagramType,
@@ -927,6 +938,7 @@ async function preparePublication(node: any, body: any) {
   const changeReason = cleanText(body?.changeReason, 1000);
 
   const snapshot = buildSnapshot(node);
+  if (snapshot.code) await assertCodeFreeForPublication(node, snapshot.code, effectiveFrom);
   const contentHash = snapshotHash(snapshot);
   const last = await prisma.processVersion.findFirst({ where: { processNodeId: node.id }, orderBy: { revision: 'desc' } });
   if (last) {
@@ -937,6 +949,55 @@ async function preparePublication(node: any, body: any) {
     }
   }
   return { snapshot, contentHash, effectiveFrom, nextReviewAt, changeReason };
+}
+
+// --- #30 CORE-04 kod procesu ---
+
+/** Kod bez medzier, velkymi pismenami; prazdny = proces bez kodu. */
+function normalizeProcessCode(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') throw new HttpError(400, 'Kód procesu musí byť text.');
+  const code = value.trim().toLocaleUpperCase('sk-SK');
+  if (!code) return null;
+  if (code.length > 32 || !/^[\p{L}\p{N}][\p{L}\p{N}._/-]*$/u.test(code)) {
+    throw new HttpError(400, 'Kód procesu môže mať najviac 32 znakov — písmená, číslice, pomlčku, bodku, lomku alebo podčiarkovník, bez medzier.');
+  }
+  return code;
+}
+
+/** Navrh: kod nesmie mat iny proces firmy (strazi aj unikatny index). */
+async function assertCodeFree(organizationId: string, processId: string, code: string) {
+  const taken = await prisma.processNode.findFirst({
+    where: { organizationId, code, id: { not: processId } },
+    select: { name: true }
+  });
+  if (taken) throw new HttpError(409, `Kód ${code} už používa proces „${taken.name}“.`);
+}
+
+/**
+ * Publikovanie: kod nesmie mat ani platna alebo naplanovana verzia ineho
+ * procesu — ten mohol kod v navrhu zmenit, no jeho verzia ho este ukazuje.
+ */
+async function assertCodeFreeForPublication(node: any, code: string, effectiveFrom: Date) {
+  const candidates = await prisma.processVersion.findMany({
+    where: {
+      organizationId: node.organizationId,
+      processNodeId: { not: node.id },
+      snapshot: { path: ['code'], equals: code },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveFrom } }]
+    },
+    select: { processNodeId: true, revision: true, effectiveFrom: true, snapshot: true }
+  });
+  for (const candidate of candidates) {
+    // verzia nahradena v ten isty den nikdy neplatila (vyhrava vyssia revizia)
+    const shadowed = await prisma.processVersion.findFirst({
+      where: { processNodeId: candidate.processNodeId, revision: { gt: candidate.revision }, effectiveFrom: { lte: candidate.effectiveFrom } },
+      select: { id: true }
+    });
+    if (shadowed) continue;
+    const name = (candidate.snapshot as unknown as ProcessSnapshot).name;
+    throw new HttpError(409, `Kód ${code} má ešte verzia v${candidate.revision} procesu „${name}“ — dva platné procesy nesmú mať rovnaký kód.`);
+  }
 }
 
 /** Vytvori dalsiu verziu; predchadzajuca plati do dna pred novou (v ten isty den vyhra vyssia revizia). */
@@ -1163,6 +1224,11 @@ async function decide(request: express.Request, approve: boolean) {
   if (approve) {
     // ucinnost, ktora medzicasom presla, zacne dnes — nie spatne
     const effectiveFrom = item.effectiveFrom && item.effectiveFrom > today() ? item.effectiveFrom : today();
+    // #30 — medzi odoslanim a rozhodnutim mohol rovnaky kod publikovat iny proces
+    const proposedCode = (item.snapshot as unknown as ProcessSnapshot)?.code;
+    if (proposedCode) {
+      await assertCodeFreeForPublication({ id: item.processNodeId, organizationId }, proposedCode, effectiveFrom);
+    }
     const version = await createVersion({
       organizationId,
       processNodeId: item.processNodeId,
@@ -1366,9 +1432,13 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     if (Array.isArray(body.positionIds)) {
       body.positionIds = await assertOwnedIds('orgPosition', current.organizationId, body.positionIds);
     }
+    // #30 — kod je sucast navrhu; jedinecny vo firme
+    const code = body.code === undefined ? undefined : normalizeProcessCode(body.code);
+    if (code) await assertCodeFree(current.organizationId, processId, code);
 
     const data = {
       name: body.name ?? undefined,
+      code,
       description: body.purpose ?? undefined,
       descriptionText: body.descriptionText ?? undefined,
       trigger: body.trigger === undefined ? undefined : (cleanText(body.trigger, 1000) ?? null),
@@ -1393,6 +1463,7 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       changedFields[field] = { from, to };
     };
     track('name', current.name, data.name);
+    track('code', current.code, data.code);
     track('purpose', current.description, data.description);
     track('descriptionText', current.descriptionText, data.descriptionText);
     track('trigger', current.trigger, data.trigger);
@@ -1410,7 +1481,13 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       changedFields['flowchartXml'] = { from: '(flowchart)', to: '(flowchart zmeneny)' };
     }
 
-    await prisma.processNode.update({ where: { id: processId }, data });
+    try {
+      await prisma.processNode.update({ where: { id: processId }, data });
+    } catch (error: any) {
+      // dvaja naraz s rovnakym kodom — druhy narazi na unikatny index
+      if (error?.code === 'P2002') throw new HttpError(409, `Kód ${code} už používa iný proces.`);
+      throw error;
+    }
 
     // R1/R3, #15: vykonavatelia (positionIds) a vlastnik (ownerPositionId) podla miest
     const performerIds = current.positions
@@ -3039,7 +3116,7 @@ app.get('/api/me/work', async (request, response, next) => {
           include: {
             processNode: {
               select: {
-                id: true, name: true,
+                id: true, name: true, code: true,
                 versions: { select: { id: true, revision: true, effectiveFrom: true, effectiveTo: true, nextReviewAt: true } }
               }
             }
@@ -3055,9 +3132,10 @@ app.get('/api/me/work', async (request, response, next) => {
     }
     const versionIds = [...effectiveByProcess.values()].filter(Boolean).map((version: any) => version.id);
     const names = versionIds.length
-      ? await prisma.$queryRaw<Array<{ id: string; name: string }>>`SELECT id, snapshot->>'name' AS name FROM "ProcessVersion" WHERE id = ANY(${versionIds})`
+      ? await prisma.$queryRaw<Array<{ id: string; name: string; code: string | null }>>`SELECT id, snapshot->>'name' AS name, snapshot->>'code' AS code FROM "ProcessVersion" WHERE id = ANY(${versionIds})`
       : [];
     const versionName = new Map(names.map((row) => [row.id, row.name]));
+    const versionCode = new Map(names.map((row) => [row.id, row.code]));
     const positionName = new Map(assignments.map((assignment) => [assignment.positionId, assignment.position.name]));
     const soon = new Date(at.getTime() + 30 * 24 * 60 * 60 * 1000);
 
@@ -3067,6 +3145,7 @@ app.get('/api/me/work', async (request, response, next) => {
       const entry = byProcess.get(link.processNodeId) ?? {
         id: link.processNodeId,
         name: (effective && versionName.get(effective.id)) || link.processNode.name,
+        code: (effective ? versionCode.get(effective.id) : link.processNode.code) ?? '',
         effective: effective
           ? { revision: effective.revision, effectiveFrom: day(effective.effectiveFrom), nextReviewAt: day(effective.nextReviewAt) }
           : null,

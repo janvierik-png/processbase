@@ -1110,3 +1110,28 @@ button.small {
 
   input { flex: 1; min-height: 30px; font-size: 13px; }
 }
+
+// #30 — kód procesu v strome, v hlavičke a pri úprave
+.tree-code {
+  &:empty { display: none; }
+
+  margin-right: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.process-code {
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--ink-soft);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.code-input { text-transform: uppercase; }
+
+.save-error { margin: 0; color: var(--warn); }
