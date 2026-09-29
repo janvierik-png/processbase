@@ -18,7 +18,8 @@ import {
   ProcessChange,
   ProcessDetail,
   ProcessNode,
-  ProcessRevision
+  ProcessRevision,
+  ProcessVersionMeta
 } from '../../core/models/process.model';
 import { OrgPosition } from '../../core/models/user.model';
 import { Camunda7Service } from '../../core/services/camunda7.service';
@@ -198,19 +199,27 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   // --- R3: karta procesu ---
 
-  openDetail(id: string): void {
+  openDetail(id: string, mode: 'draft' | 'effective' = 'draft'): void {
     this.tab.set('card');
     this.viewedRevision.set(null);
     this.editSection.set(null);
     this.editingDocumentId = null;
     this.changeDescription = '';
+    this.publishOpen = false;
+    this.viewMode.set(mode);
     this.store.detail(id).subscribe({
       next: (detail) => {
-        this.detail.set(detail);
         this.ownerPositionDraft = detail.ownerPosition?.id ?? '';
+        // #27 — kto proces neupravuje, vidí predovšetkým platnú verziu
+        if (mode === 'effective' || (!this.canWrite && detail.publication?.effective)) {
+          this.showEffective(id);
+          return;
+        }
+        this.detail.set(detail);
       },
       error: () => this.detail.set(null)
     });
+    this.store.versions(id).subscribe({ next: (versions) => this.versions.set(versions), error: () => this.versions.set([]) });
     this.store.history(id).subscribe({
       next: (history) => this.history.set(history),
       error: () => this.history.set([])
@@ -296,9 +305,10 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   /** Stav procesu -> CSS trieda badge. */
   statusClass(status?: string): string {
+    // #27 — stav počíta server z verzií: „Návrh", „Platná vN", „Naplánovaná vN"
     const value = (status ?? '').toLowerCase();
-    if (value.includes('schval') && !value.includes('na ')) return 'is-approved';
-    if (value.includes('na schval') || value.includes('review') || value.includes('kontrol')) return 'is-review';
+    if (value.startsWith('platn')) return 'is-approved';
+    if (value.startsWith('naplán')) return 'is-review';
     if (value.includes('arch')) return 'is-archived';
     return 'is-draft';
   }
@@ -333,6 +343,87 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   clearTreeSearch(): void {
     this.treeSearch = '';
+  }
+
+  // --- #27 verzie procesu ---
+
+  readonly viewMode = signal<'draft' | 'effective'>('draft');
+  readonly versions = signal<ProcessVersionMeta[]>([]);
+  readonly publishError = signal('');
+  publishOpen = false;
+  publishModel = { effectiveFrom: '', changeReason: '', nextReviewAt: '' };
+
+  /** Miestny dnešok (toISOString by dal UTC — po polnoci ešte včerajšok). */
+  todayLocal(): string {
+    return new Date().toLocaleDateString('sv-SE');
+  }
+
+  /** Publikovaná verzia alebo bez oprávnenia — nič sa nedá meniť. */
+  readOnlyView(): boolean {
+    return !this.canWrite || this.viewMode() === 'effective';
+  }
+
+  setViewMode(mode: 'draft' | 'effective'): void {
+    const id = this.detail()?.id;
+    if (!id || mode === this.viewMode()) return;
+    if (mode === 'effective') {
+      this.viewMode.set('effective');
+      this.editSection.set(null);
+      this.showEffective(id);
+    } else {
+      this.openDetail(id, 'draft');
+    }
+  }
+
+  /** Platná verzia — dokumenty sa zobrazia tak, ako boli pri publikovaní. */
+  private showEffective(id: string): void {
+    this.viewMode.set('effective');
+    this.store.effectiveDetail(id).subscribe({
+      next: (version) => this.applyVersion(version),
+      error: () => this.openDetail(id, 'draft')
+    });
+  }
+
+  openVersion(version: ProcessVersionMeta): void {
+    const id = this.detail()?.id;
+    if (!id) return;
+    this.store.versionDetail(id, version.revision).subscribe({
+      next: (detail) => {
+        this.viewMode.set('effective');
+        this.tab.set('card');
+        this.applyVersion(detail);
+      },
+      error: (error) => this.store.error.set(error?.error?.message ?? 'Verziu sa nepodarilo načítať.')
+    });
+  }
+
+  private applyVersion(detail: ProcessDetail): void {
+    this.detail.set(detail);
+    this.documents.set((detail.documents ?? []).map((document) => ({ id: document.id, name: document.name, type: '', owner: '' })));
+  }
+
+  openPublish(): void {
+    this.publishError.set('');
+    this.publishModel = { effectiveFrom: this.todayLocal(), changeReason: '', nextReviewAt: '' };
+    this.publishOpen = true;
+  }
+
+  submitPublish(): void {
+    const detail = this.detail();
+    if (!detail) return;
+    this.store.publish(detail.id, {
+      effectiveFrom: this.publishModel.effectiveFrom,
+      changeReason: this.publishModel.changeReason.trim() || undefined,
+      nextReviewAt: this.publishModel.nextReviewAt || undefined
+    }).subscribe({
+      next: (version) => {
+        this.publishOpen = false;
+        this.deployState.set(`Publikovaná verzia v${version.revision}, účinná od ${version.effectiveFrom}.`);
+        this.store.loadFromDatabase();
+        this.openDetail(detail.id, 'draft');
+      },
+      error: (error) => this.publishError.set(error?.error?.message ?? 'Proces sa nepodarilo publikovať.')
+    });
   }
 
   /** B7 — co smie prihlaseny menit; server to kontroluje aj tak. */

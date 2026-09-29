@@ -217,3 +217,18 @@ GOV-01 #37 · GOV-02 #38 · LINK-01 #39 · QUAL-01 #40 · IMP-01 #41 · AI-01 #4
 2. **CORE-01** — verzie a publikovanie, potom CORE-02 kroky.
 3. **LINK-01** — prechod z Free do workspace.
 4. **UX-01a** Moja práca, **GOV-01** schvaľovanie.
+
+---
+
+## 8. Stav implementácie
+
+| Úloha | Commit | Overenie |
+|---|---|---|
+| B7 oprávnenia podľa rolí (predpoklad SEC-01) | `4365fc6` | `permissions-test` 25/25, pôvodný kód 9/25 |
+| Písma bez Google Fonts (#21 inventúra) | `16ab752` | v prehliadači žiadna požiadavka na tretiu stranu |
+| **FREE-01** #24 | `0a466ac` | `bpmn-roundtrip-test` 7/7 vrátane súboru stiahnutého z modelera; negatívna kontrola; odmietnutie ne-BPMN, DTD, poškodeného XML, >10 MB |
+| **CORE-01** #27 | `b898db2` (API) + UI | `process-versions-test` 25/25; v prehliadači publikovanie v1, návrh so zmenami, prepínač návrh/platná verzia, schvaľovateľ vidí predvolene platnú verziu |
+
+**Známe obmedzenia CORE-01:** strom procesov zobrazuje názov návrhu aj čitateľom (obsah detailu je
+z platnej verzie); naplánovanú verziu nemožno zrušiť ani nahradiť skoršou; publikuje každý s
+oprávnením `process:write` (schvaľovanie príde v GOV-01); samostatná rola „čitateľ" zatiaľ nie je.

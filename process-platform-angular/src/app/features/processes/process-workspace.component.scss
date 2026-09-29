@@ -928,3 +928,95 @@ button.small {
 .no-iso .iso-action {
   display: none !important;
 }
+
+// #27 — stav publikovania a prepinac navrh / platna verzia
+.publication-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  font-size: 13.5px;
+
+  &.viewing-version {
+    border-color: #bfe0cb;
+    background: var(--green-soft);
+  }
+}
+
+.pub-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+
+  span { color: var(--ink-soft); }
+}
+
+.pub-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.view-switch {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+
+  button {
+    min-height: 30px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 0;
+    background: var(--panel);
+    font-size: 13px;
+
+    & + button { border-left: 1px solid var(--line-strong); }
+
+    &.active {
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      font-weight: 600;
+    }
+  }
+}
+
+.publish-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 0 0 14px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-lg);
+
+  h4 { margin: 0; grid-column: 1 / -1; }
+
+  label {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .span-two { grid-column: 1 / -1; }
+  .error { margin: 0; color: var(--warn); }
+}
+
+.chip.subtle {
+  background: var(--green-soft);
+  border-color: #bfe0cb;
+  color: var(--green);
+}
+
+@media (max-width: 760px) {
+  .publish-form { grid-template-columns: minmax(0, 1fr); }
+}

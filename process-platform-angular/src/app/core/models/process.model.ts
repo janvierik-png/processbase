@@ -6,6 +6,7 @@ export interface ProcessNode {
   children?: ProcessNode[];
   owner?: string;
   status?: string;
+  publication?: ProcessPublication;
   revision?: string;
   purpose?: string;
   risks?: string;
@@ -44,6 +45,32 @@ export interface ProcessDetail extends ProcessNode {
   parentName?: string | null;
   childProcesses?: Array<{ id: string; name: string }>;
   relatedProcesses?: Array<{ id: string; name: string }>;
+  /** #27 — 'draft' = rozpracovaný návrh, 'version' = publikovaná verzia (len na čítanie) */
+  view?: 'draft' | 'version';
+  version?: ProcessVersionMeta;
+  /** dokumenty v publikovanej verzii (stav pri publikovaní) */
+  documents?: Array<{ id: string; name: string }>;
+}
+
+/** #27 — stav publikovania procesu, počíta ho server z verzií. */
+export interface ProcessPublication {
+  effective: { revision: number; effectiveFrom: string } | null;
+  scheduled: { revision: number; effectiveFrom: string } | null;
+  latestRevision: number;
+  /** návrh sa líši od poslednej publikovanej verzie */
+  hasDraftChanges: boolean;
+}
+
+export interface ProcessVersionMeta {
+  id: string;
+  revision: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  nextReviewAt: string | null;
+  changeReason: string | null;
+  publishedAt: string;
+  publishedBy: string | null;
+  state: 'effective' | 'scheduled' | 'superseded';
 }
 
 export interface IsoSuggestion {

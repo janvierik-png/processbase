@@ -6,7 +6,8 @@ import {
   IsoSuggestion,
   ProcessChange,
   ProcessDetail,
-  ProcessNode
+  ProcessNode,
+  ProcessVersionMeta
 } from '../models/process.model';
 import { StorageService } from './storage.service';
 import { AuthService } from './auth.service';
@@ -74,6 +75,26 @@ export class ProcessStoreService {
 
   detail(id: string): Observable<ProcessDetail> {
     return this.http.get<ProcessDetail>(`${API_BASE_URL}/processes/${id}`);
+  }
+
+  // --- #27 verzie procesu ---
+
+  /** Verzia účinná v daný deň (predvolene dnes) namiesto rozpracovaného návrhu. */
+  effectiveDetail(id: string, at?: string): Observable<ProcessDetail> {
+    const query = at ? `&at=${encodeURIComponent(at)}` : '';
+    return this.http.get<ProcessDetail>(`${API_BASE_URL}/processes/${id}?view=effective${query}`);
+  }
+
+  versions(id: string): Observable<ProcessVersionMeta[]> {
+    return this.http.get<ProcessVersionMeta[]>(`${API_BASE_URL}/processes/${id}/versions`);
+  }
+
+  versionDetail(id: string, revision: number): Observable<ProcessDetail> {
+    return this.http.get<ProcessDetail>(`${API_BASE_URL}/processes/${id}/versions/${revision}`);
+  }
+
+  publish(id: string, payload: { effectiveFrom: string; changeReason?: string; nextReviewAt?: string }): Observable<ProcessVersionMeta> {
+    return this.http.post<ProcessVersionMeta>(`${API_BASE_URL}/processes/${id}/publish`, payload);
   }
 
   history(id: string): Observable<ProcessChange[]> {

@@ -1,4 +1,4 @@
-<section class="process-layout" [class.no-write]="!canWrite" [class.no-iso]="!canIso" [class.panel-narrow]="panelState() === 'narrow'" [class.panel-hidden]="panelState() === 'hidden'">
+<section class="process-layout" [class.no-write]="readOnlyView()" [class.no-iso]="!canIso || viewMode() === 'effective'" [class.panel-narrow]="panelState() === 'narrow'" [class.panel-hidden]="panelState() === 'hidden'">
   <aside class="process-tree">
     <header class="tree-header">
       <h3>Strom procesov</h3>
@@ -126,6 +126,71 @@
         <p class="notice">{{ deployState() }}</p>
       }
 
+      <!-- #27 — platná verzia vs. rozpracovaný návrh -->
+      @if (process.type === 'process') {
+        <section class="publication-bar" [class.viewing-version]="process.view === 'version'">
+          <div class="pub-state">
+            @if (process.view === 'version' && process.version) {
+              <strong>Zobrazená verzia v{{ process.version.revision }}</strong>
+              <span>účinná od {{ process.version.effectiveFrom }}{{ process.version.effectiveTo ? ' do ' + process.version.effectiveTo : '' }}
+                · publikoval {{ process.version.publishedBy ?? '—' }}</span>
+              <span class="muted-small">Publikovaná verzia sa nemení — úpravy sa robia v návrhu.</span>
+            } @else if (process.publication?.effective) {
+              <strong>Platná verzia v{{ process.publication?.effective?.revision }}</strong>
+              <span>od {{ process.publication?.effective?.effectiveFrom }}</span>
+            } @else {
+              <strong>Zatiaľ nepublikované</strong>
+              <span class="muted-small">Proces je rozpracovaný návrh — ako platný postup ho zverejníte publikovaním.</span>
+            }
+            @if (process.publication?.scheduled; as scheduled) {
+              <span class="chip">v{{ scheduled.revision }} naplánovaná od {{ scheduled.effectiveFrom }}</span>
+            }
+            @if (process.publication?.hasDraftChanges && (process.publication?.latestRevision ?? 0) > 0) {
+              <span class="chip warn">Návrh má zmeny oproti v{{ process.publication?.latestRevision }}</span>
+            }
+          </div>
+          <div class="pub-actions">
+            @if (process.publication?.effective) {
+              <div class="view-switch" role="group" aria-label="Zobrazenie">
+                <button type="button" [class.active]="viewMode() === 'draft'" (click)="setViewMode('draft')">Návrh</button>
+                <button type="button" [class.active]="viewMode() === 'effective'" (click)="setViewMode('effective')">Platná verzia</button>
+              </div>
+            }
+            @if (viewMode() === 'draft') {
+              <button type="button" class="primary small write-action" (click)="openPublish()"
+                [disabled]="!process.publication?.hasDraftChanges"
+                [title]="process.publication?.hasDraftChanges ? 'Zverejniť návrh ako novú verziu' : 'Návrh sa nelíši od poslednej verzie'">
+                Publikovať…
+              </button>
+            }
+          </div>
+        </section>
+
+        @if (publishOpen && viewMode() === 'draft') {
+          <form class="publish-form write-action" (ngSubmit)="submitPublish()">
+            <h4>Publikovať v{{ (process.publication?.latestRevision ?? 0) + 1 }}</h4>
+            <label>Účinnosť od
+              <input type="date" name="effectiveFrom" [(ngModel)]="publishModel.effectiveFrom" [min]="todayLocal()" required>
+            </label>
+            <label>Termín revízie (voliteľné)
+              <input type="date" name="nextReviewAt" [(ngModel)]="publishModel.nextReviewAt">
+            </label>
+            <label class="span-two">Dôvod zmeny {{ (process.publication?.latestRevision ?? 0) > 0 ? '(povinné)' : '(voliteľné)' }}
+              <textarea name="changeReason" [(ngModel)]="publishModel.changeReason" rows="2"
+                placeholder="Čo sa oproti predchádzajúcej verzii zmenilo a prečo"></textarea>
+            </label>
+            @if (publishError()) {
+              <p class="error span-two">{{ publishError() }}</p>
+            }
+            <p class="muted-small span-two">Publikovaná verzia sa už nedá upraviť. Kým nezačne platiť, čitatelia vidia predchádzajúcu verziu.</p>
+            <div class="edit-actions span-two">
+              <button class="primary" type="submit">Publikovať</button>
+              <button type="button" (click)="publishOpen = false">Zrušiť</button>
+            </div>
+          </form>
+        }
+      }
+
       @if (tab() === 'card') {
       <div class="overview-layout">
         <div class="overview-main">
@@ -141,14 +206,11 @@
           @if (editSection() === 'basic') {
             <form class="card-body edit-grid" (ngSubmit)="saveDetail()">
               <label>Nazov procesu <input name="name" [(ngModel)]="process.name"></label>
-              <label>Stav
-                <select name="status" [(ngModel)]="process.status">
-                  <option>Navrh</option>
-                  <option>Na schvalenie</option>
-                  <option>Schvalene</option>
-                  <option>Archiv</option>
-                </select>
-              </label>
+              <!-- #27 — stav sa nenastavuje rucne; vyplyva z publikovanych verzii (lista nad kartou) -->
+              <div class="info-item">
+                <span>Stav</span>
+                <strong><span [class]="'badge ' + statusClass(process.status)">{{ process.status }}</span></strong>
+              </div>
               <label>Nadradeny proces
                 <select name="parentId" [(ngModel)]="process.parentId">
                   <option [ngValue]="null">— ziadny (korenovy proces)</option>
@@ -524,11 +586,20 @@
             <p>Zvol typ diagramu vyššie — <strong>BPMN</strong> pre procesné modely alebo <strong>Flowchart</strong> pre jednoduché vývojové diagramy.</p>
           </div>
         }
-        @if ((detail()?.diagramType ?? 'NONE') === 'BPMN') {
-          <pp-bpmn-editor [xml]="active()?.bpmnXml || ''" [propertiesVisible]="camundaDetailsOpen()" (xmlChange)="saveBpmn($event)" />
-        }
-        @if ((detail()?.diagramType ?? 'NONE') === 'FLOWCHART') {
-          <pp-flowchart-editor [xml]="detail()?.flowchartXml || ''" (xmlChange)="saveFlowchart($event)" />
+        @if (readOnlyView()) {
+          <!-- #27, B7 — publikovaná verzia alebo bez oprávnenia: diagram len na čítanie -->
+          @if ((detail()?.diagramType ?? 'NONE') === 'BPMN' && detail()?.bpmnXml) {
+            <pp-bpmn-viewer [xml]="detail()!.bpmnXml!" />
+          } @else if ((detail()?.diagramType ?? 'NONE') === 'FLOWCHART') {
+            <div class="diagram-empty"><p>Flowchart je súčasťou procesu; upravuje sa v návrhu.</p></div>
+          }
+        } @else {
+          @if ((detail()?.diagramType ?? 'NONE') === 'BPMN') {
+            <pp-bpmn-editor [xml]="active()?.bpmnXml || ''" [propertiesVisible]="camundaDetailsOpen()" (xmlChange)="saveBpmn($event)" />
+          }
+          @if ((detail()?.diagramType ?? 'NONE') === 'FLOWCHART') {
+            <pp-flowchart-editor [xml]="detail()?.flowchartXml || ''" (xmlChange)="saveFlowchart($event)" />
+          }
         }
       }
 
@@ -544,6 +615,26 @@
           </section>
         } @else {
           <section class="history-grid">
+            <!-- #27 — publikované verzie: čo a odkedy v firme platilo -->
+            <div class="panel">
+              <h3>Publikované verzie</h3>
+              @for (version of versions(); track version.id) {
+                <article class="change-row">
+                  <strong>
+                    v{{ version.revision }}
+                    <span class="chip" [class.warn]="version.state === 'scheduled'" [class.subtle]="version.state === 'effective'">
+                      {{ version.state === 'effective' ? 'platná' : version.state === 'scheduled' ? 'naplánovaná' : 'nahradená' }}
+                    </span>
+                  </strong>
+                  <small>od {{ version.effectiveFrom }}{{ version.effectiveTo ? ' do ' + version.effectiveTo : '' }}
+                    · {{ version.publishedBy ?? '—' }} · {{ version.publishedAt.slice(0, 10) }}</small>
+                  @if (version.changeReason) { <p>{{ version.changeReason }}</p> }
+                  <button type="button" class="small" (click)="openVersion(version)">Zobraziť</button>
+                </article>
+              } @empty {
+                <p class="muted">Proces ešte nebol publikovaný.</p>
+              }
+            </div>
             <div class="panel">
               <h3>Zmeny procesu</h3>
               @for (change of history(); track change.id) {
