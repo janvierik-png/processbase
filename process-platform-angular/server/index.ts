@@ -230,7 +230,7 @@ type PermissionRule = {
 
 const PERMISSION_RULES: PermissionRule[] = [
   // procesy, dokumenty, verzie, nasadenie
-  { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/processes$/, anyOf: ['process:write'] },
+  { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/processes(\/import-bpmn)?$/, anyOf: ['process:write'] },
   {
     methods: ['PATCH'],
     pattern: /^\/api\/processes\/[^/]+$/,
@@ -566,6 +566,81 @@ app.post('/api/organizations/:organizationId/processes', async (request, respons
       include: { owner: true, revisions: true, children: true }
     });
     response.status(201).json(mapNode(processNode));
+  } catch (error) {
+    next(error);
+  }
+});
+
+const MAX_IMPORT_BPMN_BYTES = 10 * 1024 * 1024;
+
+/** Rovnaka kontrola ako v modeleri — server ju robi znova, klientovi neveri (#39). */
+function checkBpmnXml(xml: string): string | null {
+  if (Buffer.byteLength(xml, 'utf8') > MAX_IMPORT_BPMN_BYTES) return 'BPMN subor je vacsi ako 10 MB.';
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) return 'BPMN subor obsahuje DTD alebo entity — z bezpecnostnych dovodov sa neprijima.';
+  if (!/<([\w-]+:)?definitions[\s>]/.test(xml) || !xml.includes('http://www.omg.org/spec/BPMN/20100524/MODEL')) {
+    return 'Subor nie je BPMN 2.0 (chyba koren definitions alebo menny priestor BPMN).';
+  }
+  return null;
+}
+
+/**
+ * LINK-01 (#39): diagram z bezplatneho modelera sa stane NAVRHOM procesu.
+ * Povodne XML sa ulozi bez zmeny (ziadna konverzia na kroky, ziadne
+ * „zjednodusenie“). Nazov, ucel a vlastnik su povinne; nic sa nepublikuje.
+ */
+app.post('/api/organizations/:organizationId/processes/import-bpmn', async (request, response, next) => {
+  try {
+    const organizationId = orgScope(request);
+    const body = request.body ?? {};
+    const bpmnXml = typeof body.bpmnXml === 'string' ? body.bpmnXml : '';
+    const problem = checkBpmnXml(bpmnXml);
+    if (problem) throw new HttpError(400, problem);
+
+    const name = cleanText(body.name, 300);
+    const purpose = cleanText(body.purpose, 2000);
+    const missing = [!name && 'nazov', !purpose && 'ucel', !body.ownerPositionId && !cleanText(body.newPositionName) && 'vlastnik'].filter(Boolean);
+    if (missing.length) throw new HttpError(400, `Pred vytvorenim procesu doplnte: ${missing.join(', ')}.`);
+
+    let ownerPositionId: string;
+    if (body.ownerPositionId) {
+      [ownerPositionId] = await assertOwnedIds('orgPosition', organizationId, [body.ownerPositionId]);
+    } else {
+      // nove miesto smie zalozit len ten, kto smie menit organizaciu
+      if (!hasPermission(request, 'organization:write')) throw new HttpError(403, 'Na zalozenie noveho pracovneho miesta nemate opravnenie.');
+      const positionName = cleanText(body.newPositionName, 200)!;
+      const existing = await prisma.orgPosition.findFirst({
+        where: { organizationId, name: { equals: positionName, mode: 'insensitive' } }
+      });
+      ownerPositionId = existing?.id ?? (await prisma.orgPosition.create({ data: { organizationId, name: positionName } })).id;
+    }
+    const [parentId = null] = await assertOwnedIds('processNode', organizationId, [body.parentId]);
+
+    const node = await prisma.processNode.create({
+      data: {
+        organizationId,
+        parentId,
+        type: ProcessNodeType.PROCESS,
+        name: name!,
+        description: purpose,
+        status: ProcessStatus.DRAFT,
+        diagramType: 'BPMN',
+        // povodne XML bez zmeny — aj prvky a rozsirenia, ktore aplikacia nezobrazuje
+        bpmnXml,
+        positions: { create: { positionId: ownerPositionId, role: ResponsibilityRole.OWNER } }
+      }
+    });
+    const sourceName = cleanText(body.sourceFileName, 200);
+    await prisma.processChangeLog.create({
+      data: {
+        processNodeId: node.id,
+        userId: auth(request).userId,
+        changedFields: { import: { from: null, to: `BPMN z bezplatneho modelera${sourceName ? ` (${sourceName})` : ''}` } },
+        description: 'Import diagramu ako navrh — pred publikovanim doplnte kroky a skontrolujte obsah.'
+      }
+    });
+
+    const fresh = await prisma.processNode.findUnique({ where: { id: node.id }, include: processInclude() });
+    response.status(201).json(mapNode(fresh));
   } catch (error) {
     next(error);
   }

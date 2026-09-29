@@ -1,6 +1,10 @@
 import { AfterViewInit, Component, ElementRef, HostListener, OnDestroy, ViewChild, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { Title } from '@angular/platform-browser';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
+import { OrgPosition } from '../../core/models/user.model';
+import { PositionService } from '../../core/services/position.service';
+import { ProcessStoreService } from '../../core/services/process-store.service';
 import BpmnModeler from 'bpmn-js/lib/Modeler';
 import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js-properties-panel';
 import camundaModdleDescriptors from 'camunda-bpmn-moddle/resources/camunda.json';
@@ -27,7 +31,7 @@ type Draft = { xml: string; fileName: string; savedAt: string };
 @Component({
   selector: 'pp-free-modeler-page',
   standalone: true,
-  imports: [RouterLink],
+  imports: [FormsModule, RouterLink],
   templateUrl: './free-modeler-page.component.html',
   styleUrl: './free-modeler-page.component.scss'
 })
@@ -47,9 +51,21 @@ export class FreeModelerPageComponent implements AfterViewInit, OnDestroy {
   private importing = false;
   private draftTimer?: ReturnType<typeof setTimeout>;
 
+  // --- #39 LINK-01: import do workspace ako návrh ---
+  readonly importOpen = signal(false);
+  readonly importError = signal('');
+  readonly importing$ = signal(false);
+  readonly positions = signal<OrgPosition[]>([]);
+  importModel = { name: '', purpose: '', ownerPositionId: '', newPositionName: '' };
+  /** text súboru tak, ako bol otvorený — kým sa nezmení, importuje sa bajt po bajte */
+  private originalXml: string | null = null;
+
   constructor(
     private readonly title: Title,
-    readonly auth: AuthService
+    readonly auth: AuthService,
+    private readonly router: Router,
+    private readonly processes: ProcessStoreService,
+    private readonly positionsApi: PositionService
   ) {
     this.title.setTitle('Bezplatný BPMN modeler | Process Base');
   }
@@ -64,6 +80,7 @@ export class FreeModelerPageComponent implements AfterViewInit, OnDestroy {
 
     this.modeler.on('commandStack.changed', () => {
       if (this.importing) return;
+      this.originalXml = null; // diagram sa zmenil — importuje sa aktuálny stav
       this.dirty.set(true);
       this.scheduleDraft();
     });
@@ -104,10 +121,87 @@ export class FreeModelerPageComponent implements AfterViewInit, OnDestroy {
       this.importing = false;
     }
     this.fileName.set('diagram.bpmn');
+    this.originalXml = null;
     this.dirty.set(false);
     this.restoredAt.set(null);
     this.clearDraft();
     this.message.set(null);
+  }
+
+  // --- #39 import do Process Base ---
+
+  /**
+   * Neprihlásený ide cez prihlásenie a vráti sa sem — diagram na neho počká
+   * v tomto prehliadači. Prihlásený vyplní minimum a vznikne NÁVRH procesu.
+   */
+  async openImport(): Promise<void> {
+    if (!this.auth.isAuthenticated()) {
+      await this.saveDraftNow();
+      this.dirty.set(false); // záloha je uložená, netreba sa pýtať pri odchode
+      void this.router.navigate(['/'], { queryParams: { auth: 'login', return: '/bpmn-modeler' } });
+      return;
+    }
+    if (!this.auth.can('process:write')) {
+      this.message.set({ kind: 'warn', text: 'Na vytváranie procesov nemáte vo firme oprávnenie. Diagram si môžete stiahnuť ako .bpmn.' });
+      return;
+    }
+    this.importError.set('');
+    this.importModel = { name: this.diagramName(), purpose: '', ownerPositionId: '', newPositionName: '' };
+    this.positionsApi.list().subscribe({ next: (positions) => this.positions.set(positions), error: () => this.positions.set([]) });
+    this.importOpen.set(true);
+  }
+
+  get canCreatePosition(): boolean {
+    return this.auth.can('organization:write');
+  }
+
+  async submitImport(): Promise<void> {
+    const { name, purpose, ownerPositionId, newPositionName } = this.importModel;
+    if (!name.trim() || !purpose.trim() || (!ownerPositionId && !newPositionName.trim())) {
+      this.importError.set('Vyplňte názov, účel a vlastníka procesu.');
+      return;
+    }
+    // nezmenený otvorený súbor ide bez zmeny; inak aktuálny stav modelera
+    const bpmnXml = this.originalXml ?? (await this.modeler!.saveXML({ format: true })).xml ?? '';
+    this.importing$.set(true);
+    this.processes.importBpmn({
+      bpmnXml,
+      name: name.trim(),
+      purpose: purpose.trim(),
+      ownerPositionId: ownerPositionId || undefined,
+      newPositionName: ownerPositionId ? undefined : newPositionName.trim(),
+      sourceFileName: this.fileName()
+    }).subscribe({
+      next: (process) => {
+        this.importing$.set(false);
+        this.dirty.set(false);
+        this.clearDraft();
+        void this.router.navigate(['/app/processes', process.id]);
+      },
+      error: (error) => {
+        this.importing$.set(false);
+        this.importError.set(error?.error?.message ?? 'Proces sa nepodarilo vytvoriť.');
+      }
+    });
+  }
+
+  /** Návrh názvu: názov procesu alebo bazéna v diagrame, inak názov súboru. */
+  private diagramName(): string {
+    const definitions = (this.modeler as unknown as { getDefinitions: () => any })?.getDefinitions?.();
+    const roots: any[] = definitions?.rootElements ?? [];
+    const named = roots.find((root) => root.$type === 'bpmn:Process' && root.name)
+      ?? roots.flatMap((root) => root.participants ?? []).find((participant: any) => participant.name);
+    return (named?.name ?? this.fileName().replace(/\.(bpmn|xml)$/i, '')).trim();
+  }
+
+  private async saveDraftNow(): Promise<void> {
+    const { xml } = await this.modeler!.saveXML();
+    if (!xml) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ xml, fileName: this.fileName(), savedAt: new Date().toISOString() } satisfies Draft));
+    } catch {
+      // bez úložiska sa diagram po prihlásení neobnoví — používateľ ho má stále ako súbor
+    }
   }
 
   chooseFile(): void {
@@ -151,6 +245,7 @@ export class FreeModelerPageComponent implements AfterViewInit, OnDestroy {
     }
     if (!this.confirmDiscard()) return;
     if (await this.load(text, file.name)) {
+      this.originalXml = text;
       this.dirty.set(false);
       this.restoredAt.set(null);
       this.clearDraft();

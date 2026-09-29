@@ -93,6 +93,18 @@ export class ProcessStoreService {
     return this.http.get<ProcessDetail>(`${API_BASE_URL}/processes/${id}/versions/${revision}`);
   }
 
+  /** #39 — diagram z bezplatného modelera ako návrh procesu (pôvodné XML sa uloží bez zmeny). */
+  importBpmn(payload: {
+    bpmnXml: string;
+    name: string;
+    purpose: string;
+    ownerPositionId?: string;
+    newPositionName?: string;
+    sourceFileName?: string;
+  }): Observable<ProcessNode> {
+    return this.http.post<ProcessNode>(`${API_BASE_URL}/organizations/${this.auth.currentOrganizationId()}/processes/import-bpmn`, payload);
+  }
+
   /** #28 — celý zoradený zoznam krokov návrhu (existujúce kroky podľa id sa zachovajú). */
   saveActivities(id: string, activities: Array<{ id?: string; title: string; description?: string }>): Observable<ProcessNode> {
     return this.http.put<ProcessNode>(`${API_BASE_URL}/processes/${id}/activities`, { activities });

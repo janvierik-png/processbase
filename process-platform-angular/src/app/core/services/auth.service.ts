@@ -67,14 +67,14 @@ export class AuthService {
     return DEFAULT_ROLES.find((role) => role.id === roleId)?.permissions.includes(permission) ?? false;
   }
 
-  registerOwner(payload: RegisterPayload): void {
+  registerOwner(payload: RegisterPayload, redirectTo = '/app/processes'): void {
     this.loading.set(true);
     this.error.set(null);
     this.http.post<AuthResponse>(`${API_BASE_URL}/register`, payload).subscribe({
       next: (response) => {
         this.setSession(response);
         this.loading.set(false);
-        this.router.navigateByUrl('/app/processes');
+        this.router.navigateByUrl(redirectTo);
       },
       error: (error) => {
         this.error.set(error?.error?.message ?? 'Registracia zlyhala. Bezi API server?');
@@ -83,14 +83,14 @@ export class AuthService {
     });
   }
 
-  login(email: string, password: string): void {
+  login(email: string, password: string, redirectTo = '/app/processes'): void {
     this.loading.set(true);
     this.error.set(null);
     this.http.post<AuthResponse>(`${API_BASE_URL}/login`, { email, password }).subscribe({
       next: (response) => {
         this.setSession(response);
         this.loading.set(false);
-        this.router.navigateByUrl('/app/processes');
+        this.router.navigateByUrl(redirectTo);
       },
       error: (error) => {
         this.error.set(error?.error?.message ?? 'Prihlasenie zlyhalo. Bezi API server?');

@@ -57,8 +57,17 @@ export class LandingPageComponent implements OnInit {
     private readonly route: ActivatedRoute
   ) {}
 
+  /** Kam sa vrátiť po prihlásení (napr. z bezplatného modelera, #39). */
+  private returnTo: string | undefined;
+
   ngOnInit(): void {
     this.route.queryParamMap.subscribe((params) => {
+      // len cesta v tejto aplikácii — „//iny.web“ alebo URL by bol otvorený presmerovač
+      const target = params.get('return');
+      this.returnTo = target && /^\/(?!\/)[\w\-/]*$/.test(target) ? target : undefined;
+      const auth = params.get('auth');
+      if (auth === 'login' || auth === 'register') this.openModal(auth);
+
       const token = params.get('invite');
       if (!token) return;
       this.inviteToken = token;
@@ -148,11 +157,11 @@ export class LandingPageComponent implements OnInit {
 
   register(): void {
     if (this.registerBlocked()) return;
-    this.auth.registerOwner(this.registerModel);
+    this.auth.registerOwner(this.registerModel, this.returnTo);
   }
 
   login(): void {
-    this.auth.login(this.loginModel.email, this.loginModel.password);
+    this.auth.login(this.loginModel.email, this.loginModel.password, this.returnTo);
   }
 
   acceptInvite(): void {

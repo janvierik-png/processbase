@@ -24,6 +24,10 @@
         }
       </button>
       <button type="button" (click)="downloadSvg()" title="Vektorový obrázok diagramu">Export SVG</button>
+      <button type="button" class="to-workspace" (click)="openImport()"
+        title="Z diagramu vznikne návrh procesu vo vašej firme — s vlastníkom, verziami a prístupom pre kolegov">
+        Uložiť do Process Base
+      </button>
       <span class="sep"></span>
       <button type="button" (click)="fitViewport()" title="Zobraziť celý diagram">Celý diagram</button>
       <button type="button" [class.active]="propertiesOpen()" (click)="toggleProperties()" title="Vlastnosti vybraného prvku">Vlastnosti</button>
@@ -41,6 +45,39 @@
       Pokračujete v rozpracovanom diagrame z tohto prehliadača.
       <button type="button" class="link" (click)="discardRestored()">Začať nový</button>
     </p>
+  }
+
+  @if (importOpen()) {
+    <!-- #39 — z diagramu vznikne návrh procesu; nič sa nepublikuje -->
+    <form class="import-panel" (ngSubmit)="submitImport()">
+      <div class="import-intro">
+        <strong>Uložiť diagram ako návrh procesu</strong>
+        <span>Pôvodný diagram sa uloží bez zmeny. Proces bude návrh — kolegom ho zverejníte až publikovaním,
+          keď doplníte kroky a skontrolujete obsah.</span>
+      </div>
+      <label>Názov procesu <input name="name" [(ngModel)]="importModel.name" required></label>
+      <label class="wide">Účel — prečo proces existuje
+        <input name="purpose" [(ngModel)]="importModel.purpose" required placeholder="napr. Objednávka sa vybaví do 48 hodín">
+      </label>
+      <label>Vlastník (pracovné miesto)
+        <select name="owner" [(ngModel)]="importModel.ownerPositionId">
+          <option value="">{{ canCreatePosition ? '— nové miesto —' : '— vyberte —' }}</option>
+          @for (position of positions(); track position.id) {
+            <option [value]="position.id">{{ position.name }}</option>
+          }
+        </select>
+      </label>
+      @if (!importModel.ownerPositionId && canCreatePosition) {
+        <label>Nové miesto <input name="newPosition" [(ngModel)]="importModel.newPositionName" placeholder="napr. Obchodník"></label>
+      }
+      @if (importError()) {
+        <p class="import-error">{{ importError() }}</p>
+      }
+      <div class="import-actions">
+        <button type="submit" class="primary" [disabled]="importing$()">{{ importing$() ? 'Ukladám...' : 'Vytvoriť návrh procesu' }}</button>
+        <button type="button" (click)="importOpen.set(false)">Zrušiť</button>
+      </div>
+    </form>
   }
 
   <main class="workspace" [class.with-properties]="propertiesOpen()">
