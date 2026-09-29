@@ -250,3 +250,18 @@ export interface ProcessFeedback {
   decidedBy: string | null;
   decidedAt: string | null;
 }
+
+/** #35 — výsledok globálneho vyhľadávania (len vlastná firma). */
+export interface SearchMatch {
+  kind: 'published' | 'draft' | 'archive';
+  revision: number | null;
+  state?: 'effective' | 'scheduled';
+  snippet: { text: string; start: number; length: number };
+}
+
+export interface SearchResult {
+  query: string;
+  processes: Array<{ id: string; name: string; code: string; matches: SearchMatch[] }>;
+  positions: Array<{ id: string; name: string }>;
+  documents: Array<{ id: string; fileName: string; processId: string | null; processName: string | null }>;
+}

@@ -52,6 +52,11 @@
         <h1>{{ auth.currentOrganization()?.name || 'Organizacia' }}</h1>
       </div>
 
+      <!-- #35 — hľadanie v celej firme -->
+      <form class="topbar-search" role="search" (submit)="search($event, searchBox.value); searchBox.value = ''">
+        <input #searchBox type="search" placeholder="Hľadať…" aria-label="Hľadať v procesoch, miestach a dokumentoch">
+      </form>
+
       <div class="topbar-actions">
         <select class="lang-select" [value]="i18n.language()" (change)="setLanguage($any($event.target).value)">
           <option value="sk">SK</option>

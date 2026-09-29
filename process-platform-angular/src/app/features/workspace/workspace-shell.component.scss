@@ -354,3 +354,15 @@
     }
   }
 }
+
+// #35 — hľadanie v hornej lište
+.topbar-search {
+  flex: 0 1 280px;
+  margin-left: auto;
+
+  input { width: 100%; min-height: 36px; font-size: 13.5px; }
+}
+
+@media (max-width: 720px) {
+  .topbar-search { display: none; }
+}

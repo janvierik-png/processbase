@@ -11,6 +11,7 @@ import {
   MyWork,
   Overview,
   ProcessFeedback,
+  SearchResult,
   ProcessNode,
   ProcessVersionMeta
 } from '../models/process.model';
@@ -138,6 +139,11 @@ export class ProcessStoreService {
   /** Nevybavené podnety k procesom, ktorých miesto vlastníka zastávam. */
   myFeedback(): Observable<ProcessFeedback[]> {
     return this.http.get<ProcessFeedback[]>(`${API_BASE_URL}/me/feedback`);
+  }
+
+  /** #35 — globálne vyhľadávanie v procesoch, miestach a dokumentoch firmy. */
+  search(query: string): Observable<SearchResult> {
+    return this.http.get<SearchResult>(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}`);
   }
 
   /** #34 — čo treba vo firme napraviť (predvolene dnes). */

@@ -1,0 +1,65 @@
+<header class="page-head">
+  <p class="eyebrow">Vyhľadávanie</p>
+  <form class="search-form" role="search" (ngSubmit)="submit()">
+    <input name="q" [(ngModel)]="query" placeholder="Hľadať v procesoch, krokoch, pracovných miestach a dokumentoch" aria-label="Hľadať" autofocus>
+    <button class="primary" type="submit">Hľadať</button>
+  </form>
+  <div class="filters" role="group" aria-label="Druh výsledkov">
+    @for (item of filters; track item.key) {
+      <button type="button" [class.active]="filter() === item.key" (click)="filter.set(item.key)">{{ item.label }}</button>
+    }
+  </div>
+</header>
+
+@if (error()) {
+  <p class="message error">{{ error() }}</p>
+}
+@if (loading()) {
+  <p class="muted">Hľadám…</p>
+}
+
+@if (result(); as r) {
+  @if (empty()) {
+    <section class="panel empty"><p>Pre „{{ r.query }}“ sa nič nenašlo.</p></section>
+  }
+
+  @if (processes().length > 0) {
+    <section class="panel">
+      <h3>Procesy <small class="muted">({{ processes().length }})</small></h3>
+      @for (item of processes(); track item.id) {
+        <a class="result" [routerLink]="['/app/processes', item.id]">
+          <strong><span class="code">{{ item.code }}</span>{{ item.name }}</strong>
+          @for (match of item.matches; track $index) {
+            <div class="match">
+              <span class="chip" [class.draft]="match.kind === 'draft'" [class.archive]="match.kind === 'archive'">{{ label(match) }}</span>
+              <span class="snippet">{{ parts(match)[0] }}<mark>{{ parts(match)[1] }}</mark>{{ parts(match)[2] }}</span>
+            </div>
+          }
+        </a>
+      }
+    </section>
+  }
+
+  @if (filter() === 'all' && r.positions.length > 0) {
+    <section class="panel">
+      <h3>Pracovné miesta <small class="muted">({{ r.positions.length }})</small></h3>
+      @for (item of r.positions; track item.id) {
+        <a class="result compact" routerLink="/app/settings/positions">{{ item.name }}</a>
+      }
+    </section>
+  }
+
+  @if (filter() === 'all' && r.documents.length > 0) {
+    <section class="panel">
+      <h3>Dokumenty <small class="muted">({{ r.documents.length }})</small></h3>
+      @for (item of r.documents; track item.id) {
+        <a class="result compact" [routerLink]="item.processId ? ['/app/processes', item.processId] : ['/app/documents']">
+          {{ item.fileName }}
+          @if (item.processName) { <small class="muted">· {{ item.processName }}</small> }
+        </a>
+      }
+    </section>
+  }
+} @else if (!loading() && !error()) {
+  <p class="muted">Zadajte aspoň dva znaky. Hľadá sa bez ohľadu na diakritiku aj podľa začiatku slova.</p>
+}

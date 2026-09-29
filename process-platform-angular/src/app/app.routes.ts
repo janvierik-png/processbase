@@ -33,6 +33,11 @@ export const appRoutes: Routes = [
     loadComponent: () => import('./features/workspace/workspace-shell.component').then((m) => m.WorkspaceShellComponent),
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'processes' },
+      // #35 UX-01c — globálne vyhľadávanie
+      {
+        path: 'hladat',
+        loadComponent: () => import('./features/search/search-page.component').then((m) => m.SearchPageComponent)
+      },
       // #34 UX-01b — čo treba vo firme napraviť
       {
         path: 'prehlad',

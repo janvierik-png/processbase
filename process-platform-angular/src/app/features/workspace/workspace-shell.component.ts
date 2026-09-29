@@ -55,6 +55,13 @@ export class WorkspaceShellComponent implements OnInit, OnDestroy {
     this.notifications.markRead().subscribe({ error: () => undefined });
   }
 
+  /** #35 — hľadanie z hornej lišty vedie na stránku výsledkov (bez odoslania formulára). */
+  search(event: Event, query: string): void {
+    event.preventDefault();
+    const q = query.trim();
+    if (q) this.router.navigate(['/app/hladat'], { queryParams: { q } });
+  }
+
   localDay(iso: string): string {
     return new Date(iso).toLocaleDateString('sv-SE');
   }

@@ -3893,6 +3893,151 @@ app.get('/api/me/feedback', async (request, response, next) => {
   }
 });
 
+// --- #35 UX-01c globalne vyhladavanie ---
+
+// full-text: DB funkcia pb_search_vector (migracia search_function) — bez diakritiky, oddelovace kodov ako medzery
+
+/** Skladanie po znakoch (dlzka ostava) — aby sa poloha zhody dala preniest do povodneho textu. */
+function foldChars(text: string): string {
+  return [...text].map((char) => char.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().charAt(0) || char).join('');
+}
+
+/** Slova z dopytu: len pismena a cislice (nic, co by tsquery vykladal ako operator). */
+function searchTokens(query: string): string[] {
+  return [...new Set(foldChars(query).split(/[^\p{L}\p{N}]+/u).filter(Boolean))].slice(0, 8);
+}
+
+/** Uryvok okolo prvej zhody — text bez HTML, poloha zhody v uryvku. */
+function searchSnippet(body: string, tokens: string[]): { text: string; start: number; length: number } {
+  const plain = body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const folded = foldChars(plain);
+  let index = -1;
+  let length = 0;
+  for (const token of tokens) {
+    const found = folded.search(new RegExp(`(^|[^\\p{L}\\p{N}])${token}`, 'u'));
+    if (found >= 0 && (index < 0 || found < index)) {
+      index = found + (folded[found] === token[0] ? 0 : 1);
+      length = token.length;
+    }
+  }
+  if (index < 0) return { text: plain.slice(0, 160), start: 0, length: 0 };
+  const from = Math.max(0, index - 60);
+  const to = Math.min(plain.length, index + length + 100);
+  const prefix = from > 0 ? '…' : '';
+  return { text: `${prefix}${plain.slice(from, to)}${to < plain.length ? '…' : ''}`, start: index - from + prefix.length, length };
+}
+
+/**
+ * Hlada v procesoch (navrh, platne a naplanovane verzie, archiv nahradenych
+ * verzii), pracovnych miestach a nazvoch dokumentov — vzdy len vo firme
+ * prihlaseneho, rovnako ako ostatne cesty API (scenar 7).
+ */
+app.get('/api/search', async (request, response, next) => {
+  try {
+    const { organizationId } = auth(request);
+    const raw = String(request.query['q'] ?? '').slice(0, 200);
+    const tokens = searchTokens(raw);
+    if (tokens.join('').length < 2) {
+      response.json({ query: raw, processes: [], positions: [], documents: [] });
+      return;
+    }
+    const tsquery = tokens.map((token) => `${token}:*`).join(' & ');
+
+    const drafts = await prisma.$queryRaw<Array<{ id: string; name: string; code: string | null; body: string; rank: number }>>`
+      SELECT n.id, n.name, n.code, d.body, ts_rank(pb_search_vector(d.body), to_tsquery('simple', ${tsquery})) AS rank
+      FROM "ProcessNode" n
+      CROSS JOIN LATERAL (
+        SELECT concat_ws(' ', n.name, n.code, n.description, n.trigger, n.outcome, n."descriptionText",
+          (SELECT string_agg(concat_ws(' ', a.title, a.description), ' ') FROM "ProcessActivity" a WHERE a."processNodeId" = n.id)) AS body
+      ) d
+      WHERE n."organizationId" = ${organizationId} AND n.type = 'PROCESS'
+        AND pb_search_vector(d.body) @@ to_tsquery('simple', ${tsquery})
+      ORDER BY rank DESC
+      LIMIT 50`;
+
+    const versions = await prisma.$queryRaw<Array<{ id: string; revision: number; name: string; code: string | null; body: string; rank: number }>>`
+      SELECT v."processNodeId" AS id, v.revision, v.snapshot->>'name' AS name, v.snapshot->>'code' AS code, d.body,
+        ts_rank(pb_search_vector(d.body), to_tsquery('simple', ${tsquery})) AS rank
+      FROM "ProcessVersion" v
+      CROSS JOIN LATERAL (
+        SELECT concat_ws(' ', v.snapshot->>'name', v.snapshot->>'code', v.snapshot->>'purpose', v.snapshot->>'trigger', v.snapshot->>'outcome', v.snapshot->>'descriptionText',
+          (SELECT string_agg(concat_ws(' ', e->>'title', e->>'description'), ' ') FROM jsonb_array_elements(COALESCE(v.snapshot->'activities', '[]'::jsonb)) e)) AS body
+      ) d
+      WHERE v."organizationId" = ${organizationId}
+        AND pb_search_vector(d.body) @@ to_tsquery('simple', ${tsquery})
+      ORDER BY rank DESC
+      LIMIT 100`;
+
+    const positions = await prisma.$queryRaw<Array<{ id: string; name: string }>>`
+      SELECT p.id, p.name FROM "OrgPosition" p
+      WHERE p."organizationId" = ${organizationId}
+        AND pb_search_vector(p.name) @@ to_tsquery('simple', ${tsquery})
+      ORDER BY p.name LIMIT 20`;
+
+    const documents = await prisma.$queryRaw<Array<{ id: string; fileName: string; processId: string | null; processName: string | null }>>`
+      SELECT a.id, a."fileName", a."processNodeId" AS "processId", n.name AS "processName"
+      FROM "Attachment" a LEFT JOIN "ProcessNode" n ON n.id = a."processNodeId" AND n."organizationId" = a."organizationId"
+      WHERE a."organizationId" = ${organizationId}
+        AND pb_search_vector(a."fileName") @@ to_tsquery('simple', ${tsquery})
+      ORDER BY a."fileName" LIMIT 20`;
+
+    // verzie zaradit: platna / naplanovana = publikovane, ostatne = archiv
+    const now = today();
+    const processIds = [...new Set([...drafts.map((row) => row.id), ...versions.map((row) => row.id)])];
+    const allVersions = await prisma.processVersion.findMany({
+      where: { processNodeId: { in: processIds }, organizationId },
+      select: { id: true, processNodeId: true, revision: true, effectiveFrom: true, effectiveTo: true }
+    });
+    const stateOf = (processId: string, revision: number): 'effective' | 'scheduled' | 'archive' => {
+      const own = allVersions.filter((item) => item.processNodeId === processId);
+      const version = own.find((item) => item.revision === revision);
+      if (!version) return 'archive';
+      if (version.effectiveFrom > now) return 'scheduled';
+      return pickEffective(own, now)?.revision === revision ? 'effective' : 'archive';
+    };
+
+    type Match = { kind: 'published' | 'draft' | 'archive'; revision: number | null; state?: 'effective' | 'scheduled'; snippet: ReturnType<typeof searchSnippet>; rank: number };
+    const byProcess = new Map<string, { id: string; name: string; code: string; matches: Match[]; rank: number }>();
+    const add = (id: string, name: string, code: string | null, match: Match) => {
+      const entry = byProcess.get(id) ?? { id, name, code: code ?? '', matches: [], rank: 0 };
+      entry.matches.push(match);
+      entry.rank = Math.max(entry.rank, match.rank);
+      byProcess.set(id, entry);
+    };
+    for (const row of versions) {
+      const state = stateOf(row.id, row.revision);
+      add(row.id, row.name, row.code, {
+        kind: state === 'archive' ? 'archive' : 'published',
+        revision: row.revision,
+        ...(state === 'archive' ? {} : { state }),
+        snippet: searchSnippet(row.body, tokens),
+        rank: Number(row.rank)
+      });
+    }
+    for (const row of drafts) {
+      const snippet = searchSnippet(row.body, tokens);
+      const entry = byProcess.get(row.id);
+      // navrh zhodny s publikovanou verziou netreba ukazovat dvakrat
+      if (entry?.matches.some((match) => match.kind === 'published' && match.snippet.text === snippet.text)) continue;
+      add(row.id, entry?.name ?? row.name, entry?.code ?? row.code, { kind: 'draft', revision: null, snippet, rank: Number(row.rank) });
+    }
+    const order = { published: 0, draft: 1, archive: 2 };
+    const processes = [...byProcess.values()]
+      .sort((a, b) => b.rank - a.rank || a.name.localeCompare(b.name, 'sk'))
+      .map(({ rank: _rank, ...entry }) => ({
+        ...entry,
+        matches: entry.matches
+          .sort((a, b) => order[a.kind] - order[b.kind] || (b.revision ?? 0) - (a.revision ?? 0))
+          .slice(0, 4)
+          .map(({ rank: _r, ...match }) => match)
+      }));
+
+    response.json({ query: raw, processes, positions, documents });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // --- #34 UX-01b prehlad: co treba vo firme napravit ---
 
 type OverviewItem = { id: string; name: string; code: string; detail: string; overdue?: boolean };
