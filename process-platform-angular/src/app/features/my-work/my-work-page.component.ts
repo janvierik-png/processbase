@@ -50,8 +50,14 @@ export class MyWorkPageComponent implements OnInit {
     return role === 'OWNER' ? 'vlastník' : 'vykonávateľ';
   }
 
+  /** Odkiaľ zodpovednosť pochádza — miesto a rola, pri kroku aj jeho názov (#29). */
   sources(item: WorkItem): string {
-    return item.roles.map((role) => `${role.positionName} (${this.roleLabel(role.role)})`).join(', ');
+    const raciLabel = { R: 'vykonáva', A: 'zodpovedá', C: 'konzultuje', I: 'informovaný' };
+    return item.roles
+      .map((role) => role.role === 'STEP'
+        ? `${role.positionName || 'priradené priamo vám'} — krok „${role.step}“ (${role.raci ? raciLabel[role.raci] : ''})`
+        : `${role.positionName} (${this.roleLabel(role.role)})`)
+      .join(', ');
   }
 
   positionNames(): string {

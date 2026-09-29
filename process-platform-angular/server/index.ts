@@ -13,6 +13,7 @@ import {
   ApprovalStatus,
   AuthTokenType,
   JobDescriptionStatus,
+  RaciRole,
   ResponsibilityRole
 } from '../generated/prisma/client';
 import { acceptRequestId, logError } from './log';
@@ -323,7 +324,7 @@ type ProcessTreeNode = {
   publication?: Publication;
   trigger?: string;
   outcome?: string;
-  activities?: Array<{ id: string; title: string; description: string }>;
+  activities?: Array<{ id: string; title: string; description: string; raci?: ReturnType<typeof mapStepResponsibility>[] }>;
   readiness?: ReadinessItem[];
   revision?: string;
   purpose?: string;
@@ -478,7 +479,11 @@ function mapNode(node: any): ProcessTreeNode {
     activities: (node.activities ?? []).map((activity: any) => ({
       id: activity.id,
       title: activity.title,
-      description: activity.description ?? ''
+      description: activity.description ?? '',
+      // #29 — RACI kroku s ludmi, ktori miesta zastavaju
+      raci: (activity.responsibilities ?? [])
+        .map(mapStepResponsibility)
+        .sort((a: any, b: any) => RACI_ORDER.indexOf(a.role) - RACI_ORDER.indexOf(b.role) || a.name.localeCompare(b.name, 'sk'))
     })),
     readiness: node.type === ProcessNodeType.GROUP ? [] : publishReadiness(node),
     risks: '',
@@ -703,8 +708,8 @@ function publicationInclude() {
       select: { revision: true, effectiveFrom: true, effectiveTo: true, contentHash: true }
     },
     attachments: { select: { id: true, fileName: true } },
-    // #28 — kroky patria do obsahu navrhu
-    activities: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, title: true, description: true } },
+    // #28 — kroky patria do obsahu navrhu, #29 aj s RACI
+    activities: activityInclude(),
     // #37 — cakajuca ziadost o schvalenie
     approvalRequests: {
       where: { status: ApprovalStatus.PENDING },
@@ -740,12 +745,83 @@ type ProcessSnapshot = {
   /** #28 — spustac, vysledok a kroky (v starsich verziach chybaju) */
   trigger?: string;
   outcome?: string;
-  activities?: Array<{ id: string; title: string; description: string }>;
+  /** #29 — raci len pri krokoch, ktore ho maju (starsie verzie ho nemaju) */
+  activities?: Array<{ id: string; title: string; description: string; raci?: SnapshotRaci[] }>;
   /** ID miest, nie mena — kto miesto zastava, sa odvodzuje z obsadenia v case */
   responsibilities: Array<{ positionId: string; role: string }>;
   documentIds: string[];
   documents: Array<{ id: string; name: string }>;
 };
+
+// --- #29 CORE-03 RACI na kroku ---
+
+type RaciCode = 'R' | 'A' | 'C' | 'I';
+/** Miesto (bezne) alebo osoba (vynimka) — v snapshote len ID, mena sa dopocitaju k datumu. */
+type SnapshotRaci = { role: RaciCode; positionId?: string; personId?: string };
+
+const RACI_CODE: Record<RaciRole, RaciCode> = {
+  [RaciRole.RESPONSIBLE]: 'R',
+  [RaciRole.ACCOUNTABLE]: 'A',
+  [RaciRole.CONSULTED]: 'C',
+  [RaciRole.INFORMED]: 'I'
+};
+const RACI_FROM_CODE: Record<RaciCode, RaciRole> = {
+  R: RaciRole.RESPONSIBLE,
+  A: RaciRole.ACCOUNTABLE,
+  C: RaciRole.CONSULTED,
+  I: RaciRole.INFORMED
+};
+const RACI_ORDER: RaciCode[] = ['R', 'A', 'C', 'I'];
+const MAX_RACI_PER_STEP = 20;
+
+const raciSortKey = (item: { role: RaciCode; positionId?: string | null; personId?: string | null }) =>
+  `${RACI_ORDER.indexOf(item.role)}:${item.positionId ?? ''}:${item.personId ?? ''}`;
+
+/** Zodpovednosti kroku v tvare snapshotu, zoradene — rovnaky obsah = rovnaky odtlacok. */
+function snapshotRaci(activity: any): SnapshotRaci[] {
+  return (activity.responsibilities ?? [])
+    .map((item: any): SnapshotRaci => item.positionId
+      ? { role: RACI_CODE[item.role as RaciRole], positionId: item.positionId }
+      : { role: RACI_CODE[item.role as RaciRole], personId: item.personId })
+    .sort((a: SnapshotRaci, b: SnapshotRaci) => raciSortKey(a).localeCompare(raciSortKey(b)));
+}
+
+/** Zodpovednost kroku pre klienta: miesto s dnesnymi (alebo k datumu verzie) ludmi, osoba ako vynimka. */
+function mapStepResponsibility(item: any) {
+  const holders = item.position ? (item.position.assignments ?? []).map((assignment: any) => assignment.person?.name).filter(Boolean) : [];
+  return {
+    role: RACI_CODE[item.role as RaciRole],
+    positionId: item.positionId ?? null,
+    personId: item.personId ?? null,
+    name: item.position?.name ?? item.person?.name ?? '',
+    holders,
+    vacant: Boolean(item.positionId) && holders.length === 0,
+    /** priradene konkretnej osobe — pri jej odchode treba krok upravit */
+    exception: Boolean(item.personId),
+    personLeft: item.person ? item.person.active === false : false
+  };
+}
+
+/** Co treba nacitat ku krokom — pre navrh s dnesnym obsadenim. */
+function activityInclude() {
+  return {
+    orderBy: { sortOrder: 'asc' as const },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      responsibilities: {
+        select: {
+          role: true,
+          positionId: true,
+          personId: true,
+          position: { select: { id: true, name: true, assignments: { where: activeOn(today()), select: { person: { select: { name: true } } } } } },
+          person: { select: { id: true, name: true, active: true } }
+        }
+      }
+    }
+  };
+}
 
 /** Verzia ucinna v dany den; v jeden den s dvoma verziami vyhra vyssia revizia. */
 function pickEffective<T extends { revision: number; effectiveFrom: Date; effectiveTo: Date | null }>(versions: T[], at: Date): T | null {
@@ -776,11 +852,11 @@ function buildSnapshot(node: any): ProcessSnapshot {
     relatedProcessIds: [...(node.relatedProcessIds ?? [])].sort(),
     trigger: node.trigger ?? '',
     outcome: node.outcome ?? '',
-    activities: (node.activities ?? []).map((activity: any) => ({
-      id: activity.id,
-      title: activity.title,
-      description: activity.description ?? ''
-    })),
+    activities: (node.activities ?? []).map((activity: any) => {
+      const raci = snapshotRaci(activity);
+      // bez zodpovednosti kluc chyba — odtlacok starsich verzii ostava rovnaky
+      return { id: activity.id, title: activity.title, description: activity.description ?? '', ...(raci.length > 0 ? { raci } : {}) };
+    }),
     responsibilities,
     documentIds: documents.map((document: any) => document.id),
     documents
@@ -868,11 +944,35 @@ function mapVersionMeta(version: any, now = today()) {
  */
 async function versionView(node: any, version: any, at: Date) {
   const snapshot = version.snapshot as ProcessSnapshot;
+  const stepRaci = (snapshot.activities ?? []).flatMap((activity) => activity.raci ?? []);
   const positions = await prisma.orgPosition.findMany({
-    where: { id: { in: snapshot.responsibilities.map((item) => item.positionId) }, organizationId: node.organizationId },
+    where: {
+      id: { in: [...snapshot.responsibilities.map((item) => item.positionId), ...stepRaci.flatMap((item) => item.positionId ?? [])] },
+      organizationId: node.organizationId
+    },
     select: { id: true, name: true, assignments: { where: activeOn(at), select: { person: { select: { name: true } } } } }
   });
   const byId = new Map(positions.map((position) => [position.id, position]));
+  const people = await prisma.person.findMany({
+    where: { id: { in: stepRaci.flatMap((item) => item.personId ?? []) }, organizationId: node.organizationId },
+    select: { id: true, name: true, active: true }
+  });
+  const personById = new Map(people.map((person) => [person.id, person]));
+  // #29 — RACI kroku v tvare ako z DB, aby ho mapNode zobrazil s obsadenim k datumu `at`
+  const activities = (snapshot.activities ?? []).map((activity) => ({
+    ...activity,
+    responsibilities: (activity.raci ?? []).map((item) => ({
+      role: RACI_FROM_CODE[item.role],
+      positionId: item.positionId ?? null,
+      personId: item.personId ?? null,
+      position: item.positionId
+        ? byId.get(item.positionId) ?? { id: item.positionId, name: '(zrušené pracovné miesto)', assignments: [] }
+        : null,
+      person: item.personId
+        ? personById.get(item.personId) ?? { id: item.personId, name: '(osoba už nie je v adresári)', active: false }
+        : null
+    }))
+  }));
   const mapped = mapNode({
     ...node,
     name: snapshot.name,
@@ -886,7 +986,7 @@ async function versionView(node: any, version: any, at: Date) {
     relatedProcessIds: snapshot.relatedProcessIds,
     trigger: snapshot.trigger ?? '',
     outcome: snapshot.outcome ?? '',
-    activities: snapshot.activities ?? [],
+    activities,
     positions: snapshot.responsibilities.map((item) => ({
       positionId: item.positionId,
       role: item.role,
@@ -918,7 +1018,7 @@ async function loadDraftForPublication(request: express.Request, processId: stri
     include: {
       positions: true,
       attachments: { select: { id: true, fileName: true } },
-      activities: { orderBy: { sortOrder: 'asc' }, select: { id: true, title: true, description: true } }
+      activities: activityInclude()
     }
   });
   if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
@@ -1352,6 +1452,54 @@ app.get('/api/processes/:processId/versions/:revision', async (request, response
 
 const MAX_ACTIVITIES = 200;
 
+type StepRaciInput = { role: RaciRole; positionId: string | null; personId: string | null };
+
+const fromSnapshotRaci = (item: SnapshotRaci): StepRaciInput =>
+  ({ role: RACI_FROM_CODE[item.role], positionId: item.positionId ?? null, personId: item.personId ?? null });
+
+const byRaciInput = (a: StepRaciInput, b: StepRaciInput) =>
+  raciSortKey({ ...a, role: RACI_CODE[a.role] }).localeCompare(raciSortKey({ ...b, role: RACI_CODE[b.role] }));
+
+/** #29 — RACI jedneho kroku z tela poziadavky; zoradene, bez duplicit, najviac jedno A. */
+function parseStepRaci(value: unknown, index: number): StepRaciInput[] {
+  if (value === null) return [];
+  if (!Array.isArray(value)) throw new HttpError(400, `Krok ${index + 1}: zodpovednosti musia byť zoznam.`);
+  if (value.length > MAX_RACI_PER_STEP) throw new HttpError(400, `Krok ${index + 1}: najviac ${MAX_RACI_PER_STEP} zodpovedností.`);
+  const unique = new Map<string, StepRaciInput>();
+  for (const item of value as any[]) {
+    const role = RACI_FROM_CODE[item?.role as RaciCode];
+    if (!role) throw new HttpError(400, `Krok ${index + 1}: neznáma rola zodpovednosti (R, A, C alebo I).`);
+    const positionId = typeof item?.positionId === 'string' && item.positionId ? item.positionId : null;
+    const personId = typeof item?.personId === 'string' && item.personId ? item.personId : null;
+    if (Boolean(positionId) === Boolean(personId)) {
+      throw new HttpError(400, `Krok ${index + 1}: zodpovednosť patrí pracovnému miestu, alebo výnimočne osobe — práve jednému.`);
+    }
+    const entry = { role, positionId, personId };
+    unique.set(raciSortKey({ ...entry, role: RACI_CODE[role] }), entry);
+  }
+  const result = [...unique.values()].sort(byRaciInput);
+  if (result.filter((item) => item.role === RaciRole.ACCOUNTABLE).length > 1) {
+    throw new HttpError(400, `Krok ${index + 1}: zodpovedný (A) môže byť len jeden — ostatní vykonávajú (R) alebo konzultujú (C).`);
+  }
+  return result;
+}
+
+/** Citatelny zapis RACI krokov do auditu (mena miest a osob v case zmeny). */
+async function describeStepRaci(organizationId: string, titles: string[], raci: StepRaciInput[][]): Promise<string[]> {
+  const all = raci.flat();
+  const [positions, people] = await Promise.all([
+    prisma.orgPosition.findMany({ where: { organizationId, id: { in: all.flatMap((item) => item.positionId ?? []) } }, select: { id: true, name: true } }),
+    prisma.person.findMany({ where: { organizationId, id: { in: all.flatMap((item) => item.personId ?? []) } }, select: { id: true, name: true } })
+  ]);
+  const names = new Map([...positions, ...people].map((item) => [item.id, item.name]));
+  return titles
+    .map((title, index) => ({ title, items: raci[index] ?? [] }))
+    .map(({ title, items }, index) => items.length === 0
+      ? ''
+      : `${index + 1}. ${title}: ${items.map((item) => `${RACI_CODE[item.role]} ${names.get(item.positionId ?? item.personId ?? '') ?? '?'}${item.personId ? ' (osoba)' : ''}`).join(', ')}`)
+    .filter(Boolean);
+}
+
 /**
  * #28 — kroky navrhu ako cely zoradeny zoznam (jednoduche aj pre presuny).
  * Krok s existujucim `id` sa zachova (stabilne ID pre neskorsie RACI na krok),
@@ -1365,39 +1513,75 @@ app.put('/api/processes/:processId/activities', async (request, response, next) 
     if (!input) throw new HttpError(400, 'activities musi byt zoznam krokov.');
     if (input.length > MAX_ACTIVITIES) throw new HttpError(400, `Proces moze mat najviac ${MAX_ACTIVITIES} krokov.`);
 
-    const steps = input.map((item: any, index: number) => {
-      const title = cleanText(item?.title, 300);
-      if (!title) throw new HttpError(400, `Krok ${index + 1} nema nazov.`);
-      return { id: typeof item?.id === 'string' ? item.id : null, title, description: cleanText(item?.description, 5000) };
-    });
+    const steps: Array<{ id: string | null; title: string; description: string | null; raci: StepRaciInput[] | undefined }> =
+      input.map((item: any, index: number) => {
+        const title = cleanText(item?.title, 300);
+        if (!title) throw new HttpError(400, `Krok ${index + 1} nema nazov.`);
+        return {
+          id: typeof item?.id === 'string' ? item.id : null,
+          title,
+          description: cleanText(item?.description, 5000),
+          // #29 — bez `raci` sa zodpovednosti kroku nemenia (starsi klient ich nezmaze)
+          raci: item?.raci === undefined ? undefined : parseStepRaci(item.raci, index)
+        };
+      });
+    // miesta a osoby len z vlastnej firmy (B2)
+    const raciInput = steps.flatMap((step) => step.raci ?? []);
+    await assertOwnedIds('orgPosition', node.organizationId, raciInput.map((item) => item.positionId));
+    await assertOwnedIds('person', node.organizationId, raciInput.map((item) => item.personId));
 
     const existing = await prisma.processActivity.findMany({
       where: { processNodeId: node.id },
       orderBy: { sortOrder: 'asc' },
-      select: { id: true, title: true, description: true }
+      select: { id: true, title: true, description: true, responsibilities: { select: { role: true, positionId: true, personId: true } } }
     });
-    const existingIds = new Set(existing.map((activity) => activity.id));
+    const existingById = new Map(existing.map((activity) => [activity.id, activity]));
     // cudzie alebo vymyslene ID sa nezachova — krok dostane nove (B2)
-    const kept = new Set<string>(steps.filter((step: any) => step.id && existingIds.has(step.id)).map((step: any) => step.id as string));
+    const kept = new Set<string>(steps.filter((step) => step.id && existingById.has(step.id)).map((step) => step.id as string));
+    const raciOf = (step: (typeof steps)[number]) =>
+      step.raci ?? (step.id && kept.has(step.id) ? snapshotRaci(existingById.get(step.id)).map(fromSnapshotRaci) : []);
 
     await prisma.$transaction(async (tx) => {
       await tx.processActivity.deleteMany({ where: { processNodeId: node.id, id: { notIn: [...kept] } } });
       for (const [index, step] of steps.entries()) {
+        let activityId: string;
         if (step.id && kept.has(step.id)) {
           await tx.processActivity.update({ where: { id: step.id }, data: { sortOrder: index, title: step.title, description: step.description } });
+          activityId = step.id;
         } else {
-          await tx.processActivity.create({
+          const created = await tx.processActivity.create({
             data: { organizationId: node.organizationId, processNodeId: node.id, sortOrder: index, title: step.title, description: step.description }
+          });
+          activityId = created.id;
+        }
+        if (step.raci === undefined) continue;
+        await tx.activityResponsibility.deleteMany({ where: { activityId } });
+        if (step.raci.length > 0) {
+          await tx.activityResponsibility.createMany({
+            data: step.raci.map((item) => ({ organizationId: node.organizationId, activityId, ...item }))
           });
         }
       }
     });
 
     const before = existing.map((activity) => activity.title);
-    const after = steps.map((step: any) => step.title);
-    if (JSON.stringify(existing.map((a) => [a.title, a.description ?? null])) !== JSON.stringify(steps.map((s: any) => [s.title, s.description]))) {
+    const after = steps.map((step) => step.title);
+    const changedFields: Record<string, { from: unknown; to: unknown }> = {};
+    if (JSON.stringify(existing.map((a) => [a.title, a.description ?? null])) !== JSON.stringify(steps.map((s) => [s.title, s.description]))) {
+      changedFields['kroky'] = { from: before, to: after };
+    }
+    // #29 — zmena RACI do auditu citatelne: „1. Kontrola: R Uctovnik, A Veduca kvality“
+    const raciBefore = existing.map((activity) => snapshotRaci(activity).map(fromSnapshotRaci));
+    const raciAfter = steps.map(raciOf);
+    if (JSON.stringify(raciBefore) !== JSON.stringify(raciAfter.map((items) => [...items].sort(byRaciInput)))) {
+      changedFields['zodpovednostiKrokov'] = {
+        from: await describeStepRaci(node.organizationId, before, raciBefore),
+        to: await describeStepRaci(node.organizationId, after, raciAfter)
+      };
+    }
+    if (Object.keys(changedFields).length > 0) {
       await prisma.processChangeLog.create({
-        data: { processNodeId: node.id, userId: auth(request).userId, changedFields: { kroky: { from: before, to: after } } }
+        data: { processNodeId: node.id, userId: auth(request).userId, changedFields: changedFields as any }
       });
     }
 
@@ -2162,7 +2346,7 @@ async function requirePosition(request: express.Request, positionId: string) {
  * suvisiaci proces, pozicia, zlozka) a jeho nazov by sa potom vratil vo vypise.
  */
 async function assertOwnedIds(
-  model: 'processNode' | 'orgPosition' | 'orgUnit' | 'jobProfile',
+  model: 'processNode' | 'orgPosition' | 'orgUnit' | 'jobProfile' | 'person',
   organizationId: string,
   ids: unknown[]
 ): Promise<string[]> {
@@ -3116,19 +3300,46 @@ app.get('/api/me/work', async (request, response, next) => {
       orderBy: { validFrom: 'asc' }
     });
     const positionIds = assignments.map((assignment) => assignment.positionId);
-    const links = positionIds.length
+    const processSelect = {
+      select: {
+        id: true, name: true, code: true,
+        versions: { select: { id: true, revision: true, effectiveFrom: true, effectiveTo: true, nextReviewAt: true } }
+      }
+    };
+    const processLinks = positionIds.length
       ? await prisma.processPosition.findMany({
           where: { positionId: { in: positionIds }, processNode: { organizationId, type: ProcessNodeType.PROCESS } },
-          include: {
-            processNode: {
-              select: {
-                id: true, name: true, code: true,
-                versions: { select: { id: true, revision: true, effectiveFrom: true, effectiveTo: true, nextReviewAt: true } }
-              }
-            }
-          }
+          include: { processNode: processSelect }
         })
       : [];
+    // #29 — aj zodpovednost pri kroku: cez moje miesto, alebo vynimocne priamo na mna
+    const stepLinks = await prisma.activityResponsibility.findMany({
+      where: {
+        organizationId,
+        OR: [...(positionIds.length ? [{ positionId: { in: positionIds } }] : []), { personId: person.id }],
+        activity: { processNode: { organizationId, type: ProcessNodeType.PROCESS } }
+      },
+      select: { role: true, positionId: true, activity: { select: { title: true, processNode: processSelect } } }
+    });
+    type WorkLink = {
+      processNodeId: string;
+      processNode: (typeof processLinks)[number]['processNode'];
+      role: string;
+      positionId: string | null;
+      step?: string;
+      raci?: RaciCode;
+    };
+    const links: WorkLink[] = [
+      ...processLinks.map((link) => ({ processNodeId: link.processNodeId, processNode: link.processNode, role: String(link.role), positionId: link.positionId })),
+      ...stepLinks.map((link) => ({
+        processNodeId: link.activity.processNode.id,
+        processNode: link.activity.processNode,
+        role: 'STEP',
+        positionId: link.positionId,
+        step: link.activity.title,
+        raci: RACI_CODE[link.role]
+      }))
+    ];
 
     // nazov z platnej verzie (to, co plati), inak z navrhu
     const effectiveByProcess = new Map<string, any>();
@@ -3156,9 +3367,15 @@ app.get('/api/me/work', async (request, response, next) => {
           ? { revision: effective.revision, effectiveFrom: day(effective.effectiveFrom), nextReviewAt: day(effective.nextReviewAt) }
           : null,
         review: !effective?.nextReviewAt ? null : effective.nextReviewAt < at ? 'overdue' : effective.nextReviewAt <= soon ? 'soon' : null,
-        roles: [] as Array<{ role: string; positionId: string; positionName: string }>
+        roles: [] as Array<{ role: string; positionId: string | null; positionName: string; step?: string; raci?: RaciCode }>
       };
-      entry.roles.push({ role: link.role, positionId: link.positionId, positionName: positionName.get(link.positionId) ?? '' });
+      entry.roles.push({
+        role: link.role,
+        positionId: link.positionId,
+        // bez miesta = zodpovednost priradena priamo osobe (vynimka)
+        positionName: link.positionId ? positionName.get(link.positionId) ?? '' : '',
+        ...(link.step ? { step: link.step, raci: link.raci } : {})
+      });
       byProcess.set(link.processNodeId, entry);
     }
 

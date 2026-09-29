@@ -75,8 +75,25 @@ export interface MyWork {
     /** termín revízie: po termíne / do 30 dní */
     review: 'overdue' | 'soon' | null;
     /** zdroj zodpovednosti — miesto a rola */
-    roles: Array<{ role: 'OWNER' | 'PERFORMER'; positionId: string; positionName: string }>;
+    /** STEP = zodpovednosť len za krok (#29); bez miesta = priradené priamo mne */
+    roles: Array<{ role: 'OWNER' | 'PERFORMER' | 'STEP'; positionId: string | null; positionName: string; step?: string; raci?: RaciCode }>;
   }>;
+}
+
+/** #29 CORE-03 — R vykonáva, A zodpovedá, C konzultuje, I je informovaný. */
+export type RaciCode = 'R' | 'A' | 'C' | 'I';
+
+export interface StepResponsibility {
+  role: RaciCode;
+  positionId: string | null;
+  /** výnimka — priradené konkrétnej osobe, nie miestu */
+  personId: string | null;
+  name: string;
+  /** kto miesto zastáva (dnes, alebo k dátumu zobrazenej verzie) */
+  holders: string[];
+  vacant: boolean;
+  exception: boolean;
+  personLeft: boolean;
 }
 
 /** #28 — krok procesu (lineárny zoznam). */
@@ -84,6 +101,8 @@ export interface ProcessActivity {
   id: string;
   title: string;
   description?: string;
+  /** #29 — kto pri kroku vykonáva, zodpovedá, konzultuje, je informovaný */
+  raci?: StepResponsibility[];
 }
 
 /** #27 — stav publikovania procesu, počíta ho server z verzií. */

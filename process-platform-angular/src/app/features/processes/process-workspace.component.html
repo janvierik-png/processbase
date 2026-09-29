@@ -424,6 +424,39 @@
                   <div class="step-fields">
                     <input [name]="'step-title-' + step.key" [(ngModel)]="step.title" placeholder="Čo sa robí, napr. Účtovník skontroluje faktúru" required>
                     <textarea [name]="'step-desc-' + step.key" [(ngModel)]="step.description" rows="2" placeholder="Podrobnosti (voliteľné)"></textarea>
+                    <!-- #29 — RACI kroku: pracovné miesto, konkrétna osoba len výnimkou -->
+                    <div class="raci-edit">
+                      @for (item of step.raci; track $index; let raciIndex = $index) {
+                        <span class="raci-chip" [class.exception]="item.personId" [title]="raciLabel(item.role)">
+                          <b>{{ item.role }}</b> {{ raciHolderName(item) }}@if (item.personId) {<em>&nbsp;(osoba)</em>}
+                          <button type="button" class="chip-remove" (click)="removeRaci(step, raciIndex)" [attr.aria-label]="'Odobrať ' + raciHolderName(item)">×</button>
+                        </span>
+                      }
+                      <div class="raci-add">
+                        <select [name]="'raci-role-' + step.key" [(ngModel)]="step.newRole" aria-label="Rola pri kroku">
+                          @for (role of raciRoles; track role.code) {
+                            <option [ngValue]="role.code">{{ role.label }}</option>
+                          }
+                        </select>
+                        <select [name]="'raci-holder-' + step.key" [(ngModel)]="step.newHolder" aria-label="Kto">
+                          <option value="">— pracovné miesto —</option>
+                          @for (position of positions(); track position.id) {
+                            <option [value]="'pos:' + position.id">{{ position.name }} ({{ position.vacant ? 'neobsadené' : holderNames(position) }})</option>
+                          }
+                          @if (canCreatePosition) {
+                            <option value="new">+ Nové pracovné miesto…</option>
+                          }
+                          @if (people().length > 0) {
+                            <optgroup label="Konkrétna osoba (výnimka)">
+                              @for (person of people(); track person.id) {
+                                <option [value]="'per:' + person.id">{{ person.name }}</option>
+                              }
+                            </optgroup>
+                          }
+                        </select>
+                        <button type="button" class="small" (click)="addRaci(step)" [disabled]="!step.newHolder">+ Pridať</button>
+                      </div>
+                    </div>
                   </div>
                   <div class="step-tools">
                     <button type="button" class="ghost small" (click)="moveStep(index, -1)" [disabled]="index === 0" title="Posunúť vyššie">↑</button>
@@ -434,6 +467,10 @@
               } @empty {
                 <p class="muted-small">Zatiaľ žiadne kroky. Stačí pár viet — čo sa robí a kto to robí.</p>
               }
+              <p class="muted-small raci-legend">
+                <b>R</b> vykonáva · <b>A</b> zodpovedá (na kroku jeden) · <b>C</b> konzultuje · <b>I</b> je informovaný.
+                Zodpovednosť priraďte pracovnému miestu — po zmene obsadenia sa zobrazí nový človek. Konkrétnu osobu len výnimočne (napr. externistu).
+              </p>
               <button type="button" class="small" (click)="addStep()">+ Pridať krok</button>
               @if (stepsError()) {
                 <p class="error">{{ stepsError() }}</p>
@@ -451,6 +488,23 @@
                     <li>
                       <strong>{{ step.title }}</strong>
                       @if (step.description) { <p>{{ step.description }}</p> }
+                      @if ((step.raci ?? []).length > 0) {
+                        <div class="raci-list">
+                          @for (item of step.raci; track $index) {
+                            <span class="raci-chip" [class.vacant]="item.vacant" [class.exception]="item.exception"
+                              [title]="item.exception ? 'Priradené konkrétnej osobe — pri jej odchode treba krok upraviť' : raciLabel(item.role)">
+                              <b>{{ item.role }}</b> {{ item.name }}
+                              @if (item.exception) {
+                                <em>(osoba{{ item.personLeft ? ', už nie je vo firme' : '' }})</em>
+                              } @else if (item.vacant) {
+                                <em>— neobsadené</em>
+                              } @else {
+                                <span class="holders">· {{ item.holders.join(', ') }}</span>
+                              }
+                            </span>
+                          }
+                        </div>
+                      }
                     </li>
                   }
                 </ol>
@@ -557,7 +611,14 @@
                     {{ position.unitName ? position.unitName + ' — ' + position.name : position.name }}
                   </label>
                 } @empty {
-                  <p class="muted-small">Organizácia nemá pracovné miesta. Vytvorte ich v časti Organizácia.</p>
+                  <p class="muted-small">Organizácia zatiaľ nemá pracovné miesta.</p>
+                }
+                @if (canCreatePosition) {
+                  <!-- #29 — miesto sa dá založiť priamo pri procese -->
+                  <div class="inline-create">
+                    <input name="newPerformerName" [(ngModel)]="newPerformerName" placeholder="Nové pracovné miesto, napr. Skladník">
+                    <button type="button" class="small" (click)="createPerformerPosition()" [disabled]="!newPerformerName.trim()">+ Vytvoriť a pridať</button>
+                  </div>
                 }
               } @else {
                 <div class="chip-list">

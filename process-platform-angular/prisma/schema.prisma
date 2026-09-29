@@ -268,8 +268,38 @@ model ProcessActivity {
   updatedAt      DateTime    @updatedAt
 
   processNode    ProcessNode @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  responsibilities ActivityResponsibility[]
 
   @@index([processNodeId, sortOrder])
+}
+
+/// #29 CORE-03 — RACI na kroku: R vykonava, A zodpoveda, C konzultuje, I je informovany.
+enum RaciRole {
+  RESPONSIBLE
+  ACCOUNTABLE
+  CONSULTED
+  INFORMED
+}
+
+/// Zodpovednost pri kroku patri pracovnemu miestu — kto ho zastava, sa odvodzuje
+/// z obsadenia v case. Konkretna osoba len vynimkou (napr. externy poradca);
+/// prave jedno z positionId / personId strazi CHECK v migracii.
+model ActivityResponsibility {
+  id             String          @id @default(uuid())
+  organizationId String
+  activityId     String
+  role           RaciRole
+  positionId     String?
+  personId       String?
+  createdAt      DateTime        @default(now())
+
+  activity       ProcessActivity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  position       OrgPosition?    @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  person         Person?         @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([activityId])
+  @@index([positionId])
+  @@index([personId])
 }
 
 /// Publikovana verzia procesu (#27 CORE-01). Snapshot sa uz nemeni — dalsia
@@ -455,6 +485,7 @@ model OrgPosition {
   jobProfile     JobProfile?          @relation(fields: [jobProfileId], references: [id], onDelete: SetNull)
   assignments    PositionAssignment[]
   processes      ProcessPosition[]
+  activityResponsibilities ActivityResponsibility[]
   documents      AttachmentPosition[]
 
   @@unique([organizationId, name])
@@ -528,6 +559,7 @@ model Person {
   organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user           User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   assignments    PositionAssignment[]
+  activityResponsibilities ActivityResponsibility[]
 
   @@unique([organizationId, userId])
   @@index([organizationId, active])

@@ -20,9 +20,11 @@ import {
   ProcessDetail,
   ProcessNode,
   ProcessRevision,
+  RaciCode,
   ProcessVersionMeta
 } from '../../core/models/process.model';
-import { OrgPosition } from '../../core/models/user.model';
+import { OrgPosition, Person } from '../../core/models/user.model';
+import { OrganizationService } from '../../core/services/organization.service';
 import { Camunda7Service } from '../../core/services/camunda7.service';
 import { DocumentService } from '../../core/services/document.service';
 import { StorageService } from '../../core/services/storage.service';
@@ -32,7 +34,17 @@ type TreeRow = { node: ProcessNode; level: number; kind: 'process' | 'clause' | 
 type PanelState = 'wide' | 'narrow' | 'hidden';
 type Tab = 'card' | 'bpmn' | 'history';
 type EditSection = 'basic' | 'description' | 'relations' | 'steps' | null;
-type StepDraft = { key: string; id: string | null; title: string; description: string };
+type RaciDraft = { role: RaciCode; positionId: string | null; personId: string | null };
+type StepDraft = {
+  key: string;
+  id: string | null;
+  title: string;
+  description: string;
+  /** #29 — RACI kroku a rozpísané pridanie ďalšej zodpovednosti */
+  raci: RaciDraft[];
+  newRole: RaciCode;
+  newHolder: string;
+};
 
 @Component({
   selector: 'pp-process-workspace',
@@ -112,6 +124,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     private readonly camunda: Camunda7Service,
     private readonly documentsApi: DocumentService,
     private readonly positionsApi: PositionService,
+    private readonly organizationApi: OrganizationService,
     private readonly storage: StorageService,
     private readonly route: ActivatedRoute,
     private readonly router: Router,
@@ -365,14 +378,79 @@ export class ProcessWorkspaceComponent implements OnInit {
   startStepsEdit(): void {
     this.stepsError.set('');
     this.stepsDraft = (this.detail()?.activities ?? []).map((step) => ({
-      key: `s${this.stepKey++}`, id: step.id, title: step.title, description: step.description ?? ''
+      key: `s${this.stepKey++}`,
+      id: step.id,
+      title: step.title,
+      description: step.description ?? '',
+      raci: (step.raci ?? []).map((item) => ({ role: item.role, positionId: item.positionId, personId: item.personId })),
+      newRole: 'R' as RaciCode,
+      newHolder: ''
     }));
     if (this.stepsDraft.length === 0) this.addStep();
+    // osoby len pre výnimočné priradenie konkrétnemu človeku (#29)
+    if (this.people().length === 0) {
+      this.organizationApi.people().subscribe({ next: (people) => this.people.set(people.filter((person) => person.active)), error: () => undefined });
+    }
     this.editSection.set('steps');
   }
 
   addStep(): void {
-    this.stepsDraft = [...this.stepsDraft, { key: `s${this.stepKey++}`, id: null, title: '', description: '' }];
+    this.stepsDraft = [...this.stepsDraft, { key: `s${this.stepKey++}`, id: null, title: '', description: '', raci: [], newRole: 'R', newHolder: '' }];
+  }
+
+  // --- #29 RACI na kroku ---
+
+  readonly people = signal<Person[]>([]);
+  readonly raciRoles: Array<{ code: RaciCode; label: string }> = [
+    { code: 'R', label: 'R — vykonáva' },
+    { code: 'A', label: 'A — zodpovedá' },
+    { code: 'C', label: 'C — konzultuje' },
+    { code: 'I', label: 'I — je informovaný' }
+  ];
+
+  raciLabel(code: RaciCode): string {
+    return { R: 'vykonáva', A: 'zodpovedá', C: 'konzultuje', I: 'informovaný' }[code];
+  }
+
+  /** Názov miesta alebo osoby v rozpracovanom kroku. */
+  raciHolderName(item: RaciDraft): string {
+    if (item.positionId) return this.positions().find((position) => position.id === item.positionId)?.name ?? 'Pracovné miesto';
+    return this.people().find((person) => person.id === item.personId)?.name ?? 'Osoba';
+  }
+
+  /** Hodnota výberu: „pos:ID“ = miesto, „per:ID“ = osoba (výnimka), „new“ = založiť miesto. */
+  addRaci(step: StepDraft): void {
+    const [kind, id] = step.newHolder.split(':');
+    if (step.newHolder === 'new') {
+      this.createRaciPosition(step);
+      return;
+    }
+    if (!id) return;
+    const entry: RaciDraft = { role: step.newRole, positionId: kind === 'pos' ? id : null, personId: kind === 'per' ? id : null };
+    const exists = step.raci.some((item) => item.role === entry.role && item.positionId === entry.positionId && item.personId === entry.personId);
+    // zodpovedný (A) je na kroku jeden — nový nahradí predchádzajúceho
+    if (!exists) step.raci = [...step.raci.filter((item) => entry.role !== 'A' || item.role !== 'A'), entry];
+    step.newHolder = '';
+  }
+
+  removeRaci(step: StepDraft, index: number): void {
+    step.raci = step.raci.filter((_, position) => position !== index);
+  }
+
+  /** Nové miesto priamo pri kroku — bez odbočky do Organizácie. */
+  private createRaciPosition(step: StepDraft): void {
+    step.newHolder = '';
+    if (!this.canCreatePosition) return;
+    const name = window.prompt('Názov nového pracovného miesta, napr. Účtovník')?.trim();
+    if (!name) return;
+    this.positionsApi.create({ name }).subscribe({
+      next: (position) => {
+        this.positions.update((items) => [...items, position].sort((a, b) => a.name.localeCompare(b.name)));
+        step.newHolder = `pos:${position.id}`;
+        this.addRaci(step);
+      },
+      error: (error) => this.stepsError.set(error?.error?.message ?? 'Miesto sa nepodarilo vytvoriť.')
+    });
   }
 
   removeStep(index: number): void {
@@ -393,7 +471,12 @@ export class ProcessWorkspaceComponent implements OnInit {
     // prázdne riadky (napr. pridané omylom) sa neukladajú
     const steps = this.stepsDraft
       .filter((step) => step.title.trim() || step.description.trim())
-      .map((step) => ({ id: step.id ?? undefined, title: step.title.trim(), description: step.description.trim() }));
+      .map((step) => ({
+        id: step.id ?? undefined,
+        title: step.title.trim(),
+        description: step.description.trim(),
+        raci: step.raci.map((item) => item.positionId ? { role: item.role, positionId: item.positionId } : { role: item.role, personId: item.personId ?? undefined })
+      }));
     if (steps.some((step) => !step.title)) {
       this.stepsError.set('Každý krok potrebuje názov.');
       return;
@@ -424,6 +507,22 @@ export class ProcessWorkspaceComponent implements OnInit {
         this.newPositionName = '';
       },
       error: (error) => this.store.error.set(error?.error?.message ?? 'Miesto sa nepodarilo vytvoriť.')
+    });
+  }
+
+  newPerformerName = '';
+
+  createPerformerPosition(): void {
+    const name = this.newPerformerName.trim();
+    if (!name) return;
+    this.positionsApi.create({ name }).subscribe({
+      next: (position) => {
+        this.positions.update((items) => [...items, position].sort((a, b) => a.name.localeCompare(b.name)));
+        const detail = this.detail();
+        if (detail) detail.positionIds = [...(detail.positionIds ?? []), position.id];
+        this.newPerformerName = '';
+      },
+      error: (error) => this.saveError.set(error?.error?.message ?? 'Miesto sa nepodarilo vytvoriť.')
     });
   }
 
@@ -870,8 +969,16 @@ export class ProcessWorkspaceComponent implements OnInit {
     });
   }
 
+  private readonly fieldLabels: Record<string, string> = {
+    name: 'názov', code: 'kód', purpose: 'účel', descriptionText: 'popis', trigger: 'spúšťač', outcome: 'výsledok',
+    parentId: 'nadradený proces', relatedProcessIds: 'súvisiace procesy', isoLinks: 'ISO väzby',
+    bpmnXml: 'diagram', diagramType: 'typ diagramu', flowchartXml: 'flowchart',
+    positions: 'vykonávatelia', ownerPosition: 'vlastník', kroky: 'kroky',
+    zodpovednostiKrokov: 'zodpovednosti pri krokoch (RACI)', publikovanie: 'publikovanie', schvalovanie: 'schvaľovanie'
+  };
+
   changedFieldNames(change: ProcessChange): string {
-    return Object.keys(change.changedFields ?? {}).join(', ');
+    return Object.keys(change.changedFields ?? {}).map((key) => this.fieldLabels[key] ?? key).join(', ');
   }
 
   private loadDocuments(processId: string): void {

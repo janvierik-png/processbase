@@ -1135,3 +1135,63 @@ button.small {
 .code-input { text-transform: uppercase; }
 
 .save-error { margin: 0; color: var(--warn); }
+
+// #29 — RACI na kroku
+.raci-list,
+.raci-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.raci-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+
+  b {
+    color: var(--accent-strong);
+    font-family: var(--font-mono, ui-monospace, monospace);
+  }
+
+  em { font-style: normal; color: var(--muted); }
+  .holders { color: var(--ink); }
+
+  &.vacant {
+    border-color: var(--warn);
+    background: var(--warn-soft);
+
+    em { color: var(--warn); }
+  }
+
+  &.exception { border-style: dashed; }
+
+  .chip-remove {
+    min-height: 0;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    line-height: 1;
+
+    &:hover:not(:disabled) { color: var(--warn); background: transparent; }
+  }
+}
+
+.raci-add {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  select { max-width: 240px; min-height: 30px; font-size: 13px; }
+}
+
+.raci-legend b { font-family: var(--font-mono, ui-monospace, monospace); }
