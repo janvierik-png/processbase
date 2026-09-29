@@ -42,6 +42,10 @@ if (!a.token || !b.token) {
 const t = a.token;
 const proc = (await call(`/organizations/${a.orgId}/processes`, { method: 'POST', body: { name: 'Schvaľovanie faktúr', type: 'process' }, token: t })).payload;
 await call(`/processes/${proc.id}`, { method: 'PATCH', body: { purpose: 'Faktúra je skontrolovaná a uhradená včas.' }, token: t });
+// minimum na publikovanie (#28): krok a vlastnik podla miesta
+const accountant = (await call(`/organizations/${a.orgId}/positions`, { method: 'POST', body: { name: 'Účtovník' }, token: t })).payload;
+await call(`/processes/${proc.id}`, { method: 'PATCH', body: { ownerPositionId: accountant?.id }, token: t });
+await call(`/processes/${proc.id}/activities`, { method: 'PUT', body: { activities: [{ title: 'Skontrolovať faktúru' }] }, token: t });
 
 // --- pred publikovanim ---
 const fresh = (await call(`/processes/${proc.id}`, { token: t })).payload;

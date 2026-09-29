@@ -214,6 +214,10 @@ model ProcessNode {
   name               String
   description        String?
   descriptionText    String?
+  /// #28 — kedy sa proces spusti (napr. „prisla faktura“)
+  trigger            String?
+  /// #28 — co je vysledkom (napr. „uhradena alebo vratena faktura“)
+  outcome            String?
   status             ProcessStatus       @default(DRAFT)
   sortOrder          Int                 @default(0)
   bpmnXml            String?
@@ -238,8 +242,26 @@ model ProcessNode {
   positions          ProcessPosition[]
   changeLogs         ProcessChangeLog[]
   versions           ProcessVersion[]
+  activities         ProcessActivity[]
 
   @@index([organizationId, parentId, sortOrder])
+}
+
+/// Krok procesu v navrhu (#28 CORE-02). Na zaciatok staci linearny zoznam;
+/// v publikovanej verzii je kopia v snapshote, tabulka drzi len navrh.
+model ProcessActivity {
+  id             String      @id @default(uuid())
+  organizationId String
+  processNodeId  String
+  sortOrder      Int
+  title          String
+  description    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  processNode    ProcessNode @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+
+  @@index([processNodeId, sortOrder])
 }
 
 /// Publikovana verzia procesu (#27 CORE-01). Snapshot sa uz nemeni — dalsia

@@ -237,6 +237,7 @@ const PERMISSION_RULES: PermissionRule[] = [
     anyOf: (request) => (isIsoOnlyPatch(request.body) ? ['process:write', 'iso:write'] : ['process:write'])
   },
   { methods: ['DELETE'], pattern: /^\/api\/processes\/[^/]+$/, anyOf: ['process:write'] },
+  { methods: ['PUT'], pattern: /^\/api\/processes\/[^/]+\/activities$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/(documents|revisions|camunda7\/deploy|publish)$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/camunda7\/deploy$/, anyOf: ['process:write'] },
   { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/iso-detect$/, anyOf: ['process:write', 'iso:write'] },
@@ -307,6 +308,10 @@ type ProcessTreeNode = {
   vacantResponsibilities?: Responsibility[];
   status?: string;
   publication?: Publication;
+  trigger?: string;
+  outcome?: string;
+  activities?: Array<{ id: string; title: string; description: string }>;
+  readiness?: ReadinessItem[];
   revision?: string;
   purpose?: string;
   risks?: string;
@@ -453,6 +458,15 @@ function mapNode(node: any): ProcessTreeNode {
     ...publicationState(node),
     revision: node.revisions?.[0]?.createdAt?.toISOString().slice(0, 10) ?? node.updatedAt?.toISOString().slice(0, 10),
     purpose: node.description ?? '',
+    // #28 — rychly proces: spustac, vysledok, kroky a co chyba na publikovanie
+    trigger: node.trigger ?? '',
+    outcome: node.outcome ?? '',
+    activities: (node.activities ?? []).map((activity: any) => ({
+      id: activity.id,
+      title: activity.title,
+      description: activity.description ?? ''
+    })),
+    readiness: node.type === ProcessNodeType.GROUP ? [] : publishReadiness(node),
     risks: '',
     descriptionText: node.descriptionText ?? '',
     relatedProcessIds: node.relatedProcessIds ?? [],
@@ -596,7 +610,9 @@ function publicationInclude() {
       orderBy: { revision: 'desc' as const },
       select: { revision: true, effectiveFrom: true, effectiveTo: true, contentHash: true }
     },
-    attachments: { select: { id: true, fileName: true } }
+    attachments: { select: { id: true, fileName: true } },
+    // #28 — kroky patria do obsahu navrhu
+    activities: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, title: true, description: true } }
   };
 }
 
@@ -620,6 +636,10 @@ type ProcessSnapshot = {
   flowchartXml: string | null;
   isoLinks: string[];
   relatedProcessIds: string[];
+  /** #28 — spustac, vysledok a kroky (v starsich verziach chybaju) */
+  trigger?: string;
+  outcome?: string;
+  activities?: Array<{ id: string; title: string; description: string }>;
   /** ID miest, nie mena — kto miesto zastava, sa odvodzuje z obsadenia v case */
   responsibilities: Array<{ positionId: string; role: string }>;
   documentIds: string[];
@@ -651,6 +671,13 @@ function buildSnapshot(node: any): ProcessSnapshot {
     flowchartXml: node.flowchartXml ?? null,
     isoLinks: [...(node.isoLinks ?? [])].sort(),
     relatedProcessIds: [...(node.relatedProcessIds ?? [])].sort(),
+    trigger: node.trigger ?? '',
+    outcome: node.outcome ?? '',
+    activities: (node.activities ?? []).map((activity: any) => ({
+      id: activity.id,
+      title: activity.title,
+      description: activity.description ?? ''
+    })),
     responsibilities,
     documentIds: documents.map((document: any) => document.id),
     documents
@@ -661,6 +688,27 @@ function buildSnapshot(node: any): ProcessSnapshot {
 function snapshotHash(snapshot: ProcessSnapshot): string {
   const { documents: _names, ...content } = snapshot;
   return createHash('sha256').update(JSON.stringify(content)).digest('hex');
+}
+
+type ReadinessItem = { key: string; label: string; ok: boolean; required: boolean };
+
+/**
+ * #28 — co proces potrebuje, aby sa dal publikovat (Rychly proces). Povinne
+ * polozky publikovanie blokuju, odporucane len upozornia. Nie je to hodnotenie
+ * kvality ani zhody s normou — len zoznam chybajucich udajov.
+ */
+function publishReadiness(node: any): ReadinessItem[] {
+  const owner = (node.positions ?? []).find((link: any) => link.role === ResponsibilityRole.OWNER);
+  const ownerHeld = (owner?.position?.assignments ?? []).length > 0;
+  return [
+    { key: 'name', label: 'Názov procesu', ok: Boolean(node.name?.trim()), required: true },
+    { key: 'purpose', label: 'Účel — prečo proces existuje', ok: Boolean(node.description?.trim()), required: true },
+    { key: 'activities', label: 'Aspoň jeden krok', ok: (node.activities ?? []).length > 0, required: true },
+    { key: 'owner', label: 'Vlastník — pracovné miesto, ktoré za proces zodpovedá', ok: Boolean(owner), required: true },
+    { key: 'trigger', label: 'Spúšťač — kedy sa proces začína', ok: Boolean(node.trigger?.trim()), required: false },
+    { key: 'outcome', label: 'Výsledok — čo proces prinesie', ok: Boolean(node.outcome?.trim()), required: false },
+    { key: 'ownerHeld', label: 'Miesto vlastníka niekto zastáva', ok: !owner || ownerHeld, required: false }
+  ];
 }
 
 /** Stav procesu z jeho verzii — rucne nastavit sa neda (predtym sa dal oznacit "schvaleny" bez schvalenia). */
@@ -720,6 +768,9 @@ async function versionView(node: any, version: any, at: Date) {
     flowchartXml: snapshot.flowchartXml,
     isoLinks: snapshot.isoLinks,
     relatedProcessIds: snapshot.relatedProcessIds,
+    trigger: snapshot.trigger ?? '',
+    outcome: snapshot.outcome ?? '',
+    activities: snapshot.activities ?? [],
     positions: snapshot.responsibilities.map((item) => ({
       positionId: item.positionId,
       role: item.role,
@@ -748,11 +799,19 @@ app.post('/api/processes/:processId/publish', async (request, response, next) =>
   try {
     const node = await prisma.processNode.findFirst({
       where: { id: String(request.params.processId), organizationId: orgScope(request) },
-      include: { positions: true, attachments: { select: { id: true, fileName: true } } }
+      include: {
+        positions: true,
+        attachments: { select: { id: true, fileName: true } },
+        activities: { orderBy: { sortOrder: 'asc' }, select: { id: true, title: true, description: true } }
+      }
     });
     if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
     if (node.type === ProcessNodeType.GROUP) throw new HttpError(400, 'Skupinu procesov nemozno publikovat.');
-    if (!node.name.trim()) throw new HttpError(400, 'Proces musi mat nazov.');
+    // #28 — zrozumitelne minimum: co chyba, to sa povie po mene
+    const missing = publishReadiness(node).filter((item) => item.required && !item.ok);
+    if (missing.length > 0) {
+      throw new HttpError(400, `Na publikovanie chýba: ${missing.map((item) => item.label.split(' — ')[0].toLowerCase()).join(', ')}.`);
+    }
 
     const now = today();
     const effectiveFrom = parseDay(request.body?.effectiveFrom, now, 'effectiveFrom')!;
@@ -851,6 +910,64 @@ app.get('/api/processes/:processId/versions/:revision', async (request, response
   }
 });
 
+const MAX_ACTIVITIES = 200;
+
+/**
+ * #28 — kroky navrhu ako cely zoradeny zoznam (jednoduche aj pre presuny).
+ * Krok s existujucim `id` sa zachova (stabilne ID pre neskorsie RACI na krok),
+ * novy dostane nove ID, chybajuci sa zmaze. Publikovane verzie sa nemenia.
+ */
+app.put('/api/processes/:processId/activities', async (request, response, next) => {
+  try {
+    const node = await requireProcess(request, request.params.processId);
+    if (node.type === ProcessNodeType.GROUP) throw new HttpError(400, 'Skupina procesov nema kroky.');
+    const input = Array.isArray(request.body?.activities) ? request.body.activities : null;
+    if (!input) throw new HttpError(400, 'activities musi byt zoznam krokov.');
+    if (input.length > MAX_ACTIVITIES) throw new HttpError(400, `Proces moze mat najviac ${MAX_ACTIVITIES} krokov.`);
+
+    const steps = input.map((item: any, index: number) => {
+      const title = cleanText(item?.title, 300);
+      if (!title) throw new HttpError(400, `Krok ${index + 1} nema nazov.`);
+      return { id: typeof item?.id === 'string' ? item.id : null, title, description: cleanText(item?.description, 5000) };
+    });
+
+    const existing = await prisma.processActivity.findMany({
+      where: { processNodeId: node.id },
+      orderBy: { sortOrder: 'asc' },
+      select: { id: true, title: true, description: true }
+    });
+    const existingIds = new Set(existing.map((activity) => activity.id));
+    // cudzie alebo vymyslene ID sa nezachova — krok dostane nove (B2)
+    const kept = new Set<string>(steps.filter((step: any) => step.id && existingIds.has(step.id)).map((step: any) => step.id as string));
+
+    await prisma.$transaction(async (tx) => {
+      await tx.processActivity.deleteMany({ where: { processNodeId: node.id, id: { notIn: [...kept] } } });
+      for (const [index, step] of steps.entries()) {
+        if (step.id && kept.has(step.id)) {
+          await tx.processActivity.update({ where: { id: step.id }, data: { sortOrder: index, title: step.title, description: step.description } });
+        } else {
+          await tx.processActivity.create({
+            data: { organizationId: node.organizationId, processNodeId: node.id, sortOrder: index, title: step.title, description: step.description }
+          });
+        }
+      }
+    });
+
+    const before = existing.map((activity) => activity.title);
+    const after = steps.map((step: any) => step.title);
+    if (JSON.stringify(existing.map((a) => [a.title, a.description ?? null])) !== JSON.stringify(steps.map((s: any) => [s.title, s.description]))) {
+      await prisma.processChangeLog.create({
+        data: { processNodeId: node.id, userId: auth(request).userId, changedFields: { kroky: { from: before, to: after } } }
+      });
+    }
+
+    const fresh = await prisma.processNode.findUnique({ where: { id: node.id }, include: processInclude() });
+    response.json(mapNode(fresh));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.patch('/api/processes/:processId', async (request, response, next) => {
   try {
     const { processId } = request.params;
@@ -886,6 +1003,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       name: body.name ?? undefined,
       description: body.purpose ?? undefined,
       descriptionText: body.descriptionText ?? undefined,
+      trigger: body.trigger === undefined ? undefined : (cleanText(body.trigger, 1000) ?? null),
+      outcome: body.outcome === undefined ? undefined : (cleanText(body.outcome, 1000) ?? null),
       // #27 — stav (status) sa ignoruje: vyplyva z publikovanych verzii
       bpmnXml: body.bpmnXml ?? undefined,
       diagramType: body.diagramType ?? undefined,
@@ -908,6 +1027,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     track('name', current.name, data.name);
     track('purpose', current.description, data.description);
     track('descriptionText', current.descriptionText, data.descriptionText);
+    track('trigger', current.trigger, data.trigger);
+    track('outcome', current.outcome, data.outcome);
     track('parentId', current.parentId, data.parentId);
     track('relatedProcessIds', current.relatedProcessIds, data.relatedProcessIds);
     track('isoLinks', current.isoLinks, data.isoLinks);

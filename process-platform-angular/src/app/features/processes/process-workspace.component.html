@@ -158,12 +158,29 @@
             }
             @if (viewMode() === 'draft') {
               <button type="button" class="primary small write-action" (click)="openPublish()"
-                [disabled]="!process.publication?.hasDraftChanges"
-                [title]="process.publication?.hasDraftChanges ? 'Zverejniť návrh ako novú verziu' : 'Návrh sa nelíši od poslednej verzie'">
+                [disabled]="!process.publication?.hasDraftChanges || missingRequired().length > 0"
+                [title]="missingRequired().length > 0 ? 'Najprv doplňte povinné údaje' : process.publication?.hasDraftChanges ? 'Zverejniť návrh ako novú verziu' : 'Návrh sa nelíši od poslednej verzie'">
                 Publikovať…
               </button>
             }
           </div>
+          <!-- #28 — zrozumiteľné minimum pred publikovaním -->
+          @if (viewMode() === 'draft' && (missingRequired().length > 0 || missingRecommended().length > 0)) {
+            <div class="readiness write-action">
+              @if (missingRequired().length > 0) {
+                <span class="readiness-title">Na publikovanie chýba:</span>
+                @for (item of missingRequired(); track item.key) {
+                  <span class="chip warn">{{ item.label }}</span>
+                }
+              }
+              @if (missingRecommended().length > 0) {
+                <span class="readiness-title">Odporúčame doplniť:</span>
+                @for (item of missingRecommended(); track item.key) {
+                  <span class="chip">{{ item.label }}</span>
+                }
+              }
+            </div>
+          }
         </section>
 
         @if (publishOpen && viewMode() === 'draft') {
@@ -276,7 +293,13 @@
                   [value]="process.descriptionText || ''"
                   (valueChange)="process.descriptionText = $event" />
               </div>
-              <label>Rizika <textarea name="risks" [(ngModel)]="process.risks" rows="2"></textarea></label>
+              <!-- #28 — rychly proces: kedy sa zacina a co prinesie (pole „Rizika“ sa nikde neukladalo) -->
+              <label>Spúšťač — kedy sa proces začína
+                <input name="trigger" [(ngModel)]="process.trigger" placeholder="napr. Príde faktúra od dodávateľa">
+              </label>
+              <label>Výsledok — čo proces prinesie
+                <input name="outcome" [(ngModel)]="process.outcome" placeholder="napr. Uhradená alebo vrátená faktúra">
+              </label>
               <label>Popis zmeny (audit)
                 <input name="changeDescription" [(ngModel)]="changeDescription" placeholder="Co sa zmenilo a preco">
               </label>
@@ -292,6 +315,14 @@
                 <p>{{ process.purpose || '—' }}</p>
               </div>
               <div class="read-field">
+                <span>Spúšťač</span>
+                <p>{{ process.trigger || '—' }}</p>
+              </div>
+              <div class="read-field">
+                <span>Výsledok</span>
+                <p>{{ process.outcome || '—' }}</p>
+              </div>
+              <div class="read-field">
                 <span>Dokumentacia</span>
                 @if (process.descriptionText) {
                   <div class="rendered-doc" [innerHTML]="renderedDocumentation()"></div>
@@ -299,13 +330,65 @@
                   <p>—</p>
                 }
               </div>
-              <div class="read-field">
-                <span>Rizika</span>
-                <p>{{ process.risks || '—' }}</p>
-              </div>
             </div>
           }
         </section>
+
+        <!-- #28 — kroky procesu (lineárny zoznam) -->
+        @if (process.type === 'process') {
+        <section class="card">
+          <header class="card-head">
+            <h3>Kroky <span class="count">({{ (process.activities ?? []).length }})</span></h3>
+            @if (editSection() !== 'steps') {
+              <button type="button" class="ghost small write-action" (click)="startStepsEdit()">Upravit</button>
+            }
+          </header>
+
+          @if (editSection() === 'steps') {
+            <form class="card-body steps-edit" (ngSubmit)="saveSteps()">
+              @for (step of stepsDraft; track step.key; let index = $index) {
+                <div class="step-row">
+                  <span class="step-no">{{ index + 1 }}</span>
+                  <div class="step-fields">
+                    <input [name]="'step-title-' + step.key" [(ngModel)]="step.title" placeholder="Čo sa robí, napr. Účtovník skontroluje faktúru" required>
+                    <textarea [name]="'step-desc-' + step.key" [(ngModel)]="step.description" rows="2" placeholder="Podrobnosti (voliteľné)"></textarea>
+                  </div>
+                  <div class="step-tools">
+                    <button type="button" class="ghost small" (click)="moveStep(index, -1)" [disabled]="index === 0" title="Posunúť vyššie">↑</button>
+                    <button type="button" class="ghost small" (click)="moveStep(index, 1)" [disabled]="index === stepsDraft.length - 1" title="Posunúť nižšie">↓</button>
+                    <button type="button" class="ghost small" (click)="removeStep(index)" title="Odstrániť krok">×</button>
+                  </div>
+                </div>
+              } @empty {
+                <p class="muted-small">Zatiaľ žiadne kroky. Stačí pár viet — čo sa robí a kto to robí.</p>
+              }
+              <button type="button" class="small" (click)="addStep()">+ Pridať krok</button>
+              @if (stepsError()) {
+                <p class="error">{{ stepsError() }}</p>
+              }
+              <div class="edit-actions">
+                <button class="primary" type="submit">Uložiť kroky</button>
+                <button type="button" (click)="cancelEdit()">Zrušiť</button>
+              </div>
+            </form>
+          } @else {
+            <div class="card-body">
+              @if ((process.activities ?? []).length > 0) {
+                <ol class="steps-list">
+                  @for (step of process.activities; track step.id) {
+                    <li>
+                      <strong>{{ step.title }}</strong>
+                      @if (step.description) { <p>{{ step.description }}</p> }
+                    </li>
+                  }
+                </ol>
+              } @else {
+                <p class="muted-small">Proces zatiaľ nemá kroky.</p>
+              }
+            </div>
+          }
+        </section>
+        }
 
         <section class="card">
           <header class="card-head">
@@ -368,6 +451,13 @@
                   }
                 </select>
                 <p class="muted-small">Zodpovednosť je naviazaná na miesto — po zmene obsadenia sa zobrazí nový človek.</p>
+                @if (canCreatePosition) {
+                  <!-- #28 — prvý proces bez vopred vyplnenej organizačnej schémy -->
+                  <div class="inline-create">
+                    <input name="newPositionName" [(ngModel)]="newPositionName" placeholder="Nové pracovné miesto, napr. Účtovník">
+                    <button type="button" class="small" (click)="createOwnerPosition()" [disabled]="!newPositionName.trim()">+ Vytvoriť a nastaviť</button>
+                  </div>
+                }
               } @else {
                 @if (process.ownerPosition; as owner) {
                   <div class="responsibility" [class.vacant]="owner.vacant">

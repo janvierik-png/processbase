@@ -30,7 +30,8 @@ import { AuthService } from '../../core/services/auth.service';
 type TreeRow = { node: ProcessNode; level: number; kind: 'process' | 'clause' | 'norm' };
 type PanelState = 'wide' | 'narrow' | 'hidden';
 type Tab = 'card' | 'bpmn' | 'history';
-type EditSection = 'basic' | 'description' | 'relations' | null;
+type EditSection = 'basic' | 'description' | 'relations' | 'steps' | null;
+type StepDraft = { key: string; id: string | null; title: string; description: string };
 
 @Component({
   selector: 'pp-process-workspace',
@@ -345,6 +346,86 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.treeSearch = '';
   }
 
+  // --- #28 kroky procesu ---
+
+  stepsDraft: StepDraft[] = [];
+  readonly stepsError = signal('');
+  private stepKey = 0;
+
+  startStepsEdit(): void {
+    this.stepsError.set('');
+    this.stepsDraft = (this.detail()?.activities ?? []).map((step) => ({
+      key: `s${this.stepKey++}`, id: step.id, title: step.title, description: step.description ?? ''
+    }));
+    if (this.stepsDraft.length === 0) this.addStep();
+    this.editSection.set('steps');
+  }
+
+  addStep(): void {
+    this.stepsDraft = [...this.stepsDraft, { key: `s${this.stepKey++}`, id: null, title: '', description: '' }];
+  }
+
+  removeStep(index: number): void {
+    this.stepsDraft = this.stepsDraft.filter((_, position) => position !== index);
+  }
+
+  moveStep(index: number, offset: number): void {
+    const target = index + offset;
+    if (target < 0 || target >= this.stepsDraft.length) return;
+    const next = [...this.stepsDraft];
+    [next[index], next[target]] = [next[target], next[index]];
+    this.stepsDraft = next;
+  }
+
+  saveSteps(): void {
+    const detail = this.detail();
+    if (!detail) return;
+    // prázdne riadky (napr. pridané omylom) sa neukladajú
+    const steps = this.stepsDraft
+      .filter((step) => step.title.trim() || step.description.trim())
+      .map((step) => ({ id: step.id ?? undefined, title: step.title.trim(), description: step.description.trim() }));
+    if (steps.some((step) => !step.title)) {
+      this.stepsError.set('Každý krok potrebuje názov.');
+      return;
+    }
+    this.store.saveActivities(detail.id, steps).subscribe({
+      next: () => {
+        this.editSection.set(null);
+        this.openDetail(detail.id);
+      },
+      error: (error) => this.stepsError.set(error?.error?.message ?? 'Kroky sa nepodarilo uložiť.')
+    });
+  }
+
+  newPositionName = '';
+
+  /** Nové miesto priamo pri procese smie založiť, kto smie meniť organizáciu. */
+  get canCreatePosition(): boolean {
+    return this.auth.can('organization:write');
+  }
+
+  createOwnerPosition(): void {
+    const name = this.newPositionName.trim();
+    if (!name) return;
+    this.positionsApi.create({ name }).subscribe({
+      next: (position) => {
+        this.positions.update((items) => [...items, position].sort((a, b) => a.name.localeCompare(b.name)));
+        this.ownerPositionDraft = position.id;
+        this.newPositionName = '';
+      },
+      error: (error) => this.store.error.set(error?.error?.message ?? 'Miesto sa nepodarilo vytvoriť.')
+    });
+  }
+
+  /** Povinné údaje, ktoré chýbajú na publikovanie (#28). */
+  missingRequired(): Array<{ key: string; label: string }> {
+    return (this.detail()?.readiness ?? []).filter((item) => item.required && !item.ok);
+  }
+
+  missingRecommended(): Array<{ key: string; label: string }> {
+    return (this.detail()?.readiness ?? []).filter((item) => !item.required && !item.ok);
+  }
+
   // --- #27 verzie procesu ---
 
   readonly viewMode = signal<'draft' | 'effective'>('draft');
@@ -451,9 +532,10 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.store.updateProcess(detail.id, {
       name: detail.name,
       purpose: detail.purpose,
-      risks: detail.risks,
+      trigger: detail.trigger ?? '',
+      outcome: detail.outcome ?? '',
       descriptionText: detail.descriptionText,
-      status: detail.status,
+      // stav sa neposiela — počíta ho server z publikovaných verzií (#27)
       parentId: detail.parentId ?? null,
       relatedProcessIds: detail.relatedProcessIds ?? [],
       positionIds: detail.positionIds ?? [],

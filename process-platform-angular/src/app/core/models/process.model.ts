@@ -7,6 +7,12 @@ export interface ProcessNode {
   owner?: string;
   status?: string;
   publication?: ProcessPublication;
+  /** #28 — rýchly proces */
+  trigger?: string;
+  outcome?: string;
+  activities?: ProcessActivity[];
+  /** čo chýba na publikovanie; povinné blokujú, odporúčané len upozornia */
+  readiness?: Array<{ key: string; label: string; ok: boolean; required: boolean }>;
   revision?: string;
   purpose?: string;
   risks?: string;
@@ -50,6 +56,13 @@ export interface ProcessDetail extends ProcessNode {
   version?: ProcessVersionMeta;
   /** dokumenty v publikovanej verzii (stav pri publikovaní) */
   documents?: Array<{ id: string; name: string }>;
+}
+
+/** #28 — krok procesu (lineárny zoznam). */
+export interface ProcessActivity {
+  id: string;
+  title: string;
+  description?: string;
 }
 
 /** #27 — stav publikovania procesu, počíta ho server z verzií. */
