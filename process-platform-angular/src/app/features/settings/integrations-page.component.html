@@ -12,8 +12,13 @@
   <p class="ok">Nastavenia boli ulozene.</p>
 }
 
+@if (!auth.can('organization:write')) {
+  <p class="muted">Nastavenia integrácií môže meniť len vlastník alebo administrátor firmy.</p>
+}
+
 <section class="integrations-grid">
   <form class="panel" (ngSubmit)="save()">
+    <fieldset [disabled]="!auth.can('organization:write')">
     <h3>Prekladova sluzba</h3>
     <label class="check-row">
       <input type="checkbox" name="autoTranslate" [(ngModel)]="model.autoTranslate">
@@ -39,6 +44,7 @@
     </label>
     <p class="muted">Kluc sa uklada zasifrovany (AES-256-GCM). Prelozi sa nazov a dokumentacia procesu.</p>
     <button class="primary" type="submit">Ulozit nastavenia</button>
+    </fieldset>
   </form>
 
   <section class="panel">

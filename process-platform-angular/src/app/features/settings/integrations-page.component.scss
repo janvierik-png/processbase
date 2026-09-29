@@ -60,3 +60,11 @@ label {
 .ok {
   color: var(--green);
 }
+
+// fieldset len pre zablokovanie formulara (B7) — bez vlastneho vzhladu
+fieldset {
+  display: contents;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}

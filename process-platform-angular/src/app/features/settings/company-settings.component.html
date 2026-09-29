@@ -3,11 +3,13 @@
     <p class="error">{{ error() }}</p>
   }
 
+  @if (auth.can('organization:write')) {
   <form class="panel" (ngSubmit)="saveCompanyName()">
     <h2>Nastavenia firmy</h2>
     <label>Nazov spolocnosti <input name="companyName" [(ngModel)]="companyName"></label>
     <button class="primary" type="submit">Ulozit organizaciu</button>
   </form>
+  }
 
   <section class="panel">
     <h2>Organizacna struktura a integracie</h2>
@@ -15,18 +17,20 @@
     <a class="settings-link" routerLink="/app/settings/integrations">Automaticky preklad (DeepL / Google) →</a>
   </section>
 
+  @if (auth.can('user:invite')) {
   <form class="panel" (ngSubmit)="sendInvite()">
     <h2>Pozvat spolupracovnika</h2>
     <label>Email <input name="inviteEmail" type="email" [(ngModel)]="invite.email" required></label>
     <label>Rola
       <select name="inviteRole" [(ngModel)]="invite.roleId">
-        @for (role of roles; track role.id) {
+        @for (role of invitableRoles(); track role.id) {
           <option [value]="role.id">{{ role.name }}</option>
         }
       </select>
     </label>
     <button class="primary" type="submit">Vytvorit pozvanku</button>
   </form>
+  }
 
   <section class="panel">
     <h2>Pouzivatelia organizacie</h2>
@@ -47,6 +51,7 @@
     }
   </section>
 
+  @if (auth.can('user:invite')) {
   <section class="panel">
     <h2>Pozvanky</h2>
     @for (invitation of invitations(); track invitation.id) {
@@ -63,6 +68,7 @@
       <p>Zatial ziadne pozvanky.</p>
     }
   </section>
+  }
 
   <section class="panel">
     <h2>Pouzivatelske roly</h2>

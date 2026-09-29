@@ -22,7 +22,7 @@ export class IntegrationsPageComponent implements OnInit {
     apiKey: ''
   };
 
-  constructor(private readonly auth: AuthService) {}
+  constructor(readonly auth: AuthService) {}
 
   ngOnInit(): void {
     this.auth.translationSettings().subscribe({

@@ -24,6 +24,7 @@ import { OrgPosition } from '../../core/models/user.model';
 import { Camunda7Service } from '../../core/services/camunda7.service';
 import { DocumentService } from '../../core/services/document.service';
 import { StorageService } from '../../core/services/storage.service';
+import { AuthService } from '../../core/services/auth.service';
 
 type TreeRow = { node: ProcessNode; level: number; kind: 'process' | 'clause' | 'norm' };
 type PanelState = 'wide' | 'narrow' | 'hidden';
@@ -110,7 +111,8 @@ export class ProcessWorkspaceComponent implements OnInit {
     private readonly positionsApi: PositionService,
     private readonly storage: StorageService,
     private readonly route: ActivatedRoute,
-    private readonly router: Router
+    private readonly router: Router,
+    private readonly auth: AuthService
   ) {}
 
   ngOnInit(): void {
@@ -333,9 +335,28 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.treeSearch = '';
   }
 
+  /** B7 — co smie prihlaseny menit; server to kontroluje aj tak. */
+  get canWrite(): boolean {
+    return this.auth.can('process:write');
+  }
+
+  get canIso(): boolean {
+    return this.auth.can('process:write') || this.auth.can('iso:write');
+  }
+
   saveDetail(): void {
     const detail = this.detail();
     if (!detail) return;
+    const done = () => {
+      this.changeDescription = '';
+      this.editSection.set(null);
+      this.openDetail(detail.id);
+    };
+    // ISO auditor smie menit len ISO vazby — posielame len tie, inak by server odmietol celu zmenu
+    if (!this.canWrite) {
+      this.store.updateProcess(detail.id, { iso: detail.iso ?? [], changeDescription: this.changeDescription }, done);
+      return;
+    }
     this.store.updateProcess(detail.id, {
       name: detail.name,
       purpose: detail.purpose,

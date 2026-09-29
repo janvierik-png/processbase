@@ -5,6 +5,7 @@ import { RouterLink } from '@angular/router';
 import { JobDescriptionVersion, JobProfile, JobVersionStatus, OrgPosition, OrgUnit, Person, PositionHolder } from '../../core/models/user.model';
 import { OrganizationService } from '../../core/services/organization.service';
 import { PositionService } from '../../core/services/position.service';
+import { AuthService } from '../../core/services/auth.service';
 import { markdownToHtml } from '../../core/utils/markdown';
 import { flattenTree, subtreeIds } from '../../core/utils/tree';
 import { RichTextEditorComponent } from '../processes/components/rich-text-editor.component';
@@ -100,8 +101,14 @@ export class PositionsPageComponent implements OnInit {
 
   constructor(
     private readonly positionsApi: PositionService,
-    private readonly orgApi: OrganizationService
+    private readonly orgApi: OrganizationService,
+    private readonly auth: AuthService
   ) {}
+
+  /** B7 — meniť štruktúru smie len vlastník alebo admin (server to kontroluje aj tak). */
+  get canEdit(): boolean {
+    return this.auth.can('organization:write');
+  }
 
   ngOnInit(): void {
     this.reload();

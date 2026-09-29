@@ -6,6 +6,7 @@ import { Organization } from '../models/organization.model';
 import { Invitation, RoleId, TranslationSettings, User } from '../models/user.model';
 import { StorageService } from './storage.service';
 import { API_BASE_URL } from './api-url';
+import { DEFAULT_ROLES } from '../data/default-data';
 
 interface RegisterPayload {
   organizationName: string;
@@ -53,6 +54,17 @@ export class AuthService {
 
   currentOrganizationId(): string | null {
     return this.currentOrganizationSignal()?.id ?? null;
+  }
+
+  /**
+   * B7 — smie prihlásený používateľ danú akciu? Rovnaká matica ako na serveri
+   * (DEFAULT_ROLES); vlastník smie všetko. Server to kontroluje aj tak — toto
+   * len skrýva tlačidlá, ktoré by skončili chybou 403.
+   */
+  can(permission: 'organization:write' | 'user:invite' | 'process:write' | 'iso:write'): boolean {
+    const roleId = this.currentUserSignal()?.roleId;
+    if (roleId === 'owner') return true;
+    return DEFAULT_ROLES.find((role) => role.id === roleId)?.permissions.includes(permission) ?? false;
   }
 
   registerOwner(payload: RegisterPayload): void {

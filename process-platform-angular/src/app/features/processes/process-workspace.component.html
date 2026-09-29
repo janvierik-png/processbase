@@ -1,9 +1,9 @@
-<section class="process-layout" [class.panel-narrow]="panelState() === 'narrow'" [class.panel-hidden]="panelState() === 'hidden'">
+<section class="process-layout" [class.no-write]="!canWrite" [class.no-iso]="!canIso" [class.panel-narrow]="panelState() === 'narrow'" [class.panel-hidden]="panelState() === 'hidden'">
   <aside class="process-tree">
     <header class="tree-header">
       <h3>Strom procesov</h3>
       <div class="tree-header-actions">
-        <button type="button" class="icon-btn" title="Novy proces" (click)="store.createProcess()">
+        <button type="button" class="icon-btn write-action" title="Novy proces" (click)="store.createProcess()">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
         @if (norms().length > 0) {
@@ -59,10 +59,10 @@
           </svg>
           <button type="button" class="tree-select" (click)="select(row.node)">{{ row.node.name }}</button>
           <span class="tree-row-actions">
-            <button type="button" class="icon-btn" title="Premenovat" (click)="rename(row.node, $event)">
+            <button type="button" class="icon-btn write-action" title="Premenovat" (click)="rename(row.node, $event)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16z"/></svg>
             </button>
-            <button type="button" class="icon-btn danger" title="Vymazat" (click)="delete(row.node, $event)">
+            <button type="button" class="icon-btn danger write-action" title="Vymazat" (click)="delete(row.node, $event)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>
             </button>
           </span>
@@ -134,7 +134,7 @@
           <header class="card-head">
             <h3>Zakladne informacie</h3>
             @if (editSection() !== 'basic') {
-              <button type="button" class="ghost small" (click)="startEdit('basic')">Upravit</button>
+              <button type="button" class="ghost small write-action" (click)="startEdit('basic')">Upravit</button>
             }
           </header>
 
@@ -201,7 +201,7 @@
           <header class="card-head">
             <h3>Popis procesu</h3>
             @if (editSection() !== 'description') {
-              <button type="button" class="ghost small" (click)="startEdit('description')">Upravit</button>
+              <button type="button" class="ghost small write-action" (click)="startEdit('description')">Upravit</button>
             }
           </header>
 
@@ -249,7 +249,7 @@
           <header class="card-head">
             <h3>Vazby a zaradenie</h3>
             @if (editSection() !== 'relations') {
-              <button type="button" class="ghost small" (click)="startEdit('relations')">Upravit</button>
+              <button type="button" class="ghost small iso-action" (click)="startEdit('relations')">Upravit</button>
             }
           </header>
 
@@ -360,14 +360,14 @@
             <div class="relation-box">
               <h4>ISO vazby
                 @if (editSection() === 'relations') {
-                  <button type="button" class="small" (click)="detectIso()">Detekovat ISO</button>
+                  <button type="button" class="small iso-action" (click)="detectIso()">Detekovat ISO</button>
                 }
               </h4>
               <div class="chip-list">
                 @for (link of process.iso ?? []; track $index) {
                   <span class="chip">{{ link.standard }} — {{ link.clause }}
                     @if (editSection() === 'relations') {
-                      <button type="button" class="chip-remove" (click)="removeIsoLink($index)">×</button>
+                      <button type="button" class="chip-remove iso-action" (click)="removeIsoLink($index)">×</button>
                     }
                   </span>
                 } @empty {
@@ -401,7 +401,7 @@
             <h3>Dokumenty <span class="count">({{ documents().length }})</span></h3>
             <div class="upload-area">
               <span class="upload-limit">max. {{ maxUploadLabel }}</span>
-              <label class="upload-button" [class.busy]="uploading()">
+              <label class="upload-button write-action" [class.busy]="uploading()">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v10M8 9l4-4 4 4M5 19h14"/></svg>
                 {{ uploading() ? 'Nahrávam...' : 'Pridat' }}
                 <input type="file" (change)="uploadDocument($event)" [disabled]="uploading()">
@@ -432,8 +432,8 @@
                       <button type="button" class="doc-download" (click)="openPreview(document)" title="Zobrazit nahlad">Nahlad</button>
                     }
                     <a class="doc-download" [href]="documentUrl(document)" (click)="downloadDocument(document, $event)" title="Stiahnut">Stiahnut</a>
-                    <button type="button" class="ghost small" (click)="startDocumentEdit(document)">Premenovat</button>
-                    <button type="button" class="ghost small" (click)="deleteDocument(document)">Vymazat</button>
+                    <button type="button" class="ghost small write-action" (click)="startDocumentEdit(document)">Premenovat</button>
+                    <button type="button" class="ghost small write-action" (click)="deleteDocument(document)">Vymazat</button>
                   </div>
                 }
 
@@ -498,7 +498,7 @@
       }
 
       @if (tab() === 'bpmn') {
-        <div class="bpmn-actions">
+        <div class="bpmn-actions write-action">
           <span class="diagram-type-label">Typ diagramu:</span>
           <button type="button"
             [class.active]="(detail()?.diagramType ?? 'NONE') === 'NONE'"
@@ -513,8 +513,8 @@
           @if ((detail()?.diagramType ?? 'NONE') === 'BPMN') {
             <span class="divider">|</span>
             <button type="button" (click)="camundaDetailsOpen.set(!camundaDetailsOpen())">Camunda panel</button>
-            <button type="button" (click)="saveRevision()">Ulozit verziu</button>
-            <button type="button" (click)="deployToCamunda()">Camunda 7 deploy</button>
+            <button type="button" class="write-action" (click)="saveRevision()">Ulozit verziu</button>
+            <button type="button" class="write-action" (click)="deployToCamunda()">Camunda 7 deploy</button>
           }
         </div>
 

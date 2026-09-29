@@ -18,6 +18,12 @@ export class CompanySettingsComponent implements OnInit {
   readonly invitations = signal<Invitation[]>([]);
   readonly error = signal<string | null>(null);
   readonly roles = DEFAULT_ROLES;
+
+  /** Rolu vlastnika moze pridelit len vlastnik (server to kontroluje tiez). */
+  invitableRoles() {
+    return this.auth.currentUser()?.roleId === 'owner' ? this.roles : this.roles.filter((role) => role.id !== 'owner');
+  }
+
   companyName = this.organization()?.name ?? '';
   invite = { email: '', roleId: 'approver' as RoleId };
 
@@ -28,6 +34,8 @@ export class CompanySettingsComponent implements OnInit {
       next: (users) => this.users.set(users),
       error: () => this.error.set('Pouzivatelov sa nepodarilo nacitat.')
     });
+    // pozvanky obsahuju tokeny — server ich ukaze len tomu, kto smie pozyvat
+    if (!this.auth.can('user:invite')) return;
     this.auth.invitations().subscribe({
       next: (invitations) => this.invitations.set(invitations),
       error: () => this.error.set('Pozvanky sa nepodarilo nacitat.')

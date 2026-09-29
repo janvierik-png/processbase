@@ -335,3 +335,16 @@ button.small {
   .person-row { grid-template-columns: 1fr; }
   .row-actions { justify-content: flex-start; }
 }
+
+// B7 — bez opravnenia organization:write len na citanie
+.read-only .edit-only {
+  display: none !important;
+}
+
+.read-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.read-only .side:not(:has(> :not(.edit-only))) {
+  display: none;
+}

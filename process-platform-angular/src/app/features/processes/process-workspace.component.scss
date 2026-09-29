@@ -922,3 +922,9 @@ button.small {
 
   span { color: var(--ink-soft); }
 }
+
+// B7 — akcie, na ktore prihlaseny nema opravnenie, sa nezobrazuju (server ich aj tak odmietne)
+.no-write .write-action,
+.no-iso .iso-action {
+  display: none !important;
+}

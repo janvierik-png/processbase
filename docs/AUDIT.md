@@ -162,6 +162,18 @@ Na produkcii to **nebolo overované** (bez súhlasu sa na produkčný systém ne
 do `storage/secrets.json`), seed zakladá admina len ak žiadny neexistuje a bez hesla v kóde,
 zmena vlastného hesla v backoffice, limit pokusov aj pre backoffice a pozvánky.
 
+### B7 — Roly vo firme sa na serveri nekontrolovali · **Kritická** · `overené behom`
+
+Klient zobrazoval maticu rolí (`src/app/core/data/default-data.ts`), ale API ju nevynucovalo.
+Test `scripts/permissions-test.mjs` proti pôvodnému kódu: **9/25** — schvaľovateľ (rola len na
+čítanie) proces zmazal (204), pozval nového **vlastníka** (201), zmenil API kľúč prekladu a videl
+tokeny všetkých pozvánok (mohol tak prijať pozvánku určenú pre admina). Admin mohol cez pozvánku
+vytvoriť účet vlastníka.
+
+**Oprava:** pravidlá oprávnení nad všetkými zapisujúcimi volaniami (fail-closed — nový endpoint
+bez pravidla sa odmietne), rola sa číta z členstva pri každej požiadavke, rolu vlastníka prideľuje
+len vlastník, zoznam pozvánok len s oprávnením pozývať. UI skrýva nedostupné akcie. Test 25/25.
+
 ### Realistické tvrdenie o prístupe prevádzkovateľa
 
 > **Prevádzkovateľ má dnes technicky plný prístup k obsahu procesov aj k osobným údajom.**
@@ -244,9 +256,10 @@ Každá zmena je overená na lokálnom Dockeri a naviazaná na GitHub issue (`Fi
 | 4 — Backoffice: spotreba plánu, stav služby, audit zásahov | `2626058` | #17, #18 | `scripts/backoffice-test.mjs` 19/19 — agregáty bez obsahu zákazníka (test hľadá názvy procesu/osoby/dokumentu v odpovediach), zmena plánu a prihlásenia v audite, bez hesiel |
 | 5 — CI na GitHube | `b1e3afa` | #22 | prvý beh [úspešný](https://github.com/janvierik-png/processbase/actions/runs/36497855629): typy, produkčný build, testy API proti PostgreSQL 16, build backoffice |
 | 5 — Overenie e-mailu a obnova hesla (bez doručovania) | `af3ae76` | #20 | `scripts/account-flows-test.mjs` 19/19 — jednorazové a expirujúce odkazy, obnova odhlási všade, odpoveď neprezradí existenciu účtu |
-| 5 — Produkčné nasadenie (pripravené, nenasadené) | *(commit nasadenia)* | #23 (posúdenie) | `deploy/` + [DEPLOYMENT.md](DEPLOYMENT.md); lokálne overené: SPA z API, `/api/backoffice` na verejnom porte 404, backoffice na vlastnom porte; obraz stavia a testuje CI |
+| 5 — Produkčné nasadenie (pripravené, nenasadené) | `f18430e` | #23 (posúdenie) | `deploy/` + [DEPLOYMENT.md](DEPLOYMENT.md); lokálne overené: SPA z API, `/api/backoffice` na verejnom porte 404, backoffice na vlastnom porte; obraz stavia a testuje CI |
+| — Oprávnenia podľa roly | *(commit B7)* | B7 | `scripts/permissions-test.mjs` 25/25 (pôvodný kód 9/25) |
 
-**Stav nálezov:** B1, B2 — opravené (Etapa 1, doplnené o odkazované ID, autora zmien a pozvánky). B4 — hlavičky a rate limit doplnené, `cors`
+**Stav nálezov:** B7 — opravené. B1, B2 — opravené (Etapa 1, doplnené o odkazované ID, autora zmien a pozvánky). B4 — hlavičky a rate limit doplnené, `cors`
 zostáva otvorený (rieši sa pri produkčných nastaveniach). B5 — oddelené úložisko hotové,
 inline zobrazenie len pre PDF; antivírus (#11) zatiaľ odložený rozhodnutím zadávateľa.
 B3, B6 — opravené (#19).

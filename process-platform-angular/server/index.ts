@@ -195,6 +195,105 @@ app.use('/api', async (request, response, next) => {
   }
 });
 
+/**
+ * Opravnenia podla roly vo firme (B7). Rovnaka matica, akou klient popisuje
+ * roly (src/app/core/data/default-data.ts); vlastnik smie vsetko.
+ * Citat moze kazdy clen firmy — pravidla su len pre zapis.
+ */
+type Permission = 'organization:write' | 'user:invite' | 'process:write' | 'iso:write';
+
+const ROLE_PERMISSIONS: Record<OrganizationRole, Permission[]> = {
+  [OrganizationRole.OWNER]: ['organization:write', 'user:invite', 'process:write', 'iso:write'],
+  [OrganizationRole.ADMIN]: ['organization:write', 'user:invite', 'process:write', 'iso:write'],
+  [OrganizationRole.MANAGER]: ['process:write', 'iso:write'], // manazer kvality
+  [OrganizationRole.MODELER]: [], // schvalovatel — cita a schvaluje
+  [OrganizationRole.AUDITOR]: ['iso:write'], // ISO auditor
+  [OrganizationRole.VIEWER]: []
+};
+
+function hasPermission(request: express.Request, permission: Permission): boolean {
+  return ROLE_PERMISSIONS[auth(request).role]?.includes(permission) ?? false;
+}
+
+/** Uprava procesu, ktora meni len ISO vazby — smie ju aj ISO auditor. */
+function isIsoOnlyPatch(body: unknown): boolean {
+  const keys = Object.keys((body ?? {}) as object);
+  return keys.length > 0 && keys.every((key) => key === 'iso' || key === 'changeDescription');
+}
+
+type PermissionRule = {
+  methods: string[];
+  pattern: RegExp;
+  /** staci jedno z opravneni */
+  anyOf: Permission[] | ((request: express.Request) => Permission[]);
+};
+
+const PERMISSION_RULES: PermissionRule[] = [
+  // procesy, dokumenty, verzie, nasadenie
+  { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/processes$/, anyOf: ['process:write'] },
+  {
+    methods: ['PATCH'],
+    pattern: /^\/api\/processes\/[^/]+$/,
+    anyOf: (request) => (isIsoOnlyPatch(request.body) ? ['process:write', 'iso:write'] : ['process:write'])
+  },
+  { methods: ['DELETE'], pattern: /^\/api\/processes\/[^/]+$/, anyOf: ['process:write'] },
+  { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/(documents|revisions|camunda7\/deploy)$/, anyOf: ['process:write'] },
+  { methods: ['POST'], pattern: /^\/api\/camunda7\/deploy$/, anyOf: ['process:write'] },
+  { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/iso-detect$/, anyOf: ['process:write', 'iso:write'] },
+  { methods: ['PATCH', 'DELETE'], pattern: /^\/api\/documents\/[^/]+$/, anyOf: ['process:write'] },
+
+  // firma, pozvanky (aj ich citanie — obsahuju tokeny), nastavenia
+  { methods: ['PATCH'], pattern: /^\/api\/organizations\/[^/]+$/, anyOf: ['organization:write'] },
+  { methods: ['GET', 'POST'], pattern: /^\/api\/organizations\/[^/]+\/invitations$/, anyOf: ['user:invite'] },
+  { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/settings\/translation$/, anyOf: ['organization:write'] },
+
+  // organizacna struktura (#12–#16)
+  { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/(units|positions|people|job-profiles)$/, anyOf: ['organization:write'] },
+  {
+    methods: ['PATCH', 'DELETE'],
+    pattern: /^\/api\/(units|positions|people|assignments|job-profiles|job-description-versions)\/[^/]+$/,
+    anyOf: ['organization:write']
+  },
+  {
+    methods: ['POST'],
+    pattern: /^\/api\/(people\/[^/]+\/leave|positions\/[^/]+\/assignments|job-profiles\/[^/]+\/versions|job-description-versions\/[^/]+\/publish)$/,
+    anyOf: ['organization:write']
+  }
+];
+
+/** Zapis bez pravidla, ktory smie kazdy prihlaseny (vlastna relacia a ucet). */
+const SELF_SERVICE_WRITES = [/^\/api\/logout$/, /^\/api\/auth\/resend-verification$/];
+
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+app.use('/api', (request, response, next) => {
+  const context = (request as any).auth as AuthContext | undefined;
+  if (!context) {
+    next(); // verejne routy a backoffice (vlastny guard)
+    return;
+  }
+  const fullPath = request.baseUrl + request.path;
+  const rule = PERMISSION_RULES.find((item) => item.methods.includes(request.method) && item.pattern.test(fullPath));
+
+  if (!rule) {
+    // fail-closed: novy zapisujuci endpoint bez pravidla sa odmietne, kym sa nedoplni
+    if (WRITE_METHODS.has(request.method) && !SELF_SERVICE_WRITES.some((pattern) => pattern.test(fullPath))) {
+      console.error(`[opravnenia] chyba pravidlo pre ${request.method} ${fullPath}`);
+      response.status(403).json({ message: 'Na tuto akciu nemate opravnenie.' });
+      return;
+    }
+    next();
+    return;
+  }
+
+  const anyOf = typeof rule.anyOf === 'function' ? rule.anyOf(request) : rule.anyOf;
+  if (!anyOf.some((permission) => hasPermission(request, permission))) {
+    response.status(403).json({ message: 'Na tuto akciu nemate opravnenie.' });
+    return;
+  }
+  next();
+});
+
 type Responsibility = { id: string; name: string; role: string; holders: string[]; vacant: boolean };
 
 type ProcessTreeNode = {
@@ -1119,7 +1218,7 @@ async function createSession(userId: string, organizationId: string): Promise<st
   return token;
 }
 
-type AuthContext = { userId: string; organizationId: string; sessionId: string };
+type AuthContext = { userId: string; organizationId: string; sessionId: string; role: OrganizationRole };
 
 async function resolveSession(request: express.Request): Promise<AuthContext | null> {
   const header = request.headers.authorization ?? '';
@@ -1138,7 +1237,14 @@ async function resolveSession(request: express.Request): Promise<AuthContext | n
     .update({ where: { id: session.id }, data: { lastSeenAt: new Date() } })
     .catch(() => undefined);
 
-  return { userId: session.userId, organizationId: session.organizationId, sessionId: session.id };
+  // rola vo firme (B7) — ak clenstvo medzitym zaniklo, relacia uz neplati
+  const membership = await prisma.organizationUser.findUnique({
+    where: { organizationId_userId: { organizationId: session.organizationId, userId: session.userId } },
+    select: { role: true }
+  });
+  if (!membership) return null;
+
+  return { userId: session.userId, organizationId: session.organizationId, sessionId: session.id, role: membership.role };
 }
 
 /** Prihlaseny kontext poziadavky. Nastavuje ho requireAuth. */
@@ -1638,6 +1744,11 @@ app.post('/api/organizations/:organizationId/invitations', async (request, respo
     const { email, roleId } = request.body ?? {};
     if (!email) {
       throw new HttpError(400, 'email je povinny');
+    }
+    // rolu vlastnika moze pridelit len vlastnik — admin by si inak cez pozvanku
+    // vytvoril ucet s vyssimi pravami, nez ma sam
+    if (roleId === 'owner' && auth(request).role !== OrganizationRole.OWNER) {
+      throw new HttpError(403, 'Rolu vlastnika moze pridelit len vlastnik firmy.');
     }
     const organization = await prisma.organization.findUnique({ where: { id: orgScope(request) } });
     if (!organization) {
