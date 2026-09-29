@@ -10,6 +10,7 @@
       <div class="crumbs" aria-hidden="true"><span>ISO</span><span>BPMN</span><span>Camunda 7</span></div>
     </div>
     <div class="header-actions">
+      <a routerLink="/bpmn-modeler" class="btn btn-ghost">Bezplatný BPMN modeler</a>
       <button type="button" class="btn btn-ghost" (click)="openModal('login')">Prihlásiť sa</button>
       <button type="button" class="btn btn-primary" (click)="openModal('register')">Registrácia</button>
     </div>
@@ -30,7 +31,7 @@
           Začať zadarmo
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </button>
-        <a href="#cennik" class="btn btn-ghost btn-lg">Pozrieť cenník</a>
+        <a routerLink="/bpmn-modeler" class="btn btn-ghost btn-lg">Nakresliť BPMN bez registrácie</a>
       </div>
       <div class="trust-row">
         <div class="trust-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>ISO väzby a audit</div>
@@ -61,7 +62,7 @@
         <div class="feature-card">
           <span class="feature-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
           <h3>ISO väzby</h3>
-          <p>Prepojte procesy s požiadavkami ISO noriem a majte prehľad pripravený na audit.</p>
+          <p>Prepojte procesy s témami ISO noriem a pripravujte podklady pre audit kvality. Certifikáciu udeľuje certifikačný orgán, nie aplikácia.</p>
         </div>
         <div class="feature-card">
           <span class="feature-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg></span>
@@ -81,15 +82,15 @@
       </div>
       <div class="pricing-grid">
         <article class="plan-card">
-          <p class="plan-name">Starter</p>
-          <div class="plan-price"><span class="amount">0&nbsp;€</span><span class="period">/ testovanie</span></div>
-          <p class="plan-desc">Na vyskúšanie, bez záväzkov.</p>
+          <p class="plan-name">Free</p>
+          <div class="plan-price"><span class="amount">0&nbsp;€</span><span class="period">/ bez registrácie</span></div>
+          <p class="plan-desc">Bezplatný BPMN modeler postavený na bpmn-js.</p>
           <ul class="plan-features">
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Procesy a BPMN editor</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Revízie procesov</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Základné exporty</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Kreslenie BPMN 2.0 diagramov</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Otvorenie a stiahnutie .bpmn</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Export SVG, diagram ostáva vo vašom počítači</li>
           </ul>
-          <button type="button" class="btn btn-ghost btn-block" (click)="openModal('register', 'Starter')">Vyskúšať zadarmo</button>
+          <a routerLink="/bpmn-modeler" class="btn btn-ghost btn-block">Otvoriť modeler</a>
         </article>
 
         <article class="plan-card featured">
@@ -100,7 +101,7 @@
           <ul class="plan-features">
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Viac používateľov a pozvánky</li>
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Role a oprávnenia</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Prílohy a ISO šablóny</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Súkromné prílohy s kapacitou úložiska</li>
           </ul>
           <button type="button" class="btn btn-primary btn-block" (click)="openModal('register', 'Business')">Vybrať Business</button>
         </article>
@@ -112,7 +113,7 @@
           <ul class="plan-features">
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Camunda 7 konektor</li>
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Audit a vlastné preklady</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Backoffice prístup</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Individuálna kapacita úložiska</li>
           </ul>
           <button type="button" class="btn btn-ghost btn-block" (click)="openModal('register', 'Enterprise')">Kontaktovať nás</button>
         </article>

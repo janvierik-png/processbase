@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:vendor="http://example.test/schema/vendor"
+                  id="Definitions_Objednavka" targetNamespace="http://example.test/bpmn">
+  <bpmn:collaboration id="Collaboration_1">
+    <bpmn:participant id="Participant_Firma" name="Firma &amp; partneri" processRef="Process_Objednavka" />
+  </bpmn:collaboration>
+  <bpmn:process id="Process_Objednavka" name="Spracovanie objednávky" isExecutable="true">
+    <bpmn:laneSet id="LaneSet_1">
+      <bpmn:lane id="Lane_Obchod" name="Obchodné oddelenie">
+        <bpmn:flowNodeRef>Start_Prijata</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Kontrola</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Sklad</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Sklad" name="Sklad">
+        <bpmn:flowNodeRef>Task_Expedicia</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_Odoslana</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_Zamietnuta</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Prijata" name="Objednávka prijatá">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Kontrola" name="Skontrolovať objednávku &lt;do 24 h&gt;" camunda:assignee="obchodnik" vendor:priority="high">
+      <bpmn:documentation>Overiť zákazníka, cenu a dostupnosť. Špeciálne znaky: ľščťžýáíé „úvodzovky“ &amp; &lt;tagy&gt;.</bpmn:documentation>
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="sla" value="24h" />
+        </camunda:properties>
+        <vendor:note>neznámy rozširujúci prvok iného nástroja</vendor:note>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_Sklad" name="Tovar na sklade?">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Ano</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Nie</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_Expedicia" name="Expedovať tovar">
+      <bpmn:incoming>Flow_Ano</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Odoslana" name="Objednávka odoslaná">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_Zamietnuta" name="Objednávka zamietnutá">
+      <bpmn:incoming>Flow_Nie</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_Prijata" targetRef="Task_Kontrola" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Kontrola" targetRef="Gateway_Sklad" />
+    <bpmn:sequenceFlow id="Flow_Ano" name="áno" sourceRef="Gateway_Sklad" targetRef="Task_Expedicia">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${naSklade}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Nie" name="nie" sourceRef="Gateway_Sklad" targetRef="End_Zamietnuta" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Expedicia" targetRef="End_Odoslana" />
+    <bpmn:textAnnotation id="Annotation_1">
+      <bpmn:text>Kontrolu robí služobne najstarší obchodník.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_1" sourceRef="Task_Kontrola" targetRef="Annotation_1" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_1">
+    <bpmndi:BPMNPlane id="Plane_1" bpmnElement="Collaboration_1">
+      <bpmndi:BPMNShape id="Participant_Firma_di" bpmnElement="Participant_Firma" isHorizontal="true">
+        <dc:Bounds x="120" y="60" width="860" height="380" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Obchod_di" bpmnElement="Lane_Obchod" isHorizontal="true">
+        <dc:Bounds x="150" y="60" width="830" height="190" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Sklad_di" bpmnElement="Lane_Sklad" isHorizontal="true">
+        <dc:Bounds x="150" y="250" width="830" height="190" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Prijata_di" bpmnElement="Start_Prijata">
+        <dc:Bounds x="202" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="176" y="175" width="88" height="27" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Kontrola_di" bpmnElement="Task_Kontrola">
+        <dc:Bounds x="290" y="110" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Sklad_di" bpmnElement="Gateway_Sklad" isMarkerVisible="true">
+        <dc:Bounds x="465" y="125" width="50" height="50" />
+        <bpmndi:BPMNLabel><dc:Bounds x="447" y="95" width="86" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Expedicia_di" bpmnElement="Task_Expedicia">
+        <dc:Bounds x="570" y="300" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Odoslana_di" bpmnElement="End_Odoslana">
+        <dc:Bounds x="752" y="322" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Zamietnuta_di" bpmnElement="End_Zamietnuta">
+        <dc:Bounds x="752" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Annotation_1_di" bpmnElement="Annotation_1">
+        <dc:Bounds x="300" y="210" width="180" height="30" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="238" y="150" /><di:waypoint x="290" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="410" y="150" /><di:waypoint x="465" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Ano_di" bpmnElement="Flow_Ano">
+        <di:waypoint x="490" y="175" /><di:waypoint x="490" y="340" /><di:waypoint x="570" y="340" />
+        <bpmndi:BPMNLabel><dc:Bounds x="496" y="255" width="18" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Nie_di" bpmnElement="Flow_Nie">
+        <di:waypoint x="515" y="150" /><di:waypoint x="752" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="690" y="340" /><di:waypoint x="752" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_1_di" bpmnElement="Association_1">
+        <di:waypoint x="350" y="190" /><di:waypoint x="350" y="210" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

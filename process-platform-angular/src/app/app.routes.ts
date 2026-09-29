@@ -6,6 +6,11 @@ export const appRoutes: Routes = [
     path: '',
     loadComponent: () => import('./features/landing/landing-page.component').then((m) => m.LandingPageComponent)
   },
+  // #24 FREE-01 — bezplatný BPMN modeler, bez prihlásenia
+  {
+    path: 'bpmn-modeler',
+    loadComponent: () => import('./features/free-modeler/free-modeler-page.component').then((m) => m.FreeModelerPageComponent)
+  },
   // #20 — odkazy z e-mailov (bez prihlásenia)
   {
     path: 'overenie-emailu',

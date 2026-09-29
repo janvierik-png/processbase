@@ -1,0 +1,70 @@
+<div class="modeler-page">
+  <header class="topbar">
+    <a routerLink="/" class="brand" title="Process Base — úvod">
+      <span class="logo">P</span>
+      <span class="brand-text">Process Base</span>
+    </a>
+    <div class="title">
+      <h1>Bezplatný BPMN modeler</h1>
+      <span class="subtitle">postavený na bpmn-js · bez registrácie</span>
+    </div>
+
+    <div class="toolbar" role="toolbar" aria-label="Práca s diagramom">
+      <button type="button" (click)="newDiagram()" title="Nový prázdny diagram">Nový</button>
+      <button type="button" (click)="chooseFile()" title="Otvoriť .bpmn alebo .xml z počítača">Otvoriť…</button>
+      <input #fileInput type="file" accept=".bpmn,.xml,application/xml,text/xml" hidden (change)="onFileSelected($event)">
+      <label class="file-name" title="Názov súboru pri stiahnutí">
+        <span class="sr-only">Názov súboru</span>
+        <input type="text" [value]="fileName()" (change)="renameFile($any($event.target).value)" spellcheck="false">
+      </label>
+      <button type="button" class="primary" (click)="downloadBpmn()" title="Stiahnuť BPMN 2.0 XML do počítača">
+        Stiahnuť .bpmn
+        @if (dirty()) {
+          <span class="dot" title="Neuložené zmeny" aria-label="neuložené zmeny"></span>
+        }
+      </button>
+      <button type="button" (click)="downloadSvg()" title="Vektorový obrázok diagramu">Export SVG</button>
+      <span class="sep"></span>
+      <button type="button" (click)="fitViewport()" title="Zobraziť celý diagram">Celý diagram</button>
+      <button type="button" [class.active]="propertiesOpen()" (click)="toggleProperties()" title="Vlastnosti vybraného prvku">Vlastnosti</button>
+    </div>
+  </header>
+
+  @if (message(); as note) {
+    <p class="message" [class]="'message ' + note.kind" role="status">
+      {{ note.text }}
+      <button type="button" class="close" (click)="message.set(null)" aria-label="Zavrieť">×</button>
+    </p>
+  }
+  @if (restoredAt()) {
+    <p class="message info" role="status">
+      Pokračujete v rozpracovanom diagrame z tohto prehliadača.
+      <button type="button" class="link" (click)="discardRestored()">Začať nový</button>
+    </p>
+  }
+
+  <main class="workspace" [class.with-properties]="propertiesOpen()">
+    <!-- plátno bez prekrytí: znak bpmn.io vpravo dole musí ostať plne viditeľný (licencia bpmn-js) -->
+    <div class="canvas-wrap" [class.drag-over]="dragOver()"
+         (dragover)="onDragOver($event)" (dragleave)="onDragLeave()" (drop)="onDrop($event)">
+      <div #canvas class="canvas"></div>
+      @if (dragOver()) {
+        <div class="drop-hint">Pustite súbor .bpmn sem</div>
+      }
+    </div>
+    <aside #properties class="properties" [attr.aria-hidden]="!propertiesOpen()"></aside>
+  </main>
+
+  <footer class="footer">
+    <span>Diagram sa neposiela na server — otvára sa aj ukladá vo vašom počítači; rozpracovaná kópia je len v tomto prehliadači.</span>
+    <span class="upsell">
+      @if (auth.isAuthenticated()) {
+        <a routerLink="/app/processes">Späť do Process Base</a>
+      } @else {
+        Chcete z diagramu proces s vlastníkom, verziami a prístupom pre kolegov?
+        <a routerLink="/" fragment="cennik">Vyskúšajte Process Base</a>
+      }
+    </span>
+    <a href="https://bpmn.io/license/" target="_blank" rel="noopener noreferrer">Licencia bpmn.io</a>
+  </footer>
+</div>
