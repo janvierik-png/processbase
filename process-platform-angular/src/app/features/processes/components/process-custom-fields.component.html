@@ -1,0 +1,66 @@
+<!-- #45 — vlastné polia firmy -->
+@if (visibleFields().length > 0) {
+  <section class="card custom-fields-card">
+    <header class="card-head">
+      <h3>Ďalšie údaje</h3>
+      @if (!readOnly && !editing) {
+        <button type="button" class="ghost small" (click)="startEdit()">Upraviť</button>
+      }
+    </header>
+    @if (editing) {
+      <form class="card-body edit-grid" (ngSubmit)="save()">
+        @for (field of visibleFields(); track field.id) {
+          @if (field.type === 'checkbox') {
+            <label class="check-row" [class.wide]="true">
+              <input type="checkbox" [name]="'cf-' + field.id" [attr.aria-label]="field.label" [(ngModel)]="draft[field.id]" [disabled]="field.archived && draft[field.id] !== true">
+              {{ field.label }}{{ field.required ? ' *' : '' }}
+            </label>
+          } @else {
+            <label [class.wide]="field.type === 'longText'">
+              <span>{{ field.label }}{{ field.required ? ' *' : '' }}{{ field.archived ? ' (pole sa už nepoužíva — len vymazať)' : '' }}</span>
+              @switch (field.type) {
+                @case ('longText') {
+                  <textarea [name]="'cf-' + field.id" [attr.aria-label]="field.label" [(ngModel)]="draft[field.id]" rows="3" maxlength="5000" [readonly]="field.archived"></textarea>
+                }
+                @case ('number') {
+                  <input type="number" step="any" [name]="'cf-' + field.id" [attr.aria-label]="field.label" [(ngModel)]="draft[field.id]" [readonly]="field.archived">
+                }
+                @case ('date') {
+                  <input type="date" [name]="'cf-' + field.id" [attr.aria-label]="field.label" [(ngModel)]="draft[field.id]" [readonly]="field.archived">
+                }
+                @case ('select') {
+                  <select [name]="'cf-' + field.id" [attr.aria-label]="field.label" [(ngModel)]="draft[field.id]" [disabled]="field.archived">
+                    <option value="">—</option>
+                    @for (option of field.options; track option) {
+                      <option [value]="option">{{ option }}</option>
+                    }
+                  </select>
+                }
+                @default {
+                  <input [name]="'cf-' + field.id" [attr.aria-label]="field.label" [(ngModel)]="draft[field.id]" maxlength="500" [readonly]="field.archived">
+                }
+              }
+              @if (field.helpText) { <small class="muted-small">{{ field.helpText }}</small> }
+            </label>
+          }
+        }
+        <p class="muted-small wide">* povinné pred publikovaním — návrh sa dá uložiť aj bez nich.</p>
+        @if (error()) { <p class="error wide">{{ error() }}</p> }
+        <div class="edit-actions wide">
+          <button class="primary" type="submit">Uložiť</button>
+          <button type="button" (click)="editing = false">Zrušiť</button>
+        </div>
+      </form>
+    } @else {
+      <div class="card-body info-grid">
+        @for (field of visibleFields(); track field.id) {
+          <div [class.wide]="field.type === 'longText'">
+            <span class="label">{{ field.label }}{{ field.required ? ' *' : '' }}</span>
+            <p [class.missing]="missing(field)">{{ missing(field) ? 'Chýba — povinné pred publikovaním' : display(field) }}</p>
+            @if (field.archived) { <small class="muted-small">Pole firma už nepoužíva.</small> }
+          </div>
+        }
+      </div>
+    }
+  </section>
+}

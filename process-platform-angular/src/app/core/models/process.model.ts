@@ -32,6 +32,8 @@ export interface ProcessNode {
   evidenceRequirements?: string[];
   /** #43 — IT systémy, ktoré proces používa (názvy sú v zozname systémov firmy) */
   systemIds?: string[];
+  /** #45 — hodnoty vlastných polí firmy podľa ID poľa */
+  customFields?: Record<string, string | number | boolean>;
   positionIds?: string[];
   positions?: ProcessPositionRef[];
   /** #15 — miesto vlastnika procesu; owner je jeho dnesny drzitel */

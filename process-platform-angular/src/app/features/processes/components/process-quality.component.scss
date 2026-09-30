@@ -1,5 +1,13 @@
 :host { display: contents; }
 
+// rovnaký vzhľad karty ako v karte procesu (štýly workspace sa do komponentu nedostanú)
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
 .card-head {
   display: flex;
   align-items: center;
@@ -74,6 +82,9 @@
 }
 
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
+// #45 — povinné vlastné pole bez hodnoty
+.missing { color: var(--warn); }
+.edit-grid label > span { color: var(--muted); }
 .error { margin: 0; color: var(--warn); }
 .muted-small { color: var(--faint); font-size: 13px; }
 

@@ -4,11 +4,12 @@ import { RouterLink } from '@angular/router';
 import { DEFAULT_ROLES } from '../../core/data/default-data';
 import { Invitation, RoleId, User } from '../../core/models/user.model';
 import { AuthService } from '../../core/services/auth.service';
+import { ProcessFieldsPanelComponent } from './process-fields-panel.component';
 
 @Component({
   selector: 'pp-company-settings',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, ProcessFieldsPanelComponent],
   templateUrl: './company-settings.component.html',
   styleUrl: './company-settings.component.scss'
 })

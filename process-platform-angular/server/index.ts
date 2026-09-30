@@ -16,6 +16,7 @@ import {
   DocumentStatus,
   FeedbackKind,
   FeedbackStatus,
+  Prisma,
   RaciRole,
   ResponsibilityRole
 } from '../generated/prisma/client';
@@ -269,6 +270,11 @@ const PERMISSION_RULES: PermissionRule[] = [
   { methods: ['GET', 'POST'], pattern: /^\/api\/organizations\/[^/]+\/invitations$/, anyOf: ['user:invite'] },
   { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/settings\/translation$/, anyOf: ['organization:write'] },
 
+  // #45 — vlastne polia procesu definuje sprava firmy; hodnoty pri procese zapisuje editor (PATCH procesu)
+  { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/process-fields$/, anyOf: ['organization:write'] },
+  { methods: ['PUT'], pattern: /^\/api\/organizations\/[^/]+\/process-fields\/order$/, anyOf: ['organization:write'] },
+  { methods: ['PATCH', 'DELETE'], pattern: /^\/api\/process-fields\/[^/]+$/, anyOf: ['organization:write'] },
+
   // #43 — IT systemy: zaradit a upravit smie aj editor procesov, vyradit a zmazat len sprava firmy
   { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/systems$/, anyOf: ['organization:write', 'process:write'] },
   { methods: ['PATCH'], pattern: /^\/api\/systems\/[^/]+$/, anyOf: ['organization:write', 'process:write'] },
@@ -365,6 +371,7 @@ type ProcessTreeNode = {
   opportunities?: string;
   evidenceRequirements?: string[];
   systemIds?: string[];
+  customFields?: Record<string, CustomFieldValue>;
   positionIds?: string[];
   positions?: Responsibility[];
   isoSuggestions?: unknown;
@@ -590,6 +597,8 @@ function mapNode(node: any): ProcessTreeNode {
     evidenceRequirements: node.evidenceRequirements ?? [],
     // #43 — IT systemy procesu (nazvy dohlada klient zo zoznamu systemov firmy)
     systemIds: node.systemIds ?? [],
+    // #45 — vlastne polia firmy (nazvy poli su v nastaveniach firmy)
+    customFields: customFieldValues(node.customFields),
     positionIds: performers.map((item: any) => item.id),
     positions: performers,
     isoSuggestions: node.isoSuggestions ?? [],
@@ -816,9 +825,17 @@ function publicationInclude() {
     approvalRequests: {
       where: { status: ApprovalStatus.PENDING },
       select: { id: true, requestedById: true, createdAt: true, effectiveFrom: true, requestedBy: { select: { name: true } } }
-    }
+    },
+    // #45 — povinne vlastne polia firmy patria k minimu na publikovanie
+    organization: { select: { processFields: REQUIRED_FIELDS_SELECT } }
   };
 }
+
+const REQUIRED_FIELDS_SELECT = {
+  where: { required: true, archivedAt: null },
+  orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
+  select: { id: true, label: true, type: true }
+};
 
 // --- #27 CORE-01 verzie procesu: navrh vs. nemenna publikovana verzia ---
 
@@ -861,6 +878,8 @@ type ProcessSnapshot = {
   evidenceRequirements?: string[];
   /** #43 — IT systemy procesu (ID; nazov sa dohlada, aj archivovaneho systemu) */
   systemIds?: string[];
+  /** #45 — hodnoty vlastnych poli podla ID definicie (nazov pola sa dohlada) */
+  customFields?: Record<string, CustomFieldValue>;
   /** ID miest, nie mena — kto miesto zastava, sa odvodzuje z obsadenia v case */
   responsibilities: Array<{ positionId: string; role: string }>;
   documentIds: string[];
@@ -984,6 +1003,8 @@ function buildSnapshot(node: any): ProcessSnapshot {
       };
     }),
     ...controlledSnapshotFields(node),
+    // #45 — vlastne polia len ked su vyplnene (odtlacok starsich verzii sa nemeni)
+    ...(Object.keys(customFieldValues(node.customFields)).length > 0 ? { customFields: sortedFieldValues(customFieldValues(node.customFields)) } : {}),
     responsibilities,
     documentIds: documents.map((document: any) => document.id),
     documents
@@ -1031,7 +1052,14 @@ function publishReadiness(node: any): ReadinessItem[] {
     { key: 'owner', label: 'Vlastník — pracovné miesto, ktoré za proces zodpovedá', ok: Boolean(owner), required: true },
     { key: 'trigger', label: 'Spúšťač — kedy sa proces začína', ok: Boolean(node.trigger?.trim()), required: false },
     { key: 'outcome', label: 'Výsledok — čo proces prinesie', ok: Boolean(node.outcome?.trim()), required: false },
-    { key: 'ownerHeld', label: 'Miesto vlastníka niekto zastáva', ok: !owner || ownerHeld, required: false }
+    { key: 'ownerHeld', label: 'Miesto vlastníka niekto zastáva', ok: !owner || ownerHeld, required: false },
+    // #45 — povinne vlastne polia firmy
+    ...(node.organization?.processFields ?? []).map((field: any) => ({
+      key: `field:${field.id}`,
+      label: field.label,
+      ok: hasFieldValue(field, customFieldValues(node.customFields)[field.id]),
+      required: true
+    }))
   ];
 }
 
@@ -1140,6 +1168,7 @@ async function versionView(node: any, version: any, at: Date) {
     opportunities: snapshot.opportunities ?? '',
     evidenceRequirements: snapshot.evidenceRequirements ?? [],
     systemIds: snapshot.systemIds ?? [],
+    customFields: snapshot.customFields ?? {},
     trigger: snapshot.trigger ?? '',
     outcome: snapshot.outcome ?? '',
     activities,
@@ -1187,7 +1216,8 @@ async function loadDraftForPublication(request: express.Request, processId: stri
     include: {
       positions: true,
       attachments: { select: DOCUMENT_VERSION_SELECT },
-      activities: activityInclude()
+      activities: activityInclude(),
+      organization: { select: { processFields: REQUIRED_FIELDS_SELECT } }
     }
   });
   if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
@@ -1898,6 +1928,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     const systemIds = body.systemIds === undefined
       ? undefined
       : await resolveSystemLinks(current.organizationId, body.systemIds, current.systemIds ?? []);
+    // #45 — vlastne polia firmy; povinnost vyplnenia sa kontroluje az pri publikovani
+    const custom = body.customFields === undefined ? undefined : await mergeCustomFields(current.organizationId, current.customFields, body.customFields);
 
     const data = {
       name: body.name ?? undefined,
@@ -1915,7 +1947,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       sortOrder: body.sortOrder === undefined ? undefined : Number(body.sortOrder),
       relatedProcessIds: Array.isArray(body.relatedProcessIds) ? (body.relatedProcessIds as string[]) : undefined,
       ...controlled,
-      systemIds
+      systemIds,
+      customFields: custom ? (Object.keys(custom.values).length > 0 ? custom.values : Prisma.DbNull) : undefined
     };
 
     // R7: diff zmenenych poli pre audit log
@@ -1937,6 +1970,7 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     track('relatedProcessIds', current.relatedProcessIds, data.relatedProcessIds);
     track('isoLinks', current.isoLinks, data.isoLinks);
     for (const [field, value] of Object.entries(controlled)) track(field, (current as any)[field], value);
+    if (custom && custom.changes.to.length > 0) changedFields['vlastnePolia'] = custom.changes;
     if (systemIds && JSON.stringify([...(current.systemIds ?? [])].sort()) !== JSON.stringify(systemIds)) {
       // do auditu nazvy systemov v case zmeny
       changedFields['systemy'] = {
@@ -3726,6 +3760,256 @@ app.delete('/api/positions/:positionId', async (request, response, next) => {
   }
 });
 
+// --- #45 CFG-01 vlastne polia procesu ---
+
+type CustomFieldValue = string | number | boolean;
+const FIELD_TYPES = ['text', 'longText', 'number', 'date', 'select', 'checkbox'] as const;
+type FieldType = (typeof FIELD_TYPES)[number];
+const MAX_PROCESS_FIELDS = 40;
+const MAX_FIELD_OPTIONS = 50;
+
+/** Hodnoty vlastnych poli z DB (Json) — len objekt s jednoduchymi hodnotami. */
+function customFieldValues(value: unknown): Record<string, CustomFieldValue> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, CustomFieldValue] => ['string', 'number', 'boolean'].includes(typeof entry[1])));
+}
+
+/** Kluce zoradene — rovnaky obsah dava rovnaky odtlacok verzie. */
+function sortedFieldValues(values: Record<string, CustomFieldValue>): Record<string, CustomFieldValue> {
+  return Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function hasFieldValue(field: { type: string }, value: unknown): boolean {
+  if (field.type === 'checkbox') return value === true;
+  return value !== undefined && value !== null && value !== '';
+}
+
+/** Hodnota pola podla typu; null = pole bez hodnoty. */
+function parseFieldValue(field: { label: string; type: string; options: string[] }, raw: unknown): CustomFieldValue | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const fail = (message: string): never => { throw new HttpError(400, `${field.label}: ${message}`); };
+  switch (field.type as FieldType) {
+    case 'text':
+      return cleanText(raw, 500);
+    case 'longText':
+      return cleanText(raw, 5000);
+    case 'number': {
+      const number = typeof raw === 'number' ? raw : Number(String(raw).replace(',', '.').trim());
+      if (!Number.isFinite(number)) fail('zadajte číslo.');
+      return number;
+    }
+    case 'date': {
+      const text = String(raw).trim();
+      const parsed = new Date(`${text}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) fail('zadajte dátum (RRRR-MM-DD).');
+      return text;
+    }
+    case 'select': {
+      const text = String(raw).trim();
+      if (!field.options.includes(text)) fail(`vyberte jednu z možností (${field.options.join(', ')}).`);
+      return text;
+    }
+    case 'checkbox':
+      if (typeof raw !== 'boolean') fail('hodnota musí byť áno/nie.');
+      // nezaskrtnute = bez hodnoty (povinne zaskrtnutie = potvrdenie)
+      return raw ? true : null;
+    default:
+      return fail('neznámy typ poľa.');
+  }
+}
+
+function describeFieldValue(field: { type: string }, value: CustomFieldValue | undefined): string {
+  if (value === undefined) return '—';
+  if (field.type === 'checkbox') return value === true ? 'áno' : '—';
+  return String(value);
+}
+
+/**
+ * Zmena vlastnych poli z PATCH procesu: meni sa len poslane pole, null alebo
+ * prazdna hodnota ho vymaze. Pole inej firmy neexistuje (404); pole, ktore firma
+ * uz nepouziva, sa da len vymazat.
+ */
+async function mergeCustomFields(organizationId: string, current: unknown, input: unknown) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'customFields musí byť objekt { pole: hodnota }.');
+  const entries = Object.entries(input as Record<string, unknown>);
+  if (entries.length > MAX_PROCESS_FIELDS) throw new HttpError(400, 'Priveľa polí naraz.');
+  const fields = await prisma.processFieldDefinition.findMany({ where: { organizationId, id: { in: entries.map(([id]) => id) } } });
+  const byId = new Map(fields.map((field) => [field.id, field]));
+  const before = customFieldValues(current);
+  const next = { ...before };
+  const changes: { from: string[]; to: string[] } = { from: [], to: [] };
+  for (const [id, raw] of entries) {
+    const field = byId.get(id);
+    if (!field) throw new HttpError(404, 'Pole sa nenašlo.');
+    const value = parseFieldValue(field, raw);
+    if (value === null) delete next[id];
+    else {
+      if (field.archivedAt && next[id] !== value) throw new HttpError(400, `Pole „${field.label}“ už firma nepoužíva — hodnotu možno len vymazať.`);
+      next[id] = value;
+    }
+    if (before[id] !== next[id]) {
+      changes.from.push(`${field.label}: ${describeFieldValue(field, before[id])}`);
+      changes.to.push(`${field.label}: ${describeFieldValue(field, next[id])}`);
+    }
+  }
+  return { values: sortedFieldValues(next), changes };
+}
+
+function mapProcessField(field: any, usage = 0) {
+  return {
+    id: field.id,
+    label: field.label,
+    type: field.type,
+    options: field.options ?? [],
+    required: Boolean(field.required),
+    helpText: field.helpText ?? '',
+    sortOrder: field.sortOrder,
+    archived: Boolean(field.archivedAt),
+    /** kolko procesov (navrh) ma pole vyplnene */
+    usage
+  };
+}
+
+async function requireProcessField(request: express.Request, fieldId: string) {
+  const field = await prisma.processFieldDefinition.findFirst({ where: { id: fieldId, organizationId: orgScope(request) } });
+  if (!field) throw new HttpError(404, 'Pole sa nenašlo.');
+  return field;
+}
+
+function fieldOptions(value: unknown, type: string): string[] {
+  if (type !== 'select') return [];
+  if (!Array.isArray(value)) throw new HttpError(400, 'Pole s výberom potrebuje zoznam možností.');
+  const options = [...new Set(value.map((item) => cleanText(item, 120)).filter((item): item is string => Boolean(item)))];
+  if (options.length === 0) throw new HttpError(400, 'Pole s výberom potrebuje aspoň jednu možnosť.');
+  if (options.length > MAX_FIELD_OPTIONS) throw new HttpError(400, `Najviac ${MAX_FIELD_OPTIONS} možností.`);
+  return options;
+}
+
+/** Kolko procesov ma pole vyplnene — v navrhu; pri mazani aj vo verziach. */
+async function processFieldUsage(organizationId: string): Promise<Map<string, number>> {
+  const rows = await prisma.$queryRaw<Array<{ key: string; count: bigint }>>`
+    SELECT f.key, count(*) AS count FROM "ProcessNode" n, jsonb_object_keys(n."customFields") f(key)
+    WHERE n."organizationId" = ${organizationId} AND jsonb_typeof(n."customFields") = 'object'
+    GROUP BY f.key`;
+  return new Map(rows.map((row) => [row.key, Number(row.count)]));
+}
+
+async function fieldUsedInVersions(organizationId: string, fieldId: string): Promise<boolean> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT v.id FROM "ProcessVersion" v
+    WHERE v."organizationId" = ${organizationId} AND jsonb_typeof(v.snapshot->'customFields') = 'object'
+      AND v.snapshot->'customFields' ? ${fieldId}
+    LIMIT 1`;
+  return rows.length > 0;
+}
+
+app.get('/api/organizations/:organizationId/process-fields', async (request, response, next) => {
+  try {
+    const organizationId = orgScope(request);
+    const [fields, usage] = await Promise.all([
+      prisma.processFieldDefinition.findMany({ where: { organizationId }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }),
+      processFieldUsage(organizationId)
+    ]);
+    response.json(fields.map((field) => mapProcessField(field, usage.get(field.id) ?? 0)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/organizations/:organizationId/process-fields', async (request, response, next) => {
+  try {
+    const organizationId = orgScope(request);
+    const body = request.body ?? {};
+    const label = cleanText(body.label, 120);
+    if (!label) throw new HttpError(400, 'Zadajte názov poľa.');
+    const type = String(body.type ?? '');
+    if (!(FIELD_TYPES as readonly string[]).includes(type)) throw new HttpError(400, `Typ poľa: ${FIELD_TYPES.join(', ')}.`);
+    const count = await prisma.processFieldDefinition.count({ where: { organizationId, archivedAt: null } });
+    if (count >= MAX_PROCESS_FIELDS) throw new HttpError(400, `Firma môže mať najviac ${MAX_PROCESS_FIELDS} vlastných polí.`);
+    const clash = await prisma.processFieldDefinition.findFirst({ where: { organizationId, archivedAt: null, label: { equals: label, mode: 'insensitive' } } });
+    if (clash) throw new HttpError(409, `Pole „${label}“ už existuje.`);
+    const last = await prisma.processFieldDefinition.findFirst({ where: { organizationId }, orderBy: { sortOrder: 'desc' }, select: { sortOrder: true } });
+    const field = await prisma.processFieldDefinition.create({
+      data: {
+        organizationId,
+        label,
+        type,
+        options: fieldOptions(body.options, type),
+        required: body.required === true,
+        helpText: cleanText(body.helpText, 300),
+        sortOrder: (last?.sortOrder ?? -1) + 1
+      }
+    });
+    response.status(201).json(mapProcessField(field));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/organizations/:organizationId/process-fields/order', async (request, response, next) => {
+  try {
+    const organizationId = orgScope(request);
+    const ids = Array.isArray(request.body?.ids) ? request.body.ids : null;
+    if (!ids) throw new HttpError(400, 'ids musí byť zoznam polí v novom poradí.');
+    const owned = await prisma.processFieldDefinition.findMany({ where: { organizationId, id: { in: ids } }, select: { id: true } });
+    if (owned.length !== new Set(ids).size) throw new HttpError(404, 'Pole sa nenašlo.');
+    await prisma.$transaction(async (tx) => {
+      for (const [index, id] of (ids as string[]).entries()) await tx.processFieldDefinition.update({ where: { id }, data: { sortOrder: index } });
+    });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/process-fields/:fieldId', async (request, response, next) => {
+  try {
+    const field = await requireProcessField(request, request.params.fieldId);
+    const body = request.body ?? {};
+    // typ sa nemeni — existujuce hodnoty by prestali davat zmysel
+    if (body.type !== undefined && body.type !== field.type) throw new HttpError(400, 'Typ poľa sa nedá zmeniť — založte nové pole.');
+    const label = body.label === undefined ? undefined : cleanText(body.label, 120);
+    if (body.label !== undefined && !label) throw new HttpError(400, 'Zadajte názov poľa.');
+    if (label) {
+      const clash = await prisma.processFieldDefinition.findFirst({
+        where: { organizationId: field.organizationId, archivedAt: null, id: { not: field.id }, label: { equals: label, mode: 'insensitive' } }
+      });
+      if (clash) throw new HttpError(409, `Pole „${label}“ už existuje.`);
+    }
+    const updated = await prisma.processFieldDefinition.update({
+      where: { id: field.id },
+      data: {
+        label: label ?? undefined,
+        options: body.options === undefined ? undefined : fieldOptions(body.options, field.type),
+        required: typeof body.required === 'boolean' ? body.required : undefined,
+        helpText: body.helpText === undefined ? undefined : cleanText(body.helpText, 300),
+        archivedAt: typeof body.archived === 'boolean' ? (body.archived ? (field.archivedAt ?? new Date()) : null) : undefined
+      }
+    });
+    response.json(mapProcessField(updated, (await processFieldUsage(field.organizationId)).get(field.id) ?? 0));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Pole s hodnotami (v navrhu alebo vo verzii) sa nemaze — archivuje sa a hodnoty ostanu. */
+app.delete('/api/process-fields/:fieldId', async (request, response, next) => {
+  try {
+    const field = await requireProcessField(request, request.params.fieldId);
+    const used = ((await processFieldUsage(field.organizationId)).get(field.id) ?? 0) > 0 || await fieldUsedInVersions(field.organizationId, field.id);
+    if (used) {
+      const archived = await prisma.processFieldDefinition.update({ where: { id: field.id }, data: { archivedAt: field.archivedAt ?? new Date() } });
+      response.json({ ...mapProcessField(archived), message: 'Pole má hodnoty — je archivované, hodnoty v procesoch a verziách ostali.' });
+      return;
+    }
+    await prisma.processFieldDefinition.delete({ where: { id: field.id } });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // --- #43 GRAPH-01 IT systemy a dopad ich zmeny ---
 
 const MAX_SYSTEM_LINKS = 30;
@@ -4765,7 +5049,9 @@ app.get('/api/search', async (request, response, next) => {
       FROM "ProcessNode" n
       CROSS JOIN LATERAL (
         SELECT concat_ws(' ', n.name, n.code, n.description, n.trigger, n.outcome, n."descriptionText",
-          (SELECT string_agg(concat_ws(' ', a.title, a.description), ' ') FROM "ProcessActivity" a WHERE a."processNodeId" = n.id)) AS body
+          (SELECT string_agg(concat_ws(' ', a.title, a.description), ' ') FROM "ProcessActivity" a WHERE a."processNodeId" = n.id),
+          -- #45 — hodnoty vlastnych poli (bez ID poli)
+          (SELECT string_agg(f.value, ' ') FROM jsonb_each_text(CASE WHEN jsonb_typeof(n."customFields") = 'object' THEN n."customFields" ELSE '{}'::jsonb END) f)) AS body
       ) d
       WHERE n."organizationId" = ${organizationId} AND n.type = 'PROCESS'
         AND pb_search_vector(d.body) @@ to_tsquery('simple', ${tsquery})
@@ -4778,7 +5064,8 @@ app.get('/api/search', async (request, response, next) => {
       FROM "ProcessVersion" v
       CROSS JOIN LATERAL (
         SELECT concat_ws(' ', v.snapshot->>'name', v.snapshot->>'code', v.snapshot->>'purpose', v.snapshot->>'trigger', v.snapshot->>'outcome', v.snapshot->>'descriptionText',
-          (SELECT string_agg(concat_ws(' ', e->>'title', e->>'description'), ' ') FROM jsonb_array_elements(COALESCE(v.snapshot->'activities', '[]'::jsonb)) e)) AS body
+          (SELECT string_agg(concat_ws(' ', e->>'title', e->>'description'), ' ') FROM jsonb_array_elements(COALESCE(v.snapshot->'activities', '[]'::jsonb)) e),
+          (SELECT string_agg(f.value, ' ') FROM jsonb_each_text(CASE WHEN jsonb_typeof(v.snapshot->'customFields') = 'object' THEN v.snapshot->'customFields' ELSE '{}'::jsonb END) f)) AS body
       ) d
       WHERE v."organizationId" = ${organizationId}
         AND pb_search_vector(d.body) @@ to_tsquery('simple', ${tsquery})

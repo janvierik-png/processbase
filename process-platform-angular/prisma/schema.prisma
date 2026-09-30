@@ -121,6 +121,7 @@ model Organization {
   controlledDocuments ControlledDocument[]
   evidenceRecords    EvidenceRecord[]
   itSystems          ItSystem[]
+  processFields      ProcessFieldDefinition[]
 }
 
 /// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
@@ -258,6 +259,8 @@ model ProcessNode {
   evidenceRequirements String[]
   /// #43 — IT systemy, ktore proces pouziva (ID ItSystem vlastnej firmy)
   systemIds          String[]
+  /// #45 — hodnoty vlastnych poli firmy: { [ProcessFieldDefinition.id]: text | cislo | true/false }
+  customFields       Json?
   isoSuggestions     Json?
   translations       Json?
   camundaProcessKey  String?
@@ -905,4 +908,27 @@ model ItSystem {
   ownerPosition   OrgPosition? @relation(fields: [ownerPositionId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, name])
+}
+
+/// #45 CFG-01 — vlastne pole procesu, ktore si firma definuje v nastaveniach.
+/// Hodnoty su v ProcessNode.customFields a v snapshote verzie; pole s hodnotami sa nemaze, len archivuje.
+model ProcessFieldDefinition {
+  id             String       @id @default(uuid())
+  organizationId String
+  label          String
+  /// text | longText | number | date | select | checkbox
+  type           String
+  /// moznosti pre typ select
+  options        String[]
+  /// povinne pole blokuje publikovanie (nie ulozenie navrhu)
+  required       Boolean      @default(false)
+  helpText       String?
+  sortOrder      Int          @default(0)
+  archivedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, sortOrder])
 }

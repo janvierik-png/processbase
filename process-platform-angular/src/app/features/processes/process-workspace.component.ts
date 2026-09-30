@@ -28,6 +28,9 @@ import {
 } from '../../core/models/process.model';
 import { ItSystem, OrgPosition, Person } from '../../core/models/user.model';
 import { SystemService } from '../../core/services/system.service';
+import { ProcessFieldService } from '../../core/services/process-field.service';
+import { ProcessFieldDefinition } from '../../core/models/organization.model';
+import { ProcessCustomFieldsComponent } from './components/process-custom-fields.component';
 import { OrganizationService } from '../../core/services/organization.service';
 import { Camunda7Service } from '../../core/services/camunda7.service';
 import { DocumentService } from '../../core/services/document.service';
@@ -64,6 +67,7 @@ type StepDraft = {
     FlowchartEditorComponent,
     RichTextEditorComponent,
     ProcessQualityComponent,
+    ProcessCustomFieldsComponent,
     PdfPreviewComponent
   ],
   templateUrl: './process-workspace.component.html',
@@ -90,6 +94,8 @@ export class ProcessWorkspaceComponent implements OnInit {
   readonly positions = signal<OrgPosition[]>([]);
   // #43 — IT systémy firmy (aj vyradené, kvôli názvom v starších verziách)
   readonly systems = signal<ItSystem[]>([]);
+  // #45 — vlastné polia procesu, ktoré si firma definovala
+  readonly processFields = signal<ProcessFieldDefinition[]>([]);
 
   // dokumenty — premenovanie, nahravanie, nahlad
   editingDocumentId: string | null = null;
@@ -135,6 +141,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     private readonly documentsApi: DocumentService,
     private readonly positionsApi: PositionService,
     private readonly systemsApi: SystemService,
+    private readonly fieldsApi: ProcessFieldService,
     private readonly organizationApi: OrganizationService,
     private readonly storage: StorageService,
     private readonly route: ActivatedRoute,
@@ -146,6 +153,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     this.store.loadFromDatabase();
     this.positionsApi.list().subscribe({ next: (items) => this.positions.set(items), error: () => undefined });
     this.systemsApi.list().subscribe({ next: (items) => this.systems.set(items), error: () => undefined });
+    this.fieldsApi.list().subscribe({ next: (items) => this.processFields.set(items), error: () => undefined });
     this.store.isoNorms().subscribe({ next: (norms) => this.norms.set(norms), error: () => undefined });
 
     // R3: vlastna URL procesu /app/processes/:id
@@ -1156,7 +1164,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     bpmnXml: 'diagram', diagramType: 'typ diagramu', flowchartXml: 'flowchart',
     positions: 'vykonávatelia', ownerPosition: 'vlastník', kroky: 'kroky',
     zodpovednostiKrokov: 'zodpovednosti pri krokoch (RACI)', publikovanie: 'publikovanie', schvalovanie: 'schvaľovanie',
-    systemy: 'IT systémy', systemyKrokov: 'IT systémy pri krokoch'
+    systemy: 'IT systémy', systemyKrokov: 'IT systémy pri krokoch', vlastnePolia: 'ďalšie údaje'
   };
 
   changedFieldNames(change: ProcessChange): string {

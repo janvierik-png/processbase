@@ -406,6 +406,11 @@
           }
         </section>
 
+        <!-- #45 — vlastné polia firmy -->
+        @if (process.type === 'process') {
+          <pp-process-custom-fields [process]="process" [fields]="processFields()" [readOnly]="readOnlyView()" (saved)="openDetail(process.id)" />
+        }
+
         <!-- #28 — kroky procesu (lineárny zoznam) -->
         @if (process.type === 'process') {
         <section class="card">

@@ -1,0 +1,73 @@
+<section class="panel fields-panel">
+  <div class="head">
+    <div>
+      <h2>Vlastné polia procesu</h2>
+      <p class="muted">Čo chcete pri každom procese evidovať navyše — napr. číslo smernice, stupeň dôvernosti alebo dátum školenia.
+        Povinné pole musí byť vyplnené pred publikovaním; rozpracovaný návrh sa dá uložiť aj bez neho.</p>
+    </div>
+  </div>
+
+  @if (error()) { <p class="error">{{ error() }}</p> }
+  @if (notice()) { <p class="notice">{{ notice() }}</p> }
+
+  <div class="fields-grid">
+    <div class="field-list">
+      @for (field of active(); track field.id; let index = $index; let last = $last) {
+        <article class="field-row" [class.editing]="editingId === field.id">
+          <div class="field-main">
+            <strong>{{ field.label }}@if (field.required) {<span class="required" title="Povinné pred publikovaním">&nbsp;*</span>}</strong>
+            <small class="muted">
+              {{ typeLabels[field.type] }}{{ field.type === 'select' ? ': ' + field.options.join(', ') : '' }} · vyplnené v {{ field.usage }} procesoch
+            </small>
+            @if (field.helpText) { <small>{{ field.helpText }}</small> }
+          </div>
+          <div class="field-actions">
+            <label class="check-row small-check"><input type="checkbox" [checked]="field.required" (change)="toggleRequired(field)"> povinné</label>
+            <button type="button" class="ghost small" (click)="move(index, -1)" [disabled]="index === 0" title="Vyššie">↑</button>
+            <button type="button" class="ghost small" (click)="move(index, 1)" [disabled]="last" title="Nižšie">↓</button>
+            <button type="button" class="ghost small" (click)="startEdit(field)">Upraviť</button>
+            <button type="button" class="ghost small" (click)="remove(field)">{{ field.usage > 0 ? 'Archivovať' : 'Odstrániť' }}</button>
+          </div>
+        </article>
+      } @empty {
+        <p class="muted">Firma zatiaľ nemá vlastné polia.</p>
+      }
+
+      @if (archived().length > 0) {
+        <details class="archived">
+          <summary>Archivované polia ({{ archived().length }})</summary>
+          @for (field of archived(); track field.id) {
+            <div class="archived-row">
+              <span>{{ field.label }} <small class="muted">· {{ typeLabels[field.type] }} · hodnoty v {{ field.usage }} procesoch</small></span>
+              <button type="button" class="ghost small" (click)="restore(field)">Obnoviť</button>
+            </div>
+          }
+        </details>
+      }
+    </div>
+
+    <form class="field-form" (ngSubmit)="save()">
+      <h3>{{ editingId ? 'Upraviť pole' : 'Nové pole' }}</h3>
+      <label>Názov poľa <input name="fieldLabel" [(ngModel)]="model.label" maxlength="120" placeholder="napr. Číslo smernice"></label>
+      <label>Typ
+        <select name="fieldType" [(ngModel)]="model.type" [disabled]="editingId !== null">
+          @for (type of types; track type) {
+            <option [value]="type">{{ typeLabels[type] }}</option>
+          }
+        </select>
+      </label>
+      @if (editingId) { <small class="muted">Typ sa po založení nemení — existujúce hodnoty by stratili zmysel.</small> }
+      @if (model.type === 'select') {
+        <label>Možnosti (každá na riadok)
+          <textarea name="fieldOptions" [(ngModel)]="model.options" rows="4" placeholder="Verejné&#10;Interné&#10;Dôverné"></textarea>
+        </label>
+      }
+      <label>Pomocný text (voliteľné) <input name="fieldHelp" [(ngModel)]="model.helpText" maxlength="300" placeholder="Čo sem vyplniť"></label>
+      <label class="check-row"><input type="checkbox" name="fieldRequired" [(ngModel)]="model.required"> Povinné pred publikovaním</label>
+      <div class="form-actions">
+        <button class="primary" type="submit">{{ editingId ? 'Uložiť' : 'Pridať pole' }}</button>
+        @if (editingId) { <button type="button" (click)="cancel()">Zrušiť</button> }
+      </div>
+    </form>
+  </div>
+</section>
