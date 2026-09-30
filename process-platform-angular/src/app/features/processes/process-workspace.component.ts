@@ -26,7 +26,8 @@ import {
   RaciCode,
   ProcessVersionMeta
 } from '../../core/models/process.model';
-import { OrgPosition, Person } from '../../core/models/user.model';
+import { ItSystem, OrgPosition, Person } from '../../core/models/user.model';
+import { SystemService } from '../../core/services/system.service';
 import { OrganizationService } from '../../core/services/organization.service';
 import { Camunda7Service } from '../../core/services/camunda7.service';
 import { DocumentService } from '../../core/services/document.service';
@@ -47,6 +48,9 @@ type StepDraft = {
   raci: RaciDraft[];
   newRole: RaciCode;
   newHolder: string;
+  /** #43 — IT systémy použité pri kroku */
+  systemIds: string[];
+  newSystem: string;
 };
 
 @Component({
@@ -84,6 +88,8 @@ export class ProcessWorkspaceComponent implements OnInit {
 
   // R1: pozicie organizacie
   readonly positions = signal<OrgPosition[]>([]);
+  // #43 — IT systémy firmy (aj vyradené, kvôli názvom v starších verziách)
+  readonly systems = signal<ItSystem[]>([]);
 
   // dokumenty — premenovanie, nahravanie, nahlad
   editingDocumentId: string | null = null;
@@ -128,6 +134,7 @@ export class ProcessWorkspaceComponent implements OnInit {
     private readonly camunda: Camunda7Service,
     private readonly documentsApi: DocumentService,
     private readonly positionsApi: PositionService,
+    private readonly systemsApi: SystemService,
     private readonly organizationApi: OrganizationService,
     private readonly storage: StorageService,
     private readonly route: ActivatedRoute,
@@ -138,6 +145,7 @@ export class ProcessWorkspaceComponent implements OnInit {
   ngOnInit(): void {
     this.store.loadFromDatabase();
     this.positionsApi.list().subscribe({ next: (items) => this.positions.set(items), error: () => undefined });
+    this.systemsApi.list().subscribe({ next: (items) => this.systems.set(items), error: () => undefined });
     this.store.isoNorms().subscribe({ next: (norms) => this.norms.set(norms), error: () => undefined });
 
     // R3: vlastna URL procesu /app/processes/:id
@@ -389,7 +397,9 @@ export class ProcessWorkspaceComponent implements OnInit {
       description: step.description ?? '',
       raci: (step.raci ?? []).map((item) => ({ role: item.role, positionId: item.positionId, personId: item.personId })),
       newRole: 'R' as RaciCode,
-      newHolder: ''
+      newHolder: '',
+      systemIds: [...(step.systemIds ?? [])],
+      newSystem: ''
     }));
     if (this.stepsDraft.length === 0) this.addStep();
     // osoby len pre výnimočné priradenie konkrétnemu človeku (#29)
@@ -400,7 +410,30 @@ export class ProcessWorkspaceComponent implements OnInit {
   }
 
   addStep(): void {
-    this.stepsDraft = [...this.stepsDraft, { key: `s${this.stepKey++}`, id: null, title: '', description: '', raci: [], newRole: 'R', newHolder: '' }];
+    this.stepsDraft = [...this.stepsDraft, { key: `s${this.stepKey++}`, id: null, title: '', description: '', raci: [], newRole: 'R', newHolder: '', systemIds: [], newSystem: '' }];
+  }
+
+  // --- #43 IT systémy pri kroku ---
+
+  /** Aktívne systémy na výber; vyradený ostane pri kroku, kým ho niekto neodoberie. */
+  readonly selectableSystems = computed(() => this.systems().filter((system) => !system.archived));
+
+  systemName(id: string): string {
+    const system = this.systems().find((item) => item.id === id);
+    return system ? `${system.name}${system.archived ? ' (vyradený)' : ''}` : 'Systém';
+  }
+
+  isRetiredSystem(id: string): boolean {
+    return this.systems().find((item) => item.id === id)?.archived ?? false;
+  }
+
+  addStepSystem(step: StepDraft): void {
+    if (step.newSystem && !step.systemIds.includes(step.newSystem)) step.systemIds = [...step.systemIds, step.newSystem];
+    step.newSystem = '';
+  }
+
+  removeStepSystem(step: StepDraft, id: string): void {
+    step.systemIds = step.systemIds.filter((item) => item !== id);
   }
 
   // --- #36 podnety k procesu ---
@@ -540,7 +573,8 @@ export class ProcessWorkspaceComponent implements OnInit {
         id: step.id ?? undefined,
         title: step.title.trim(),
         description: step.description.trim(),
-        raci: step.raci.map((item) => item.positionId ? { role: item.role, positionId: item.positionId } : { role: item.role, personId: item.personId ?? undefined })
+        raci: step.raci.map((item) => item.positionId ? { role: item.role, positionId: item.positionId } : { role: item.role, personId: item.personId ?? undefined }),
+        systemIds: step.systemIds
       }));
     if (steps.some((step) => !step.title)) {
       this.stepsError.set('Každý krok potrebuje názov.');
@@ -1121,7 +1155,8 @@ export class ProcessWorkspaceComponent implements OnInit {
     parentId: 'nadradený proces', relatedProcessIds: 'súvisiace procesy', isoLinks: 'ISO väzby',
     bpmnXml: 'diagram', diagramType: 'typ diagramu', flowchartXml: 'flowchart',
     positions: 'vykonávatelia', ownerPosition: 'vlastník', kroky: 'kroky',
-    zodpovednostiKrokov: 'zodpovednosti pri krokoch (RACI)', publikovanie: 'publikovanie', schvalovanie: 'schvaľovanie'
+    zodpovednostiKrokov: 'zodpovednosti pri krokoch (RACI)', publikovanie: 'publikovanie', schvalovanie: 'schvaľovanie',
+    systemy: 'IT systémy', systemyKrokov: 'IT systémy pri krokoch'
   };
 
   changedFieldNames(change: ProcessChange): string {

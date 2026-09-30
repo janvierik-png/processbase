@@ -49,6 +49,19 @@
     </section>
   }
 
+  @if (filter() === 'all' && (r.systems ?? []).length > 0) {
+    <section class="panel">
+      <h3>IT systémy <small class="muted">({{ r.systems?.length }})</small></h3>
+      @for (item of r.systems ?? []; track item.id) {
+        <a class="result compact" routerLink="/app/settings/systems">
+          {{ item.name }}
+          @if (item.code) { <small class="muted">· {{ item.code }}</small> }
+          @if (item.archived) { <small class="muted">· vyradený</small> }
+        </a>
+      }
+    </section>
+  }
+
   @if (filter() === 'all' && r.documents.length > 0) {
     <section class="panel">
       <h3>Dokumenty <small class="muted">({{ r.documents.length }})</small></h3>

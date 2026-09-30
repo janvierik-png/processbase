@@ -29,6 +29,7 @@ export class OverviewPageComponent implements OnInit {
     feedback: { title: 'Nevybavené podnety', hint: 'Kolegovia nahlásili chybu alebo navrhli zlepšenie.', fix: 'Posúdiť podnety', warn: false, target: 'process' },
     ownerless: { title: 'Bez vlastníka', hint: 'Za proces nezodpovedá žiadne pracovné miesto.', fix: 'Určiť vlastníka', warn: true, target: 'process' },
     vacant: { title: 'Neobsadené miesta', hint: 'Proces závisí od miesta, ktoré dnes nikto nezastáva.', fix: 'Obsadiť v Organizácii', warn: true, target: 'organization' },
+    retiredSystems: { title: 'Vyradený systém', hint: 'Proces alebo jeho krok používa IT systém, ktorý firma vyradila.', fix: 'Upraviť postup', warn: true, target: 'process' },
     incomplete: { title: 'Neúplné', hint: 'Chýbajú povinné údaje na publikovanie.', fix: 'Doplniť údaje', warn: false, target: 'process' },
     unpublished: { title: 'Bez platnej verzie', hint: 'Kolegovia proces nevidia ako platný postup.', fix: 'Otvoriť návrh', warn: false, target: 'process' },
     pendingChanges: { title: 'Nepublikované zmeny', hint: 'Návrh sa líši od platnej verzie — zmeny ešte neplatia.', fix: 'Publikovať zmeny', warn: false, target: 'process' }

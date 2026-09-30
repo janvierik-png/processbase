@@ -142,3 +142,28 @@ export interface PositionImpact {
   versions: Array<{ processId: string; name: string; revision: number; scheduled: boolean }>;
   documents: Array<{ id: string; title: string }>;
 }
+
+/** #43 — IT systém (aplikácia, nástroj), ktorý procesy a kroky používajú. */
+export interface ItSystem {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  vendor: string;
+  url: string;
+  ownerPositionId: string | null;
+  /** kto za systém zodpovedá — pracovné miesto a kto ho dnes zastáva */
+  ownerPosition: { id: string; name: string; holders: string[]; vacant: boolean; archived: boolean } | null;
+  /** vyradený systém sa neponúka na nové väzby; existujúce ostávajú */
+  archived: boolean;
+  archivedAt: string | null;
+  processCount: number;
+  stepCount: number;
+}
+
+/** #43 — čo zmena alebo vyradenie systému zasiahne. */
+export interface SystemImpact {
+  system: ItSystem;
+  processes: Array<{ id: string; name: string; code: string; wholeProcess: boolean; steps: string[] }>;
+  versions: Array<{ processId: string; name: string; revision: number; scheduled: boolean }>;
+}

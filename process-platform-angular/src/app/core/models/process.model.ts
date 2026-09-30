@@ -30,6 +30,8 @@ export interface ProcessNode {
   resources?: string;
   opportunities?: string;
   evidenceRequirements?: string[];
+  /** #43 — IT systémy, ktoré proces používa (názvy sú v zozname systémov firmy) */
+  systemIds?: string[];
   positionIds?: string[];
   positions?: ProcessPositionRef[];
   /** #15 — miesto vlastnika procesu; owner je jeho dnesny drzitel */
@@ -115,6 +117,8 @@ export interface ProcessActivity {
   description?: string;
   /** #29 — kto pri kroku vykonáva, zodpovedá, konzultuje, je informovaný */
   raci?: StepResponsibility[];
+  /** #43 — IT systémy použité pri kroku */
+  systemIds?: string[];
 }
 
 /** #27 — stav publikovania procesu, počíta ho server z verzií. */
@@ -236,7 +240,7 @@ export interface ProcessRevision {
 }
 
 /** #34 — prehľad firmy: každá karta je zoznam procesov s konkrétnym problémom. */
-export type OverviewKey = 'review' | 'pendingApproval' | 'feedback' | 'staleDocuments' | 'ownerless' | 'vacant' | 'incomplete' | 'unpublished' | 'pendingChanges';
+export type OverviewKey = 'review' | 'pendingApproval' | 'feedback' | 'staleDocuments' | 'ownerless' | 'vacant' | 'retiredSystems' | 'incomplete' | 'unpublished' | 'pendingChanges';
 
 export interface OverviewItem {
   id: string;
@@ -285,6 +289,8 @@ export interface SearchResult {
   processes: Array<{ id: string; name: string; code: string; matches: SearchMatch[] }>;
   positions: Array<{ id: string; name: string }>;
   documents: Array<{ id: string; fileName: string; processId: string | null; processName: string | null }>;
+  /** #43 — IT systémy */
+  systems?: Array<{ id: string; name: string; code: string | null; archived: boolean }>;
 }
 
 /** #31 — riadený dokument so všetkými verziami. */

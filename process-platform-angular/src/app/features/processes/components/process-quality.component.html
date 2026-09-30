@@ -32,6 +32,17 @@
           }
         </div>
       </fieldset>
+      <!-- #43 — IT systémy celého procesu; systémy jednotlivých krokov sa určujú pri krokoch -->
+      <fieldset class="wide">
+        <legend>IT systémy, ktoré proces používa</legend>
+        <div class="link-list systems">
+          @for (item of systemCandidates(); track item.id) {
+            <label class="check-row"><input type="checkbox" [checked]="draft.systems.includes(item.id)" (change)="toggleLink('systems', item.id)"> {{ item.name }}{{ item.archived ? ' (vyradený — len odobrať)' : '' }}</label>
+          } @empty {
+            <span class="muted-small">Firma zatiaľ nemá systémy — pridáte ich v <a routerLink="/app/settings/systems">Nastavenia → IT systémy</a>.</span>
+          }
+        </div>
+      </fieldset>
       @if (error()) { <p class="error wide">{{ error() }}</p> }
       <div class="edit-actions wide">
         <button class="primary" type="submit">Uložiť</button>
@@ -62,6 +73,14 @@
         <span class="label">Nasledujúce procesy</span>
         <div class="chip-list">
           @for (id of process.downstreamProcessIds ?? []; track id) { <a class="chip link" [routerLink]="['/app/processes', id]">{{ processName(id) }} →</a> } @empty { <span class="muted-small">—</span> }
+        </div>
+      </div>
+      <div class="wide">
+        <span class="label">IT systémy</span>
+        <div class="chip-list">
+          @for (id of process.systemIds ?? []; track id) { <span class="chip system" [class.retired]="isRetired(id)">{{ systemName(id) }}</span> }
+          @for (id of stepSystems(); track id) { <span class="chip system step" [class.retired]="isRetired(id)" title="Používa sa pri niektorom kroku">{{ systemName(id) }} · pri kroku</span> }
+          @if ((process.systemIds ?? []).length === 0 && stepSystems().length === 0) { <span class="muted-small">—</span> }
         </div>
       </div>
     </div>

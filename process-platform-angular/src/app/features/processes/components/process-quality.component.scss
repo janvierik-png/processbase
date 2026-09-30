@@ -66,6 +66,11 @@
   text-decoration: none;
 
   &.link:hover { text-decoration: underline; }
+
+  // #43 — IT systémy; vyradený systém treba nahradiť
+  &.system { background: var(--surface-alt); color: var(--ink); border: 1px solid var(--line); }
+  &.system.step { color: var(--ink-soft); }
+  &.system.retired { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
 }
 
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; }

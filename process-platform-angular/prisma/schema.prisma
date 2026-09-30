@@ -120,6 +120,7 @@ model Organization {
   notifications      Notification[]
   controlledDocuments ControlledDocument[]
   evidenceRecords    EvidenceRecord[]
+  itSystems          ItSystem[]
 }
 
 /// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
@@ -255,6 +256,8 @@ model ProcessNode {
   risks              String?
   opportunities      String?
   evidenceRequirements String[]
+  /// #43 — IT systemy, ktore proces pouziva (ID ItSystem vlastnej firmy)
+  systemIds          String[]
   isoSuggestions     Json?
   translations       Json?
   camundaProcessKey  String?
@@ -291,6 +294,8 @@ model ProcessActivity {
   sortOrder      Int
   title          String
   description    String?
+  /// #43 — IT systemy pouzite pri kroku
+  systemIds      String[]
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -527,6 +532,7 @@ model OrgPosition {
   processes      ProcessPosition[]
   activityResponsibilities ActivityResponsibility[]
   ownedDocuments  ControlledDocument[]
+  ownedSystems   ItSystem[]
   documents      AttachmentPosition[]
 
   @@unique([organizationId, name])
@@ -874,4 +880,29 @@ model ReadinessException {
   approvedBy     User?       @relation("ExceptionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
 
   @@unique([processNodeId, itemKey])
+}
+
+/// #43 GRAPH-01 — IT system (aplikacia, nastroj), ktory procesy a kroky pouzivaju.
+/// Vazby su ID v ProcessNode.systemIds a ProcessActivity.systemIds (aj v snapshote verzie);
+/// pouzity system sa nemaze, len archivuje — verzie si ho pamataju podla ID.
+model ItSystem {
+  id              String       @id @default(uuid())
+  organizationId  String
+  name            String
+  /// skratka, napr. ERP
+  code            String?
+  description     String?
+  vendor          String?
+  /// odkaz na system alebo jeho dokumentaciu (len http/https)
+  url             String?
+  /// kto za system zodpoveda — pracovne miesto, nie osoba
+  ownerPositionId String?
+  archivedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerPosition   OrgPosition? @relation(fields: [ownerPositionId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, name])
 }

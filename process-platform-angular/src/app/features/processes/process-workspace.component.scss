@@ -1177,6 +1177,11 @@ button.small {
 
   &.exception { border-style: dashed; }
 
+  // #43 — IT systém pri kroku; vyradený treba nahradiť
+  &.system { background: var(--panel); color: var(--ink); }
+  &.system::before { content: '⚙'; color: var(--muted); font-size: 11px; }
+  &.system.retired { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+
   .chip-remove {
     min-height: 0;
     padding: 0 2px;

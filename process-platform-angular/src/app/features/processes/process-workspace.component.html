@@ -457,6 +457,28 @@
                         <button type="button" class="small" (click)="addRaci(step)" [disabled]="!step.newHolder">+ Pridať</button>
                       </div>
                     </div>
+                    <!-- #43 — IT systémy pri kroku -->
+                    @if (systems().length > 0) {
+                      <div class="raci-edit step-systems">
+                        @for (id of step.systemIds; track id) {
+                          <span class="raci-chip system" [class.retired]="isRetiredSystem(id)">
+                            {{ systemName(id) }}
+                            <button type="button" class="chip-remove" (click)="removeStepSystem(step, id)" [attr.aria-label]="'Odobrať ' + systemName(id)">×</button>
+                          </span>
+                        }
+                        <div class="raci-add">
+                          <select [name]="'step-system-' + step.key" [(ngModel)]="step.newSystem" aria-label="IT systém pri kroku">
+                            <option value="">— IT systém —</option>
+                            @for (system of selectableSystems(); track system.id) {
+                              @if (!step.systemIds.includes(system.id)) {
+                                <option [value]="system.id">{{ system.name }}</option>
+                              }
+                            }
+                          </select>
+                          <button type="button" class="small" (click)="addStepSystem(step)" [disabled]="!step.newSystem">+ Systém</button>
+                        </div>
+                      </div>
+                    }
                   </div>
                   <div class="step-tools">
                     <button type="button" class="ghost small" (click)="moveStep(index, -1)" [disabled]="index === 0" title="Posunúť vyššie">↑</button>
@@ -505,6 +527,13 @@
                           }
                         </div>
                       }
+                      @if ((step.systemIds ?? []).length > 0) {
+                        <div class="raci-list">
+                          @for (id of step.systemIds; track id) {
+                            <span class="raci-chip system" [class.retired]="isRetiredSystem(id)" title="IT systém pri kroku">{{ systemName(id) }}</span>
+                          }
+                        </div>
+                      }
                     </li>
                   }
                 </ol>
@@ -518,7 +547,7 @@
 
         <!-- #40 — riadený proces a profil Kvalita a audit -->
         @if (process.type === 'process') {
-          <pp-process-quality [process]="process" [processes]="processes()" [readOnly]="readOnlyView()"
+          <pp-process-quality [process]="process" [processes]="processes()" [readOnly]="readOnlyView()" [systems]="systems()"
             [qualityProfile]="qualityProfile" (saved)="openDetail(process.id)" />
         }
 

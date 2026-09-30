@@ -200,7 +200,7 @@ export class ProcessStoreService {
   /** #28 — celý zoradený zoznam krokov návrhu (existujúce kroky podľa id sa zachovajú). */
   saveActivities(
     id: string,
-    activities: Array<{ id?: string; title: string; description?: string; raci?: Array<{ role: RaciCode; positionId?: string; personId?: string }> }>
+    activities: Array<{ id?: string; title: string; description?: string; raci?: Array<{ role: RaciCode; positionId?: string; personId?: string }>; systemIds?: string[] }>
   ): Observable<ProcessNode> {
     return this.http.put<ProcessNode>(`${API_BASE_URL}/processes/${id}/activities`, { activities });
   }

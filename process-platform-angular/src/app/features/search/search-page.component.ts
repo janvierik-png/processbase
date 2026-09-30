@@ -90,6 +90,6 @@ export class SearchPageComponent implements OnInit {
 
   empty(): boolean {
     const result = this.result();
-    return Boolean(result) && this.processes().length === 0 && result!.positions.length === 0 && result!.documents.length === 0;
+    return Boolean(result) && this.processes().length === 0 && result!.positions.length === 0 && result!.documents.length === 0 && (result!.systems ?? []).length === 0;
   }
 }

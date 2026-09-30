@@ -1,0 +1,126 @@
+<header class="page-header">
+  <div>
+    <p class="eyebrow"><a routerLink="/app/settings">Nastavenia</a> / IT systémy</p>
+    <h2>IT systémy</h2>
+    <p class="lead">Aplikácie a nástroje, ktoré procesy používajú. Pri zmene alebo vyradení systému hneď vidíte, ktorých procesov a krokov sa to týka.</p>
+  </div>
+</header>
+
+@if (error()) {
+  <p class="message error">{{ error() }}</p>
+}
+@if (notice()) {
+  <p class="message notice">{{ notice() }}</p>
+}
+
+<div class="systems-grid">
+  @if (canEdit) {
+    <form class="panel" (ngSubmit)="save()">
+      <h3>{{ editingId ? 'Upraviť systém' : 'Pridať systém' }}</h3>
+      <label>Názov <input name="name" [(ngModel)]="model.name" placeholder="napr. Účtovný systém" maxlength="200" required></label>
+      <div class="two">
+        <label>Skratka <input name="code" [(ngModel)]="model.code" placeholder="napr. ERP" maxlength="30"></label>
+        <label>Dodávateľ <input name="vendor" [(ngModel)]="model.vendor" maxlength="200"></label>
+      </div>
+      <label>Odkaz <input name="url" type="url" [(ngModel)]="model.url" placeholder="https://…" maxlength="500"></label>
+      <label>Za systém zodpovedá
+        <select name="owner" [(ngModel)]="model.ownerPositionId">
+          <option value="">— nikto neurčený —</option>
+          @for (position of selectablePositions(); track position.id) {
+            <option [value]="position.id">{{ position.name }}</option>
+          }
+        </select>
+      </label>
+      <label>Na čo slúži <textarea name="description" [(ngModel)]="model.description" rows="3" maxlength="2000"></textarea></label>
+      <div class="form-actions">
+        <button class="primary" type="submit">{{ editingId ? 'Uložiť' : 'Pridať systém' }}</button>
+        @if (editingId) {
+          <button type="button" (click)="cancelEdit()">Zrušiť</button>
+        }
+      </div>
+      <p class="hint">Zodpovednosť patrí pracovnému miestu — po zmene obsadenia sa ukáže nový človek.</p>
+    </form>
+  }
+
+  <section class="panel list-panel">
+    <div class="list-head">
+      <h3>Systémy <small class="muted">({{ activeSystems().length }})</small></h3>
+      <input class="filter" name="filter" [(ngModel)]="filter" placeholder="Hľadať systém" aria-label="Hľadať systém">
+    </div>
+
+    @for (system of filtered(activeSystems()); track system.id) {
+      <article class="system-row" [class.selected]="impact()?.system?.id === system.id">
+        <div class="system-main">
+          <strong>{{ system.name }}@if (system.code) {<span class="code">&nbsp;{{ system.code }}</span>}</strong>
+          <small class="muted">
+            {{ usage(system) }}@if (system.vendor) {<span> · {{ system.vendor }}</span>}
+          </small>
+          @if (system.ownerPosition; as owner) {
+            <small [class.warn-line]="owner.vacant">Zodpovedá: {{ owner.name }}{{ owner.vacant ? ' — neobsadené' : ' · ' + owner.holders.join(', ') }}</small>
+          }
+          @if (system.description) { <p class="description">{{ system.description }}</p> }
+          @if (system.url) { <a class="link" [href]="system.url" target="_blank" rel="noopener noreferrer">{{ system.url }}</a> }
+        </div>
+        <div class="row-actions">
+          <button type="button" class="small ghost" (click)="showImpact(system)">Dopad</button>
+          @if (canEdit) {
+            <button type="button" class="small ghost" (click)="startEdit(system)">Upraviť</button>
+          }
+          @if (canRetire && system.processCount === 0) {
+            <button type="button" class="small ghost" (click)="remove(system)">Odstrániť</button>
+          }
+        </div>
+
+        @if (impact()?.system?.id === system.id) {
+          @if (impact(); as item) {
+            <div class="impact-panel">
+              <strong>Čo zmena alebo vyradenie systému „{{ item.system.name }}“ zasiahne</strong>
+              @if (item.processes.length > 0) {
+                <ul>
+                  @for (process of item.processes; track process.id) {
+                    <li>
+                      <a [routerLink]="['/app/processes', process.id]">{{ process.code ? process.code + ' · ' : '' }}{{ process.name }}</a>
+                      <small class="muted">
+                        {{ process.wholeProcess ? 'celý proces' : '' }}{{ process.wholeProcess && process.steps.length ? '; ' : '' }}{{ process.steps.length ? 'kroky: ' + process.steps.join(', ') : '' }}
+                      </small>
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <p class="muted">Žiadny proces ani krok ho v návrhu nepoužíva.</p>
+              }
+              @if (item.versions.length > 0) {
+                <p class="muted">Platné a naplánované verzie so systémom ({{ item.versions.length }}) ostanú nezmenené — ľudia podľa nich pracujú, kým ich nenahradí nová verzia.</p>
+              }
+              <div class="impact-actions">
+                @if (canRetire) {
+                  <button type="button" class="small danger" (click)="confirmRetire()">Vyradiť systém</button>
+                }
+                <button type="button" class="small" (click)="impact.set(null)">Zavrieť</button>
+              </div>
+              @if (canRetire) {
+                <p class="hint">Po vyradení sa systém neponúka pri nových krokoch. Procesy, ktoré ho používajú, sa ukážu v Prehľade na úpravu.</p>
+              }
+            </div>
+          }
+        }
+      </article>
+    } @empty {
+      <p class="muted">{{ filter ? 'Žiadny systém nezodpovedá hľadaniu.' : 'Zatiaľ žiadne systémy. Pridajte napr. účtovný systém, CRM alebo e-mail.' }}</p>
+    }
+
+    @if (retiredSystems().length > 0) {
+      <details class="retired">
+        <summary>Vyradené systémy ({{ retiredSystems().length }})</summary>
+        @for (system of retiredSystems(); track system.id) {
+          <div class="retired-row">
+            <span>{{ system.name }} <small class="muted">vyradený {{ system.archivedAt }} · {{ usage(system) }}</small></span>
+            @if (canRetire) {
+              <button type="button" class="small ghost" (click)="restore(system)">Obnoviť</button>
+            }
+          </div>
+        }
+      </details>
+    }
+  </section>
+</div>

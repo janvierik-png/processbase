@@ -2,6 +2,7 @@ import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, signa
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { EvidenceRecord, ProcessDetail, ProcessNode, QualityReadiness, ReadinessItem, ReadinessState } from '../../../core/models/process.model';
+import { ItSystem } from '../../../core/models/user.model';
 import { AuthService } from '../../../core/services/auth.service';
 import { ProcessStoreService } from '../../../core/services/process-store.service';
 
@@ -28,6 +29,8 @@ export class ProcessQualityComponent implements OnChanges {
   /** publikovaná verzia, posudzovaný návrh alebo bez práva upravovať */
   @Input() readOnly = true;
   @Input() qualityProfile = false;
+  /** #43 — IT systémy firmy (aj vyradené — kvôli názvom v starších verziách) */
+  @Input() systems: ItSystem[] = [];
   @Output() saved = new EventEmitter<void>();
 
   readonly quality = signal<QualityReadiness | null>(null);
@@ -35,7 +38,7 @@ export class ProcessQualityComponent implements OnChanges {
   readonly records = signal<EvidenceRecord[] | null>(null);
   readonly error = signal('');
   editing: Section = null;
-  draft = { inputs: '', outputs: '', upstream: [] as string[], downstream: [] as string[], successMeasure: '', resources: '', risks: '', opportunities: '', evidence: '' };
+  draft = { inputs: '', outputs: '', upstream: [] as string[], downstream: [] as string[], systems: [] as string[], successMeasure: '', resources: '', risks: '', opportunities: '', evidence: '' };
   evidenceModel = { requirement: '', performedOn: '', note: '' };
   exceptionFor: string | null = null;
   exceptionReason = '';
@@ -79,6 +82,7 @@ export class ProcessQualityComponent implements OnChanges {
       outputs: (p.outputs ?? []).join('\n'),
       upstream: [...(p.upstreamProcessIds ?? [])],
       downstream: [...(p.downstreamProcessIds ?? [])],
+      systems: [...(p.systemIds ?? [])],
       successMeasure: p.successMeasure ?? '',
       resources: p.resources ?? '',
       risks: p.risks ?? '',
@@ -89,7 +93,7 @@ export class ProcessQualityComponent implements OnChanges {
     this.editing = section;
   }
 
-  toggleLink(list: 'upstream' | 'downstream', id: string): void {
+  toggleLink(list: 'upstream' | 'downstream' | 'systems', id: string): void {
     const current = this.draft[list];
     this.draft[list] = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
   }
@@ -97,7 +101,13 @@ export class ProcessQualityComponent implements OnChanges {
   save(): void {
     const lines = (text: string) => text.split('\n').map((line) => line.trim()).filter(Boolean);
     const patch = this.editing === 'control'
-      ? { inputs: lines(this.draft.inputs), outputs: lines(this.draft.outputs), upstreamProcessIds: this.draft.upstream, downstreamProcessIds: this.draft.downstream }
+      ? {
+          inputs: lines(this.draft.inputs),
+          outputs: lines(this.draft.outputs),
+          upstreamProcessIds: this.draft.upstream,
+          downstreamProcessIds: this.draft.downstream,
+          systemIds: this.draft.systems
+        }
       : {
           successMeasure: this.draft.successMeasure,
           resources: this.draft.resources,
@@ -119,6 +129,29 @@ export class ProcessQualityComponent implements OnChanges {
 
   processName(id: string): string {
     return this.processes.find((item) => item.id === id)?.name ?? 'Proces';
+  }
+
+  // --- #43 IT systémy ---
+
+  systemName(id: string): string {
+    const system = this.systems.find((item) => item.id === id);
+    return system ? `${system.name}${system.archived ? ' (vyradený)' : ''}` : 'Systém';
+  }
+
+  isRetired(id: string): boolean {
+    return this.systems.find((item) => item.id === id)?.archived ?? false;
+  }
+
+  /** Na výber sú aktívne systémy a tie vyradené, ktoré proces už má (dajú sa len odobrať). */
+  systemCandidates(): ItSystem[] {
+    const linked = new Set(this.process.systemIds ?? []);
+    return this.systems.filter((item) => !item.archived || linked.has(item.id));
+  }
+
+  /** Systémy, ktoré proces používa len pri krokoch (nie pri celom procese). */
+  stepSystems(): string[] {
+    const own = new Set(this.process.systemIds ?? []);
+    return [...new Set((this.process.activities ?? []).flatMap((step) => step.systemIds ?? []))].filter((id) => !own.has(id));
   }
 
   linkCandidates(): ProcessNode[] {

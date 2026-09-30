@@ -67,6 +67,11 @@ export const appRoutes: Routes = [
         path: 'settings/positions',
         loadComponent: () => import('./features/settings/positions-page.component').then((m) => m.PositionsPageComponent)
       },
+      // #43 — IT systémy a dopad ich zmeny
+      {
+        path: 'settings/systems',
+        loadComponent: () => import('./features/settings/systems-page.component').then((m) => m.SystemsPageComponent)
+      },
       {
         path: 'settings/integrations',
         loadComponent: () => import('./features/settings/integrations-page.component').then((m) => m.IntegrationsPageComponent)

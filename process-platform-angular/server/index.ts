@@ -269,6 +269,12 @@ const PERMISSION_RULES: PermissionRule[] = [
   { methods: ['GET', 'POST'], pattern: /^\/api\/organizations\/[^/]+\/invitations$/, anyOf: ['user:invite'] },
   { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/settings\/translation$/, anyOf: ['organization:write'] },
 
+  // #43 — IT systemy: zaradit a upravit smie aj editor procesov, vyradit a zmazat len sprava firmy
+  { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/systems$/, anyOf: ['organization:write', 'process:write'] },
+  { methods: ['PATCH'], pattern: /^\/api\/systems\/[^/]+$/, anyOf: ['organization:write', 'process:write'] },
+  { methods: ['DELETE'], pattern: /^\/api\/systems\/[^/]+$/, anyOf: ['organization:write'] },
+  { methods: ['POST'], pattern: /^\/api\/systems\/[^/]+\/(archive|restore)$/, anyOf: ['organization:write'] },
+
   // organizacna struktura (#12–#16)
   { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/(units|positions|people|job-profiles)$/, anyOf: ['organization:write'] },
   {
@@ -343,7 +349,7 @@ type ProcessTreeNode = {
   publication?: Publication;
   trigger?: string;
   outcome?: string;
-  activities?: Array<{ id: string; title: string; description: string; raci?: ReturnType<typeof mapStepResponsibility>[] }>;
+  activities?: Array<{ id: string; title: string; description: string; systemIds?: string[]; raci?: ReturnType<typeof mapStepResponsibility>[] }>;
   readiness?: ReadinessItem[];
   revision?: string;
   purpose?: string;
@@ -358,6 +364,7 @@ type ProcessTreeNode = {
   resources?: string;
   opportunities?: string;
   evidenceRequirements?: string[];
+  systemIds?: string[];
   positionIds?: string[];
   positions?: Responsibility[];
   isoSuggestions?: unknown;
@@ -562,6 +569,7 @@ function mapNode(node: any): ProcessTreeNode {
       id: activity.id,
       title: activity.title,
       description: activity.description ?? '',
+      systemIds: activity.systemIds ?? [],
       // #29 — RACI kroku s ludmi, ktori miesta zastavaju
       raci: (activity.responsibilities ?? [])
         .map(mapStepResponsibility)
@@ -580,6 +588,8 @@ function mapNode(node: any): ProcessTreeNode {
     risks: node.risks ?? '',
     opportunities: node.opportunities ?? '',
     evidenceRequirements: node.evidenceRequirements ?? [],
+    // #43 — IT systemy procesu (nazvy dohlada klient zo zoznamu systemov firmy)
+    systemIds: node.systemIds ?? [],
     positionIds: performers.map((item: any) => item.id),
     positions: performers,
     isoSuggestions: node.isoSuggestions ?? [],
@@ -838,7 +848,7 @@ type ProcessSnapshot = {
   trigger?: string;
   outcome?: string;
   /** #29 — raci len pri krokoch, ktore ho maju (starsie verzie ho nemaju) */
-  activities?: Array<{ id: string; title: string; description: string; raci?: SnapshotRaci[] }>;
+  activities?: Array<{ id: string; title: string; description: string; raci?: SnapshotRaci[]; systemIds?: string[] }>;
   /** #40 — riadeny proces a profil Kvalita a audit; len vyplnene polia (odtlacok starsich verzii sa nemeni) */
   inputs?: string[];
   outputs?: string[];
@@ -849,6 +859,8 @@ type ProcessSnapshot = {
   risks?: string;
   opportunities?: string;
   evidenceRequirements?: string[];
+  /** #43 — IT systemy procesu (ID; nazov sa dohlada, aj archivovaneho systemu) */
+  systemIds?: string[];
   /** ID miest, nie mena — kto miesto zastava, sa odvodzuje z obsadenia v case */
   responsibilities: Array<{ positionId: string; role: string }>;
   documentIds: string[];
@@ -914,6 +926,7 @@ function activityInclude(at: Date = today()) {
       id: true,
       title: true,
       description: true,
+      systemIds: true,
       responsibilities: {
         select: {
           role: true,
@@ -960,7 +973,15 @@ function buildSnapshot(node: any): ProcessSnapshot {
     activities: (node.activities ?? []).map((activity: any) => {
       const raci = snapshotRaci(activity);
       // bez zodpovednosti kluc chyba — odtlacok starsich verzii ostava rovnaky
-      return { id: activity.id, title: activity.title, description: activity.description ?? '', ...(raci.length > 0 ? { raci } : {}) };
+      const systemIds = [...(activity.systemIds ?? [])].sort();
+      return {
+        id: activity.id,
+        title: activity.title,
+        description: activity.description ?? '',
+        ...(raci.length > 0 ? { raci } : {}),
+        // #43 — bez systemov kluc chyba (odtlacok starsich verzii sa nemeni)
+        ...(systemIds.length > 0 ? { systemIds } : {})
+      };
     }),
     ...controlledSnapshotFields(node),
     responsibilities,
@@ -983,6 +1004,7 @@ function controlledSnapshotFields(node: any): Partial<ProcessSnapshot> {
   if (text(node.risks)) fields.risks = node.risks;
   if (text(node.opportunities)) fields.opportunities = node.opportunities;
   if (list(node.evidenceRequirements).length) fields.evidenceRequirements = list(node.evidenceRequirements);
+  if (list(node.systemIds).length) fields.systemIds = [...list(node.systemIds)].sort();
   return fields;
 }
 
@@ -1117,6 +1139,7 @@ async function versionView(node: any, version: any, at: Date) {
     risks: snapshot.risks ?? '',
     opportunities: snapshot.opportunities ?? '',
     evidenceRequirements: snapshot.evidenceRequirements ?? [],
+    systemIds: snapshot.systemIds ?? [],
     trigger: snapshot.trigger ?? '',
     outcome: snapshot.outcome ?? '',
     activities,
@@ -1693,16 +1716,21 @@ app.put('/api/processes/:processId/activities', async (request, response, next) 
     if (!input) throw new HttpError(400, 'activities musi byt zoznam krokov.');
     if (input.length > MAX_ACTIVITIES) throw new HttpError(400, `Proces moze mat najviac ${MAX_ACTIVITIES} krokov.`);
 
-    const steps: Array<{ id: string | null; title: string; description: string | null; raci: StepRaciInput[] | undefined }> =
+    const steps: Array<{ id: string | null; title: string; description: string | null; raci: StepRaciInput[] | undefined; systemIds: string[] | undefined }> =
       input.map((item: any, index: number) => {
         const title = cleanText(item?.title, 300);
         if (!title) throw new HttpError(400, `Krok ${index + 1} nema nazov.`);
+        if (item?.systemIds !== undefined && !Array.isArray(item.systemIds)) throw new HttpError(400, `Krok ${index + 1}: systémy musia byť zoznam.`);
         return {
           id: typeof item?.id === 'string' ? item.id : null,
           title,
           description: cleanText(item?.description, 5000),
           // #29 — bez `raci` sa zodpovednosti kroku nemenia (starsi klient ich nezmaze)
-          raci: item?.raci === undefined ? undefined : parseStepRaci(item.raci, index)
+          raci: item?.raci === undefined ? undefined : parseStepRaci(item.raci, index),
+          // #43 — bez `systemIds` sa systemy kroku nemenia
+          systemIds: item?.systemIds === undefined
+            ? undefined
+            : [...new Set((item.systemIds as unknown[]).filter((id): id is string => typeof id === 'string' && id.length > 0))].sort().slice(0, MAX_SYSTEM_LINKS)
         };
       });
     // miesta a osoby len z vlastnej firmy (B2)
@@ -1719,8 +1747,10 @@ app.put('/api/processes/:processId/activities', async (request, response, next) 
     const existing = await prisma.processActivity.findMany({
       where: { processNodeId: node.id },
       orderBy: { sortOrder: 'asc' },
-      select: { id: true, title: true, description: true, responsibilities: { select: { role: true, positionId: true, personId: true } } }
+      select: { id: true, title: true, description: true, systemIds: true, responsibilities: { select: { role: true, positionId: true, personId: true } } }
     });
+    // #43 — systemy krokov: vlastna firma, vyradeny system len ak ho proces uz pri kroku mal
+    await resolveSystemLinks(node.organizationId, steps.flatMap((step) => step.systemIds ?? []), existing.flatMap((activity) => activity.systemIds ?? []));
     const existingById = new Map(existing.map((activity) => [activity.id, activity]));
     // cudzie alebo vymyslene ID sa nezachova — krok dostane nove (B2)
     const kept = new Set<string>(steps.filter((step) => step.id && existingById.has(step.id)).map((step) => step.id as string));
@@ -1732,11 +1762,21 @@ app.put('/api/processes/:processId/activities', async (request, response, next) 
       for (const [index, step] of steps.entries()) {
         let activityId: string;
         if (step.id && kept.has(step.id)) {
-          await tx.processActivity.update({ where: { id: step.id }, data: { sortOrder: index, title: step.title, description: step.description } });
+          await tx.processActivity.update({
+            where: { id: step.id },
+            data: { sortOrder: index, title: step.title, description: step.description, systemIds: step.systemIds }
+          });
           activityId = step.id;
         } else {
           const created = await tx.processActivity.create({
-            data: { organizationId: node.organizationId, processNodeId: node.id, sortOrder: index, title: step.title, description: step.description }
+            data: {
+              organizationId: node.organizationId,
+              processNodeId: node.id,
+              sortOrder: index,
+              title: step.title,
+              description: step.description,
+              systemIds: step.systemIds ?? []
+            }
           });
           activityId = created.id;
         }
@@ -1764,6 +1804,19 @@ app.put('/api/processes/:processId/activities', async (request, response, next) 
         from: await describeStepRaci(node.organizationId, before, raciBefore),
         to: await describeStepRaci(node.organizationId, after, raciAfter)
       };
+    }
+    // #43 — systemy krokov do auditu: „2. Zaúčtovanie: ERP, Banka“
+    const systemsBefore = existing.map((activity) => [...(activity.systemIds ?? [])].sort());
+    const systemsAfter = steps.map((step) => step.systemIds ?? (step.id && kept.has(step.id) ? [...(existingById.get(step.id)?.systemIds ?? [])].sort() : []));
+    if (JSON.stringify(systemsBefore) !== JSON.stringify(systemsAfter)) {
+      const names = new Map((await prisma.itSystem.findMany({
+        where: { organizationId: node.organizationId, id: { in: [...systemsBefore.flat(), ...systemsAfter.flat()] } },
+        select: { id: true, name: true }
+      })).map((system) => [system.id, system.name]));
+      const describe = (titles: string[], lists: string[][]) => titles
+        .map((title, index) => (lists[index] ?? []).length ? `${index + 1}. ${title}: ${lists[index].map((id) => names.get(id) ?? '?').join(', ')}` : '')
+        .filter(Boolean);
+      changedFields['systemyKrokov'] = { from: describe(before, systemsBefore), to: describe(after, systemsAfter) };
     }
     if (Object.keys(changedFields).length > 0) {
       await prisma.processChangeLog.create({
@@ -1841,6 +1894,10 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       risks: longText(body.risks),
       opportunities: longText(body.opportunities)
     };
+    // #43 — IT systemy len vlastnej firmy; vyradeny system nove vazby nedostava
+    const systemIds = body.systemIds === undefined
+      ? undefined
+      : await resolveSystemLinks(current.organizationId, body.systemIds, current.systemIds ?? []);
 
     const data = {
       name: body.name ?? undefined,
@@ -1857,7 +1914,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       parentId: body.parentId === undefined ? undefined : body.parentId,
       sortOrder: body.sortOrder === undefined ? undefined : Number(body.sortOrder),
       relatedProcessIds: Array.isArray(body.relatedProcessIds) ? (body.relatedProcessIds as string[]) : undefined,
-      ...controlled
+      ...controlled,
+      systemIds
     };
 
     // R7: diff zmenenych poli pre audit log
@@ -1879,6 +1937,13 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     track('relatedProcessIds', current.relatedProcessIds, data.relatedProcessIds);
     track('isoLinks', current.isoLinks, data.isoLinks);
     for (const [field, value] of Object.entries(controlled)) track(field, (current as any)[field], value);
+    if (systemIds && JSON.stringify([...(current.systemIds ?? [])].sort()) !== JSON.stringify(systemIds)) {
+      // do auditu nazvy systemov v case zmeny
+      changedFields['systemy'] = {
+        from: await describeSystems(current.organizationId, current.systemIds ?? []),
+        to: await describeSystems(current.organizationId, systemIds)
+      };
+    }
     if (data.bpmnXml !== undefined && data.bpmnXml !== current.bpmnXml) {
       changedFields['bpmnXml'] = { from: '(diagram)', to: '(diagram zmeneny)' };
     }
@@ -2685,7 +2750,7 @@ async function requirePosition(request: express.Request, positionId: string) {
  * suvisiaci proces, pozicia, zlozka) a jeho nazov by sa potom vratil vo vypise.
  */
 async function assertOwnedIds(
-  model: 'processNode' | 'orgPosition' | 'orgUnit' | 'jobProfile' | 'person',
+  model: 'processNode' | 'orgPosition' | 'orgUnit' | 'jobProfile' | 'person' | 'itSystem',
   organizationId: string,
   ids: unknown[]
 ): Promise<string[]> {
@@ -3661,6 +3726,266 @@ app.delete('/api/positions/:positionId', async (request, response, next) => {
   }
 });
 
+// --- #43 GRAPH-01 IT systemy a dopad ich zmeny ---
+
+const MAX_SYSTEM_LINKS = 30;
+
+/** Systemy procesu alebo kroku: len vlastna firma; vyradeny system len ak uz bol pripojeny. */
+async function resolveSystemLinks(organizationId: string, value: unknown, alreadyLinked: string[]): Promise<string[]> {
+  if (!Array.isArray(value)) throw new HttpError(400, 'Systémy musia byť zoznam.');
+  const ids = (await assertOwnedIds('itSystem', organizationId, value)).sort();
+  if (ids.length > MAX_SYSTEM_LINKS) throw new HttpError(400, `Najviac ${MAX_SYSTEM_LINKS} systémov.`);
+  const fresh = ids.filter((id) => !alreadyLinked.includes(id));
+  if (fresh.length > 0) {
+    const retired = await prisma.itSystem.findFirst({ where: { organizationId, id: { in: fresh }, archivedAt: { not: null } }, select: { name: true } });
+    if (retired) throw new HttpError(400, `Systém „${retired.name}“ je vyradený — vyberte iný.`);
+  }
+  return ids;
+}
+
+async function describeSystems(organizationId: string, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const systems = await prisma.itSystem.findMany({ where: { organizationId, id: { in: ids } }, select: { name: true } });
+  return systems.map((system) => system.name).sort((a, b) => a.localeCompare(b, 'sk'));
+}
+
+async function requireSystem(request: express.Request, systemId: string) {
+  const system = await prisma.itSystem.findFirst({ where: { id: systemId, organizationId: orgScope(request) } });
+  if (!system) throw new HttpError(404, 'Systém sa nenašiel.');
+  return system;
+}
+
+const SYSTEM_INCLUDE = () => ({
+  ownerPosition: { select: { id: true, name: true, archivedAt: true, assignments: { where: activeOn(today()), select: { person: { select: { name: true } } } } } }
+});
+
+function mapItSystem(system: any, usage?: { processes: number; steps: number }) {
+  const holders = (system.ownerPosition?.assignments ?? []).map((item: any) => item.person?.name).filter(Boolean);
+  return {
+    id: system.id,
+    name: system.name,
+    code: system.code ?? '',
+    description: system.description ?? '',
+    vendor: system.vendor ?? '',
+    url: system.url ?? '',
+    ownerPositionId: system.ownerPositionId ?? null,
+    ownerPosition: system.ownerPosition
+      ? { id: system.ownerPosition.id, name: system.ownerPosition.name, holders, vacant: holders.length === 0, archived: Boolean(system.ownerPosition.archivedAt) }
+      : null,
+    archived: Boolean(system.archivedAt),
+    archivedAt: system.archivedAt ? businessDay.format(system.archivedAt) : null,
+    processCount: usage?.processes ?? 0,
+    stepCount: usage?.steps ?? 0
+  };
+}
+
+/** Odkaz na system — len http(s), aby sa v odkaze nedal podstrcit javascript: a pod. */
+function cleanUrl(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  const text = cleanText(value, 500);
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('protocol');
+    return url.toString();
+  } catch {
+    throw new HttpError(400, 'Odkaz musí začínať http:// alebo https://');
+  }
+}
+
+async function systemFields(organizationId: string, body: any, current?: { ownerPositionId: string | null }) {
+  const name = body.name === undefined ? undefined : cleanText(body.name, 200);
+  if (body.name !== undefined && !name) throw new HttpError(400, 'Názov systému je povinný.');
+  let ownerPositionId: string | null | undefined;
+  if (body.ownerPositionId !== undefined) {
+    [ownerPositionId = null] = await assertOwnedIds('orgPosition', organizationId, [body.ownerPositionId]);
+    if (ownerPositionId) await assertPositionsLinkable(organizationId, [ownerPositionId], current?.ownerPositionId ? [current.ownerPositionId] : []);
+  }
+  return {
+    name: name ?? undefined,
+    code: body.code === undefined ? undefined : (cleanText(body.code, 30)?.toUpperCase() ?? null),
+    description: body.description === undefined ? undefined : cleanText(body.description, 2000),
+    vendor: body.vendor === undefined ? undefined : cleanText(body.vendor, 200),
+    url: cleanUrl(body.url),
+    ownerPositionId
+  };
+}
+
+async function assertSystemNameFree(organizationId: string, name: string, systemId?: string) {
+  const clash = await prisma.itSystem.findFirst({
+    where: { organizationId, name: { equals: name, mode: 'insensitive' }, ...(systemId ? { id: { not: systemId } } : {}) },
+    select: { id: true }
+  });
+  if (clash) throw new HttpError(409, `Systém „${name}“ už v zozname je.`);
+}
+
+/** Kolko procesov a krokov (navrh) system pouziva — pre zoznam systemov. */
+async function systemUsage(organizationId: string) {
+  const [processes, steps] = await Promise.all([
+    prisma.processNode.findMany({ where: { organizationId, NOT: { systemIds: { isEmpty: true } } }, select: { id: true, systemIds: true } }),
+    prisma.processActivity.findMany({ where: { organizationId, NOT: { systemIds: { isEmpty: true } } }, select: { processNodeId: true, systemIds: true } })
+  ]);
+  const usage = new Map<string, { processIds: Set<string>; steps: number }>();
+  const entry = (id: string) => {
+    const item = usage.get(id) ?? { processIds: new Set<string>(), steps: 0 };
+    usage.set(id, item);
+    return item;
+  };
+  for (const process of processes) for (const id of process.systemIds) entry(id).processIds.add(process.id);
+  for (const step of steps) {
+    for (const id of step.systemIds) {
+      const item = entry(id);
+      item.processIds.add(step.processNodeId);
+      item.steps += 1;
+    }
+  }
+  return new Map([...usage].map(([id, item]) => [id, { processes: item.processIds.size, steps: item.steps }]));
+}
+
+/**
+ * Dopad zmeny alebo vyradenia systemu: procesy a kroky navrhu, platne
+ * a naplanovane verzie (ludia podla nich pracuju) a vlastnik systemu.
+ */
+async function systemImpact(organizationId: string, systemId: string, onlyCurrent = true) {
+  const now = today();
+  const contains = JSON.stringify([systemId]);
+  const [processes, steps, versions] = await Promise.all([
+    prisma.processNode.findMany({ where: { organizationId, systemIds: { has: systemId } }, select: { id: true, name: true, code: true } }),
+    prisma.processActivity.findMany({
+      where: { organizationId, systemIds: { has: systemId } },
+      select: { title: true, sortOrder: true, processNode: { select: { id: true, name: true, code: true } } }
+    }),
+    prisma.$queryRaw<Array<{ processNodeId: string; revision: number; name: string; effectiveFrom: Date; effectiveTo: Date | null }>>`
+      SELECT v."processNodeId", v.revision, v.snapshot->>'name' AS name, v."effectiveFrom", v."effectiveTo"
+      FROM "ProcessVersion" v
+      WHERE v."organizationId" = ${organizationId}
+        AND (${!onlyCurrent} OR v."effectiveTo" IS NULL OR v."effectiveTo" >= ${now})
+        AND (
+          COALESCE(v.snapshot->'systemIds', '[]'::jsonb) @> ${contains}::jsonb
+          OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(v.snapshot->'activities', '[]'::jsonb)) a
+                     WHERE COALESCE(a->'systemIds', '[]'::jsonb) @> ${contains}::jsonb)
+        )
+      ORDER BY name, v.revision`
+  ]);
+  const byProcess = new Map<string, { id: string; name: string; code: string; wholeProcess: boolean; steps: string[] }>();
+  const entry = (node: { id: string; name: string; code: string | null }) => {
+    const item = byProcess.get(node.id) ?? { id: node.id, name: node.name, code: node.code ?? '', wholeProcess: false, steps: [] };
+    byProcess.set(node.id, item);
+    return item;
+  };
+  for (const node of processes) entry(node).wholeProcess = true;
+  for (const step of steps.sort((a, b) => a.sortOrder - b.sortOrder)) entry(step.processNode).steps.push(`${step.sortOrder + 1}. ${step.title}`);
+  return {
+    processes: [...byProcess.values()].sort((a, b) => a.name.localeCompare(b.name, 'sk')),
+    versions: versions.map((version) => ({ processId: version.processNodeId, name: version.name, revision: version.revision, scheduled: version.effectiveFrom > now }))
+  };
+}
+
+app.get('/api/organizations/:organizationId/systems', async (request, response, next) => {
+  try {
+    const organizationId = orgScope(request);
+    const [systems, usage] = await Promise.all([
+      prisma.itSystem.findMany({ where: { organizationId }, include: SYSTEM_INCLUDE(), orderBy: { name: 'asc' } }),
+      systemUsage(organizationId)
+    ]);
+    response.json(systems.map((system) => mapItSystem(system, usage.get(system.id))));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/organizations/:organizationId/systems', async (request, response, next) => {
+  try {
+    const organizationId = orgScope(request);
+    const fields = await systemFields(organizationId, request.body ?? {});
+    if (!fields.name) throw new HttpError(400, 'Názov systému je povinný.');
+    await assertSystemNameFree(organizationId, fields.name);
+    const system = await prisma.itSystem.create({
+      data: { organizationId, ...fields, name: fields.name, ownerPositionId: fields.ownerPositionId ?? null },
+      include: SYSTEM_INCLUDE()
+    });
+    response.status(201).json(mapItSystem(system));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/systems/:systemId', async (request, response, next) => {
+  try {
+    const current = await requireSystem(request, request.params.systemId);
+    const fields = await systemFields(current.organizationId, request.body ?? {}, current);
+    if (fields.name) await assertSystemNameFree(current.organizationId, fields.name, current.id);
+    const system = await prisma.itSystem.update({ where: { id: current.id }, data: fields, include: SYSTEM_INCLUDE() });
+    response.json(mapItSystem(system, (await systemUsage(current.organizationId)).get(system.id)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/systems/:systemId/impact', async (request, response, next) => {
+  try {
+    const system = await prisma.itSystem.findFirst({ where: { id: request.params.systemId, organizationId: orgScope(request) }, include: SYSTEM_INCLUDE() });
+    if (!system) throw new HttpError(404, 'Systém sa nenašiel.');
+    response.json({ system: mapItSystem(system), ...(await systemImpact(system.organizationId, system.id)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Vyradenie systemu (napr. nahradenie novym ERP): az po potvrdeni dopadu.
+ * Vazby a verzie ostavaju — procesy sa ukazu v Prehlade, kym ich niekto neupravi.
+ */
+app.post('/api/systems/:systemId/archive', async (request, response, next) => {
+  try {
+    const system = await requireSystem(request, request.params.systemId);
+    if (system.archivedAt) throw new HttpError(409, 'Systém už je vyradený.');
+    if (request.body?.confirm !== true) {
+      throw new HttpError(400, 'Najprv si pozrite dopad vyradenia (GET /systems/:id/impact) a potvrďte ho.');
+    }
+    const impact = await systemImpact(system.organizationId, system.id);
+    await prisma.$transaction(async (tx) => {
+      await tx.itSystem.update({ where: { id: system.id }, data: { archivedAt: new Date() } });
+      await emitEvent(tx, {
+        organizationId: system.organizationId,
+        type: 'SystemArchived',
+        actorId: auth(request).userId,
+        payload: { systemName: system.name, processCount: impact.processes.length, processes: impact.processes.slice(0, 10).map((item) => item.name) }
+      });
+    });
+    kickDispatcher();
+    const fresh = await prisma.itSystem.findUniqueOrThrow({ where: { id: system.id }, include: SYSTEM_INCLUDE() });
+    response.json({ system: mapItSystem(fresh), ...impact });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/systems/:systemId/restore', async (request, response, next) => {
+  try {
+    const system = await requireSystem(request, request.params.systemId);
+    const fresh = await prisma.itSystem.update({ where: { id: system.id }, data: { archivedAt: null }, include: SYSTEM_INCLUDE() });
+    response.json(mapItSystem(fresh));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/systems/:systemId', async (request, response, next) => {
+  try {
+    const system = await requireSystem(request, request.params.systemId);
+    // pouzity system sa nemaze — aj stara verzia procesu by stratila jeho nazov
+    const impact = await systemImpact(system.organizationId, system.id, false);
+    if (impact.processes.length > 0 || impact.versions.length > 0) {
+      throw new HttpError(409, `Systém „${system.name}“ je použitý (procesy: ${impact.processes.length}, verzie: ${impact.versions.length}) — vyraďte ho, dopad uvidíte pred potvrdením.`);
+    }
+    await prisma.itSystem.delete({ where: { id: system.id } });
+    response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // --- #13 adresar osob a #14 obsadenie miest s obdobim platnosti ---
 
 /**
@@ -3869,7 +4194,7 @@ app.get('/api/me/work', async (request, response, next) => {
 type EventClient = Pick<typeof prisma, 'domainEvent'>;
 type DomainEventInput = {
   organizationId: string;
-  type: 'ProcessPublished' | 'ReviewDue' | 'PositionAssignmentChanged' | 'ApprovalRequested' | 'ApprovalDecided' | 'FeedbackSubmitted' | 'FeedbackDecided' | 'DocumentSuperseded' | 'PositionArchived';
+  type: 'ProcessPublished' | 'ReviewDue' | 'PositionAssignmentChanged' | 'ApprovalRequested' | 'ApprovalDecided' | 'FeedbackSubmitted' | 'FeedbackDecided' | 'DocumentSuperseded' | 'PositionArchived' | 'SystemArchived';
   processNodeId?: string | null;
   actorId?: string | null;
   payload: Record<string, unknown>;
@@ -3998,6 +4323,15 @@ async function notificationsFor(event: { organizationId: string; type: string; p
           ? `Dotknuté procesy: ${p.processCount}${(p.ownerless ?? []).length ? `; bez vlastníka: ${p.ownerless.join(', ')}` : ''}. Určte nové miesto.`
           : 'Žiadny proces od neho nezávisel.',
         link: '/app/prehlad?kategoria=vacant',
+        recipients: await usersWithPermission(orgId, 'process:write')
+      };
+    case 'SystemArchived':
+      return {
+        title: `Systém „${p.systemName}“ bol vyradený`,
+        body: p.processCount
+          ? `Používa ho procesov: ${p.processCount} (${(p.processes ?? []).join(', ')}${p.processCount > (p.processes ?? []).length ? ', …' : ''}). Upravte postup.`
+          : 'Žiadny proces ho nepoužíval.',
+        link: '/app/prehlad?kategoria=retiredSystems',
         recipients: await usersWithPermission(orgId, 'process:write')
       };
     case 'PositionAssignmentChanged':
@@ -4421,7 +4755,7 @@ app.get('/api/search', async (request, response, next) => {
     const raw = String(request.query['q'] ?? '').slice(0, 200);
     const tokens = searchTokens(raw);
     if (tokens.join('').length < 2) {
-      response.json({ query: raw, processes: [], positions: [], documents: [] });
+      response.json({ query: raw, processes: [], positions: [], documents: [], systems: [] });
       return;
     }
     const tsquery = tokens.map((token) => `${token}:*`).join(' & ');
@@ -4456,6 +4790,13 @@ app.get('/api/search', async (request, response, next) => {
       WHERE p."organizationId" = ${organizationId}
         AND pb_search_vector(p.name) @@ to_tsquery('simple', ${tsquery})
       ORDER BY p.name LIMIT 20`;
+
+    // #43 — IT systemy podla nazvu, skratky a dodavatela
+    const systems = await prisma.$queryRaw<Array<{ id: string; name: string; code: string | null; archived: boolean }>>`
+      SELECT s.id, s.name, s.code, s."archivedAt" IS NOT NULL AS archived FROM "ItSystem" s
+      WHERE s."organizationId" = ${organizationId}
+        AND pb_search_vector(concat_ws(' ', s.name, s.code, s.vendor)) @@ to_tsquery('simple', ${tsquery})
+      ORDER BY s.name LIMIT 20`;
 
     const documents = await prisma.$queryRaw<Array<{ id: string; fileName: string; processId: string | null; processName: string | null }>>`
       SELECT a.id, a."fileName", a."processNodeId" AS "processId", n.name AS "processName"
@@ -4515,7 +4856,7 @@ app.get('/api/search', async (request, response, next) => {
           .map(({ rank: _r, ...match }) => match)
       }));
 
-    response.json({ query: raw, processes, positions, documents });
+    response.json({ query: raw, processes, positions, documents, systems });
   } catch (error) {
     next(error);
   }
@@ -4801,7 +5142,7 @@ app.delete('/api/readiness-exceptions/:exceptionId', async (request, response, n
 // --- #34 UX-01b prehlad: co treba vo firme napravit ---
 
 type OverviewItem = { id: string; name: string; code: string; detail: string; overdue?: boolean };
-const OVERVIEW_KEYS = ['review', 'pendingApproval', 'feedback', 'staleDocuments', 'ownerless', 'vacant', 'incomplete', 'unpublished', 'pendingChanges'] as const;
+const OVERVIEW_KEYS = ['review', 'pendingApproval', 'feedback', 'staleDocuments', 'ownerless', 'vacant', 'retiredSystems', 'incomplete', 'unpublished', 'pendingChanges'] as const;
 
 /**
  * Kazda kategoria je zoznam procesov s konkretnym problemom a popisom, co
@@ -4845,6 +5186,11 @@ app.get('/api/overview', async (request, response, next) => {
       ? await prisma.attachment.findMany({ where: { organizationId, documentId: { in: referencedDocuments } }, select: DOCUMENT_VERSION_SELECT })
       : [];
     const currentDocument = new Map(currentDocumentVersions(documentVersions, at).map((item) => [item.documentId ?? item.id, item]));
+    // #43 — vyradene IT systemy, ktore este nejaky proces pouziva
+    const retiredSystems = new Map((await prisma.itSystem.findMany({
+      where: { organizationId, archivedAt: { not: null } },
+      select: { id: true, name: true }
+    })).map((system) => [system.id, system.name]));
 
     const categories = Object.fromEntries(OVERVIEW_KEYS.map((key) => [key, [] as OverviewItem[]])) as Record<(typeof OVERVIEW_KEYS)[number], OverviewItem[]>;
     for (const node of nodes) {
@@ -4891,6 +5237,19 @@ app.get('/api/overview', async (request, response, next) => {
       });
       if (vacant.size > 0) {
         categories.vacant.push({ ...base, detail: `Neobsadené: ${[...vacant].map(([name, where]) => `${name} — ${[...new Set(where)].join(', ')}`).join('; ')}` });
+      }
+      if (retiredSystems.size > 0) {
+        // navrh aj platna verzia — ludia podla nej pracuju, kym ju nenahradi nova
+        const used = new Set([
+          ...(node.systemIds ?? []),
+          ...node.activities.flatMap((activity) => activity.systemIds ?? []),
+          ...(effectiveSnapshot?.systemIds ?? []),
+          ...(effectiveSnapshot?.activities ?? []).flatMap((activity) => activity.systemIds ?? [])
+        ]);
+        const names = [...used].flatMap((id) => retiredSystems.get(id) ?? []).sort((a, b) => a.localeCompare(b, 'sk'));
+        if (names.length > 0) {
+          categories.retiredSystems.push({ ...base, detail: `Používa vyradený systém: ${names.join(', ')} — nahraďte ho alebo upravte postup` });
+        }
       }
 
       const missing = publishReadiness(node).filter((item) => item.required && !item.ok);
