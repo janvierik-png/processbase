@@ -94,6 +94,8 @@ model Organization {
   storageQuotaMb     Int                  @default(1024)
   /// #37 — true = verziu procesu mozno zverejnit len schvalenim (nie priamym publikovanim)
   requireApproval    Boolean              @default(false)
+  /// #40 — profil „Kvalita a audit“: kontrolne otazky a pripravenost evidencie
+  qualityProfile     Boolean              @default(false)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
@@ -117,6 +119,7 @@ model Organization {
   domainEvents       DomainEvent[]
   notifications      Notification[]
   controlledDocuments ControlledDocument[]
+  evidenceRecords    EvidenceRecord[]
 }
 
 /// Prihlasovacia relacia. V DB je len hash tokenu — unik databazy tak
@@ -162,6 +165,9 @@ model User {
   authoredFeedback  ProcessFeedback[] @relation("FeedbackAuthor")
   decidedFeedback   ProcessFeedback[] @relation("FeedbackDecider")
   notifications     Notification[]
+  evidenceRecords   EvidenceRecord[]    @relation("EvidenceAuthor")
+  readinessMarked   ReadinessException[] @relation("ExceptionMarker")
+  readinessApproved ReadinessException[] @relation("ExceptionApprover")
   sessions       Session[]
   processChanges ProcessChangeLog[]
 }
@@ -238,6 +244,17 @@ model ProcessNode {
   flowchartXml       String?
   isoLinks           String[]
   relatedProcessIds  String[]
+  /// #40 QUAL-01 — riadeny proces: vstupy, vystupy a nadvaznost na ine procesy
+  inputs             String[]
+  outputs            String[]
+  upstreamProcessIds   String[]
+  downstreamProcessIds String[]
+  /// profil Kvalita a audit: meradlo uspechu, zdroje, rizika, prilezitosti, co sa uchovava ako zaznam
+  successMeasure     String?
+  resources          String?
+  risks              String?
+  opportunities      String?
+  evidenceRequirements String[]
   isoSuggestions     Json?
   translations       Json?
   camundaProcessKey  String?
@@ -257,6 +274,8 @@ model ProcessNode {
   versions           ProcessVersion[]
   feedback           ProcessFeedback[]
   controlledDocuments ControlledDocument[]
+  evidenceRecords    EvidenceRecord[]
+  readinessExceptions ReadinessException[]
   activities         ProcessActivity[]
 
   @@unique([organizationId, code])
@@ -812,4 +831,47 @@ model ControlledDocument {
   versions        Attachment[]
 
   @@index([organizationId, processNodeId])
+}
+
+/// #40 QUAL-01 — zaznam o vykonani (dokaz): co sa urobilo, kedy, kto to zapisal.
+/// Odlisuje sa od postupu — existujuci postup este neznamena, ze sa vykonal.
+model EvidenceRecord {
+  id             String        @id @default(uuid())
+  organizationId String
+  processNodeId  String
+  /// ktoru poziadavku na zaznam (text z evidenceRequirements) dokladuje
+  requirement    String
+  /// den vykonania
+  performedOn    DateTime      @db.Date
+  note           String?
+  /// volitelne odkaz na verziu dokumentu (priloha)
+  attachmentId   String?
+  createdById    String?
+  createdAt      DateTime      @default(now())
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  processNode    ProcessNode   @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  createdBy      User?         @relation("EvidenceAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([processNodeId, requirement, performedOn])
+}
+
+/// #40 — polozka pripravenosti oznacena ako neaplikovatelna: s dovodom a schvalenim
+/// inym clovekom (nie svojvolnym skrytim chyby).
+model ReadinessException {
+  id             String      @id @default(uuid())
+  organizationId String
+  processNodeId  String
+  itemKey        String
+  reason         String
+  markedById     String?
+  markedAt       DateTime    @default(now())
+  approvedById   String?
+  approvedAt     DateTime?
+
+  processNode    ProcessNode @relation(fields: [processNodeId], references: [id], onDelete: Cascade)
+  markedBy       User?       @relation("ExceptionMarker", fields: [markedById], references: [id], onDelete: SetNull)
+  approvedBy     User?       @relation("ExceptionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([processNodeId, itemKey])
 }

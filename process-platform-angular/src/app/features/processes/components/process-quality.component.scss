@@ -1,0 +1,130 @@
+:host { display: contents; }
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line);
+
+  h3 { margin: 0; }
+}
+
+.card-body {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+
+  & + .card-body { border-top: 1px solid var(--line); }
+}
+
+.info-grid,
+.edit-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  .wide { grid-column: 1 / -1; }
+  p { margin: 2px 0 0; white-space: pre-wrap; }
+}
+
+.edit-grid {
+  label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+  fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+  legend { margin-bottom: 6px; color: var(--muted); font-size: 13px; }
+}
+
+.label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+.link-list {
+  display: grid;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.check-row { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
+
+.chip-list { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+
+  &.link:hover { text-decoration: underline; }
+}
+
+.edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.error { margin: 0; color: var(--warn); }
+.muted-small { color: var(--faint); font-size: 13px; }
+
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+
+  input, select { min-height: 30px; font-size: 13px; }
+  input[name='evNote'], input[name^='na-'] { flex: 1 1 200px; }
+}
+
+// #40 — pripravenosť evidencie ako zoznam stavov
+.readiness-head { display: grid; gap: 2px; }
+
+.readiness-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+
+  .state {
+    justify-self: start;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  &.done .state { background: var(--green-soft); color: var(--green); }
+  &.attention { border-color: var(--warn); }
+  &.attention .state { background: var(--warn-soft); color: var(--warn); }
+  &.na .state { background: var(--surface-alt); color: var(--ink-soft); }
+  &.unverified .state { background: var(--gold-soft, #fff1c2); color: var(--ink); }
+
+  small { display: block; color: var(--ink-soft); }
+  .pending { color: var(--warn); }
+}
+
+.readiness-main { display: grid; gap: 2px; min-width: 0; }
+.readiness-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+
+.evidence-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 10px;
+  font-size: 13px;
+
+  .date { font-family: var(--font-mono, ui-monospace, monospace); }
+}
+
+@media (max-width: 720px) {
+  .info-grid, .edit-grid { grid-template-columns: minmax(0, 1fr); }
+  .readiness-row { grid-template-columns: minmax(0, 1fr); }
+}

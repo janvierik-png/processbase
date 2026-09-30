@@ -516,6 +516,12 @@
         </section>
         }
 
+        <!-- #40 — riadený proces a profil Kvalita a audit -->
+        @if (process.type === 'process') {
+          <pp-process-quality [process]="process" [processes]="processes()" [readOnly]="readOnlyView()"
+            [qualityProfile]="qualityProfile" (saved)="openDetail(process.id)" />
+        }
+
         <!-- #36 — podnet smie poslať každý; vlastník procesu (podľa miesta) alebo editor rozhodne -->
         @if (process.type === 'process' && process.view !== 'approval') {
         <section class="card feedback-card">

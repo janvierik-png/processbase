@@ -12,6 +12,8 @@ import {
   Overview,
   ProcessFeedback,
   SearchResult,
+  QualityReadiness,
+  EvidenceRecord,
   ProcessNode,
   ProcessVersionMeta
 } from '../models/process.model';
@@ -144,6 +146,32 @@ export class ProcessStoreService {
   /** #35 — globálne vyhľadávanie v procesoch, miestach a dokumentoch firmy. */
   search(query: string): Observable<SearchResult> {
     return this.http.get<SearchResult>(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}`);
+  }
+
+  // --- #40 riadený proces a pripravenosť evidencie ---
+
+  quality(id: string): Observable<QualityReadiness> {
+    return this.http.get<QualityReadiness>(`${API_BASE_URL}/processes/${id}/quality`);
+  }
+
+  evidence(id: string): Observable<EvidenceRecord[]> {
+    return this.http.get<EvidenceRecord[]>(`${API_BASE_URL}/processes/${id}/evidence`);
+  }
+
+  addEvidence(id: string, payload: { requirement: string; performedOn: string; note?: string }): Observable<EvidenceRecord> {
+    return this.http.post<EvidenceRecord>(`${API_BASE_URL}/processes/${id}/evidence`, payload);
+  }
+
+  markNotApplicable(id: string, itemKey: string, reason: string): Observable<{ id: string }> {
+    return this.http.post<{ id: string }>(`${API_BASE_URL}/processes/${id}/readiness-exceptions`, { itemKey, reason });
+  }
+
+  approveException(exceptionId: string): Observable<{ id: string }> {
+    return this.http.post<{ id: string }>(`${API_BASE_URL}/readiness-exceptions/${exceptionId}/approve`, {});
+  }
+
+  revokeException(exceptionId: string): Observable<void> {
+    return this.http.delete<void>(`${API_BASE_URL}/readiness-exceptions/${exceptionId}`);
   }
 
   /** #34 — čo treba vo firme napraviť (predvolene dnes). */

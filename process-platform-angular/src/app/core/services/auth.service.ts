@@ -137,6 +137,19 @@ export class AuthService {
     });
   }
 
+  /** #40 — profil „Kvalita a audit“: kontrolné otázky a pripravenosť evidencie. */
+  updateQualityProfile(qualityProfile: boolean): void {
+    const organizationId = this.currentOrganizationId();
+    if (!organizationId) return;
+    this.http.patch<Organization>(`${API_BASE_URL}/organizations/${organizationId}`, { qualityProfile }).subscribe({
+      next: (organization) => {
+        this.currentOrganizationSignal.set(organization);
+        this.storage.write(this.currentOrgKey, organization);
+      },
+      error: (error) => this.error.set(error?.error?.message ?? 'Nastavenie sa nepodarilo uložiť.')
+    });
+  }
+
   organizationUsers(): Observable<User[]> {
     return this.http.get<User[]>(`${API_BASE_URL}/organizations/${this.currentOrganizationId()}/users`);
   }

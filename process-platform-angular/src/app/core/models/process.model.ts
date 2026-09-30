@@ -20,6 +20,16 @@ export interface ProcessNode {
   risks?: string;
   descriptionText?: string;
   relatedProcessIds?: string[];
+  /** #40 — riadený proces: vstupy, výstupy, nadväzujúce procesy */
+  inputs?: string[];
+  outputs?: string[];
+  upstreamProcessIds?: string[];
+  downstreamProcessIds?: string[];
+  /** #40 — profil Kvalita a audit */
+  successMeasure?: string;
+  resources?: string;
+  opportunities?: string;
+  evidenceRequirements?: string[];
   positionIds?: string[];
   positions?: ProcessPositionRef[];
   /** #15 — miesto vlastnika procesu; owner je jeho dnesny drzitel */
@@ -284,4 +294,35 @@ export interface DocumentVersions {
   status: 'active' | 'archived';
   ownerPosition: { id: string; name: string } | null;
   versions: Array<Attachment & { state: 'current' | 'scheduled' | 'superseded'; usedIn: Array<{ revision: number; processName: string }> }>;
+}
+
+/** #40 — pripravenosť evidencie: zoznam stavov, nikdy percento zhody. */
+export type ReadinessState = 'done' | 'attention' | 'na' | 'unverified';
+
+export interface ReadinessItem {
+  key: string;
+  label: string;
+  state: ReadinessState;
+  detail: string;
+  source: string;
+  fix: 'publish' | 'relations' | 'steps' | 'control' | 'quality' | 'evidence';
+  exception?: { id: string; reason: string; markedBy: string | null; approvedBy: string | null; pending: boolean };
+}
+
+export interface QualityReadiness {
+  enabled: boolean;
+  assessedAt?: string;
+  note?: string;
+  source?: string;
+  items: ReadinessItem[];
+}
+
+export interface EvidenceRecord {
+  id: string;
+  requirement: string;
+  performedOn: string;
+  note: string | null;
+  attachmentId?: string | null;
+  createdBy: string | null;
+  createdAt?: string;
 }

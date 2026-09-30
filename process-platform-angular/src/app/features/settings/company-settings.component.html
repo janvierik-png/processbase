@@ -21,6 +21,19 @@
     <p class="muted">Návrh potom editor odošle na schválenie a verzia vznikne až rozhodnutím schvaľovateľa —
       nie toho istého človeka. Bez zaškrtnutia môže editor publikovať priamo.</p>
   </section>
+
+  <!-- #40 — profil Kvalita a audit (scenár 4) -->
+  <section class="panel">
+    <h2>Kvalita a audit</h2>
+    <label class="check-row">
+      <input type="checkbox" [checked]="organization()?.qualityProfile"
+        (change)="auth.updateQualityProfile($any($event.target).checked)">
+      Zapnúť profil „Kvalita a audit“
+    </label>
+    <p class="muted">Pri procesoch pribudne meradlo úspechu, riziká, záznamy o vykonaní a pripravenosť evidencie
+      pre správcu kvality a ISO auditora. Je to podklad pre posúdenie — aplikácia nehodnotí zhodu s normou
+      ani proces „necertifikuje“. Bežní zamestnanci kontrolné otázky nevidia.</p>
+  </section>
   }
 
   <section class="panel">

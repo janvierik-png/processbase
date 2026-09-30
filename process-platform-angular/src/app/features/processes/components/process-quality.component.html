@@ -1,0 +1,186 @@
+<!-- #40 — riadený proces: vstupy, výstupy a nadväznosť -->
+<section class="card">
+  <header class="card-head">
+    <h3>Riadenie procesu</h3>
+    @if (!readOnly && editing !== 'control') {
+      <button type="button" class="ghost small" (click)="startEdit('control')">Upraviť</button>
+    }
+  </header>
+  @if (editing === 'control') {
+    <form class="card-body edit-grid" (ngSubmit)="save()">
+      <label>Vstupy (každý na riadok)
+        <textarea name="inputs" [(ngModel)]="draft.inputs" rows="3" placeholder="napr. Faktúra od dodávateľa"></textarea>
+      </label>
+      <label>Výstupy (každý na riadok)
+        <textarea name="outputs" [(ngModel)]="draft.outputs" rows="3" placeholder="napr. Uhradená faktúra"></textarea>
+      </label>
+      <fieldset>
+        <legend>Predchádzajúce procesy</legend>
+        <div class="link-list">
+          @for (item of linkCandidates(); track item.id) {
+            <label class="check-row"><input type="checkbox" [checked]="draft.upstream.includes(item.id)" (change)="toggleLink('upstream', item.id)"> {{ item.name }}</label>
+          } @empty {
+            <span class="muted-small">Firma nemá ďalšie procesy.</span>
+          }
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Nasledujúce procesy</legend>
+        <div class="link-list">
+          @for (item of linkCandidates(); track item.id) {
+            <label class="check-row"><input type="checkbox" [checked]="draft.downstream.includes(item.id)" (change)="toggleLink('downstream', item.id)"> {{ item.name }}</label>
+          }
+        </div>
+      </fieldset>
+      @if (error()) { <p class="error wide">{{ error() }}</p> }
+      <div class="edit-actions wide">
+        <button class="primary" type="submit">Uložiť</button>
+        <button type="button" (click)="editing = null">Zrušiť</button>
+      </div>
+    </form>
+  } @else {
+    <div class="card-body info-grid">
+      <div>
+        <span class="label">Vstupy</span>
+        <div class="chip-list">
+          @for (item of process.inputs ?? []; track $index) { <span class="chip">{{ item }}</span> } @empty { <span class="muted-small">—</span> }
+        </div>
+      </div>
+      <div>
+        <span class="label">Výstupy</span>
+        <div class="chip-list">
+          @for (item of process.outputs ?? []; track $index) { <span class="chip">{{ item }}</span> } @empty { <span class="muted-small">{{ process.outcome || '—' }}</span> }
+        </div>
+      </div>
+      <div>
+        <span class="label">Predchádzajúce procesy</span>
+        <div class="chip-list">
+          @for (id of process.upstreamProcessIds ?? []; track id) { <a class="chip link" [routerLink]="['/app/processes', id]">← {{ processName(id) }}</a> } @empty { <span class="muted-small">—</span> }
+        </div>
+      </div>
+      <div>
+        <span class="label">Nasledujúce procesy</span>
+        <div class="chip-list">
+          @for (id of process.downstreamProcessIds ?? []; track id) { <a class="chip link" [routerLink]="['/app/processes', id]">{{ processName(id) }} →</a> } @empty { <span class="muted-small">—</span> }
+        </div>
+      </div>
+    </div>
+  }
+</section>
+
+@if (qualityProfile) {
+  <!-- #40 — profil Kvalita a audit: podklad pre posúdenie, nie hodnotenie zhody -->
+  <section class="card quality-card">
+    <header class="card-head">
+      <h3>Kvalita a audit</h3>
+      @if (!readOnly && editing !== 'quality') {
+        <button type="button" class="ghost small" (click)="startEdit('quality')">Upraviť</button>
+      }
+    </header>
+    @if (editing === 'quality') {
+      <form class="card-body edit-grid" (ngSubmit)="save()">
+        <label class="wide">Meradlo úspechu — podľa čoho viete, že proces funguje
+          <textarea name="measure" [(ngModel)]="draft.successMeasure" rows="2" placeholder="napr. 95 % faktúr uhradených do splatnosti"></textarea>
+        </label>
+        <label class="wide">Riziká — čo sa môže pokaziť a čo robíte, aby sa to nestalo?
+          <textarea name="risks" [(ngModel)]="draft.risks" rows="2"></textarea>
+        </label>
+        <label>Príležitosti na zlepšenie
+          <textarea name="opportunities" [(ngModel)]="draft.opportunities" rows="2"></textarea>
+        </label>
+        <label>Zdroje (systémy, nástroje)
+          <textarea name="resources" [(ngModel)]="draft.resources" rows="2"></textarea>
+        </label>
+        <label class="wide">Čo sa uchováva ako záznam o vykonaní (každé na riadok)
+          <textarea name="evidence" [(ngModel)]="draft.evidence" rows="2" placeholder="napr. Podpísaný protokol kontroly"></textarea>
+        </label>
+        @if (error()) { <p class="error wide">{{ error() }}</p> }
+        <div class="edit-actions wide">
+          <button class="primary" type="submit">Uložiť</button>
+          <button type="button" (click)="editing = null">Zrušiť</button>
+        </div>
+      </form>
+    } @else {
+      <div class="card-body info-grid">
+        <div class="wide"><span class="label">Meradlo úspechu</span><p>{{ process.successMeasure || '—' }}</p></div>
+        <div class="wide"><span class="label">Riziká</span><p>{{ process.risks || '—' }}</p></div>
+        <div><span class="label">Príležitosti</span><p>{{ process.opportunities || '—' }}</p></div>
+        <div><span class="label">Zdroje</span><p>{{ process.resources || '—' }}</p></div>
+        <div class="wide">
+          <span class="label">Záznamy o vykonaní</span>
+          <div class="chip-list">
+            @for (item of process.evidenceRequirements ?? []; track $index) { <span class="chip">{{ item }}</span> } @empty { <span class="muted-small">Neurčené.</span> }
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (quality(); as q) {
+      @if (q.enabled) {
+        <div class="card-body readiness">
+          <div class="readiness-head">
+            <strong>Pripravenosť evidencie</strong>
+            <small class="muted-small">{{ q.note }} Posudzuje sa: {{ q.source }}.</small>
+          </div>
+          @for (item of q.items; track item.key) {
+            <div class="readiness-row" [class]="'readiness-row ' + item.state">
+              <span class="state">{{ stateLabel(item.state) }}</span>
+              <div class="readiness-main">
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.detail }}</small>
+                @if (item.exception?.pending) {
+                  <small class="pending">Návrh „neaplikovateľné“: {{ item.exception?.reason }} ({{ item.exception?.markedBy ?? '—' }}) — čaká na schválenie iným človekom.</small>
+                } @else if (item.exception && item.state === 'na') {
+                  <small>Označil(a) {{ item.exception.markedBy ?? '—' }}, schválil(a) {{ item.exception.approvedBy ?? '—' }}.</small>
+                }
+                @if (exceptionFor === item.key) {
+                  <div class="inline-form">
+                    <input [name]="'na-' + item.key" [(ngModel)]="exceptionReason" placeholder="Prečo táto položka pre proces neplatí" maxlength="1000">
+                    <button type="button" class="small primary" (click)="markNotApplicable(item)">Navrhnúť</button>
+                    <button type="button" class="small" (click)="exceptionFor = null">Zrušiť</button>
+                  </div>
+                }
+              </div>
+              <div class="readiness-actions">
+                @if (item.exception?.pending && canApprove) {
+                  <button type="button" class="small" (click)="approveException(item)">Schváliť výnimku</button>
+                }
+                @if (item.exception) {
+                  <button type="button" class="ghost small" (click)="revokeException(item)">Zrušiť výnimku</button>
+                } @else if (item.state !== 'done' && item.key !== 'procedure' && canAssess && exceptionFor !== item.key) {
+                  <button type="button" class="ghost small" (click)="exceptionFor = item.key; exceptionReason = ''">Neaplikovateľné…</button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      }
+    }
+
+    @if (records(); as list) {
+      <div class="card-body evidence">
+        <strong>Záznamy o vykonaní</strong>
+        @if ((process.evidenceRequirements ?? []).length > 0 && process.view !== 'version') {
+          <form class="inline-form" (ngSubmit)="addEvidence()">
+            <select name="evRequirement" [(ngModel)]="evidenceModel.requirement" aria-label="Záznam">
+              @for (item of process.evidenceRequirements ?? []; track $index) { <option [value]="item">{{ item }}</option> }
+            </select>
+            <input type="date" name="evDate" [(ngModel)]="evidenceModel.performedOn" aria-label="Deň vykonania">
+            <input name="evNote" [(ngModel)]="evidenceModel.note" placeholder="Poznámka (voliteľné)" maxlength="1000">
+            <button type="submit" class="small primary">Zaznamenať vykonanie</button>
+          </form>
+        }
+        @for (record of list.slice(0, 10); track record.id) {
+          <div class="evidence-row">
+            <span class="date">{{ record.performedOn }}</span>
+            <span>{{ record.requirement }}{{ record.note ? ' — ' + record.note : '' }}</span>
+            <small class="muted-small">{{ record.createdBy ?? '—' }}</small>
+          </div>
+        } @empty {
+          <span class="muted-small">Zatiaľ žiadny záznam — postup existuje, dôkaz o vykonaní zatiaľ nie.</span>
+        }
+        @if (error() && !editing) { <p class="error">{{ error() }}</p> }
+      </div>
+    }
+  </section>
+}

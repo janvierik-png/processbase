@@ -259,6 +259,10 @@ const PERMISSION_RULES: PermissionRule[] = [
   { methods: ['PATCH', 'DELETE'], pattern: /^\/api\/documents\/[^/]+$/, anyOf: ['process:write'] },
   // #31 — nova verzia riadeneho dokumentu
   { methods: ['POST'], pattern: /^\/api\/documents\/[^/]+\/versions$/, anyOf: ['process:write'] },
+  // #40 — neaplikovatelne polozky pripravenosti: navrhne editor alebo ISO auditor, schvali iny schvalovatel
+  { methods: ['POST'], pattern: /^\/api\/processes\/[^/]+\/readiness-exceptions$/, anyOf: ['process:write', 'iso:write'] },
+  { methods: ['DELETE'], pattern: /^\/api\/readiness-exceptions\/[^/]+$/, anyOf: ['process:write', 'iso:write'] },
+  { methods: ['POST'], pattern: /^\/api\/readiness-exceptions\/[^/]+\/approve$/, anyOf: ['approval:approve'] },
 
   // firma, pozvanky (aj ich citanie — obsahuju tokeny), nastavenia
   { methods: ['PATCH'], pattern: /^\/api\/organizations\/[^/]+$/, anyOf: ['organization:write'] },
@@ -287,7 +291,9 @@ const SELF_SERVICE_WRITES = [
   /^\/api\/processes\/[^/]+\/feedback$/,
   /^\/api\/feedback\/[^/]+\/decide$/,
   // #38 — vlastne upozornenia (handler meni len upozornenia prihlaseneho)
-  /^\/api\/me\/notifications\/read$/
+  /^\/api\/me\/notifications\/read$/,
+  // #40 — zaznam o vykonani smie pridat aj vykonavatel procesu; handler overi vztah k procesu
+  /^\/api\/processes\/[^/]+\/evidence$/
 ];
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -344,6 +350,14 @@ type ProcessTreeNode = {
   risks?: string;
   descriptionText?: string;
   relatedProcessIds?: string[];
+  inputs?: string[];
+  outputs?: string[];
+  upstreamProcessIds?: string[];
+  downstreamProcessIds?: string[];
+  successMeasure?: string;
+  resources?: string;
+  opportunities?: string;
+  evidenceRequirements?: string[];
   positionIds?: string[];
   positions?: Responsibility[];
   isoSuggestions?: unknown;
@@ -554,9 +568,18 @@ function mapNode(node: any): ProcessTreeNode {
         .sort((a: any, b: any) => RACI_ORDER.indexOf(a.role) - RACI_ORDER.indexOf(b.role) || a.name.localeCompare(b.name, 'sk'))
     })),
     readiness: node.type === ProcessNodeType.GROUP ? [] : publishReadiness(node),
-    risks: '',
     descriptionText: node.descriptionText ?? '',
     relatedProcessIds: node.relatedProcessIds ?? [],
+    // #40 — riadeny proces a profil Kvalita a audit
+    inputs: node.inputs ?? [],
+    outputs: node.outputs ?? [],
+    upstreamProcessIds: node.upstreamProcessIds ?? [],
+    downstreamProcessIds: node.downstreamProcessIds ?? [],
+    successMeasure: node.successMeasure ?? '',
+    resources: node.resources ?? '',
+    risks: node.risks ?? '',
+    opportunities: node.opportunities ?? '',
+    evidenceRequirements: node.evidenceRequirements ?? [],
     positionIds: performers.map((item: any) => item.id),
     positions: performers,
     isoSuggestions: node.isoSuggestions ?? [],
@@ -816,6 +839,16 @@ type ProcessSnapshot = {
   outcome?: string;
   /** #29 — raci len pri krokoch, ktore ho maju (starsie verzie ho nemaju) */
   activities?: Array<{ id: string; title: string; description: string; raci?: SnapshotRaci[] }>;
+  /** #40 — riadeny proces a profil Kvalita a audit; len vyplnene polia (odtlacok starsich verzii sa nemeni) */
+  inputs?: string[];
+  outputs?: string[];
+  upstreamProcessIds?: string[];
+  downstreamProcessIds?: string[];
+  successMeasure?: string;
+  resources?: string;
+  risks?: string;
+  opportunities?: string;
+  evidenceRequirements?: string[];
   /** ID miest, nie mena — kto miesto zastava, sa odvodzuje z obsadenia v case */
   responsibilities: Array<{ positionId: string; role: string }>;
   documentIds: string[];
@@ -929,10 +962,28 @@ function buildSnapshot(node: any): ProcessSnapshot {
       // bez zodpovednosti kluc chyba — odtlacok starsich verzii ostava rovnaky
       return { id: activity.id, title: activity.title, description: activity.description ?? '', ...(raci.length > 0 ? { raci } : {}) };
     }),
+    ...controlledSnapshotFields(node),
     responsibilities,
     documentIds: documents.map((document: any) => document.id),
     documents
   };
+}
+
+/** #40 — polia riadeneho procesu do snapshotu, len ked su vyplnene. */
+function controlledSnapshotFields(node: any): Partial<ProcessSnapshot> {
+  const fields: Partial<ProcessSnapshot> = {};
+  const list = (value: unknown) => (Array.isArray(value) ? value.filter((item) => typeof item === 'string' && item) as string[] : []);
+  const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value : undefined);
+  if (list(node.inputs).length) fields.inputs = list(node.inputs);
+  if (list(node.outputs).length) fields.outputs = list(node.outputs);
+  if (list(node.upstreamProcessIds).length) fields.upstreamProcessIds = [...list(node.upstreamProcessIds)].sort();
+  if (list(node.downstreamProcessIds).length) fields.downstreamProcessIds = [...list(node.downstreamProcessIds)].sort();
+  if (text(node.successMeasure)) fields.successMeasure = node.successMeasure;
+  if (text(node.resources)) fields.resources = node.resources;
+  if (text(node.risks)) fields.risks = node.risks;
+  if (text(node.opportunities)) fields.opportunities = node.opportunities;
+  if (list(node.evidenceRequirements).length) fields.evidenceRequirements = list(node.evidenceRequirements);
+  return fields;
 }
 
 /** Odtlacok obsahu; premenovanie dokumentu nie je zmena postupu, preto bez nazvov. */
@@ -1056,6 +1107,16 @@ async function versionView(node: any, version: any, at: Date) {
     flowchartXml: snapshot.flowchartXml,
     isoLinks: snapshot.isoLinks,
     relatedProcessIds: snapshot.relatedProcessIds,
+    // #40 — riadeny proces zo snapshotu (starsie verzie tieto polia nemaju)
+    inputs: snapshot.inputs ?? [],
+    outputs: snapshot.outputs ?? [],
+    upstreamProcessIds: snapshot.upstreamProcessIds ?? [],
+    downstreamProcessIds: snapshot.downstreamProcessIds ?? [],
+    successMeasure: snapshot.successMeasure ?? '',
+    resources: snapshot.resources ?? '',
+    risks: snapshot.risks ?? '',
+    opportunities: snapshot.opportunities ?? '',
+    evidenceRequirements: snapshot.evidenceRequirements ?? [],
     trigger: snapshot.trigger ?? '',
     outcome: snapshot.outcome ?? '',
     activities,
@@ -1757,6 +1818,30 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     const code = body.code === undefined ? undefined : normalizeProcessCode(body.code);
     if (code) await assertCodeFree(current.organizationId, processId, code);
 
+    // #40 — riadeny proces: zoznamy textov, nadvaznost len na procesy vlastnej firmy (nie sam na seba)
+    const textList = (value: unknown, field: string) => {
+      if (value === undefined) return undefined;
+      if (!Array.isArray(value)) throw new HttpError(400, `${field} musí byť zoznam.`);
+      return [...new Set(value.map((item) => cleanText(item, 300)).filter((item): item is string => Boolean(item)))].slice(0, 30);
+    };
+    const processLinks = async (value: unknown) => {
+      if (value === undefined) return undefined;
+      if (!Array.isArray(value)) throw new HttpError(400, 'Nadväzujúce procesy musia byť zoznam.');
+      return (await assertOwnedIds('processNode', current.organizationId, value)).filter((id) => id !== processId);
+    };
+    const longText = (value: unknown) => (value === undefined ? undefined : cleanText(value, 2000) ?? null);
+    const controlled = {
+      inputs: textList(body.inputs, 'Vstupy'),
+      outputs: textList(body.outputs, 'Výstupy'),
+      evidenceRequirements: textList(body.evidenceRequirements, 'Záznamy'),
+      upstreamProcessIds: await processLinks(body.upstreamProcessIds),
+      downstreamProcessIds: await processLinks(body.downstreamProcessIds),
+      successMeasure: longText(body.successMeasure),
+      resources: longText(body.resources),
+      risks: longText(body.risks),
+      opportunities: longText(body.opportunities)
+    };
+
     const data = {
       name: body.name ?? undefined,
       code,
@@ -1771,7 +1856,8 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
       isoLinks: body.iso ? isoLinksFromBody(body.iso) : undefined,
       parentId: body.parentId === undefined ? undefined : body.parentId,
       sortOrder: body.sortOrder === undefined ? undefined : Number(body.sortOrder),
-      relatedProcessIds: Array.isArray(body.relatedProcessIds) ? (body.relatedProcessIds as string[]) : undefined
+      relatedProcessIds: Array.isArray(body.relatedProcessIds) ? (body.relatedProcessIds as string[]) : undefined,
+      ...controlled
     };
 
     // R7: diff zmenenych poli pre audit log
@@ -1792,6 +1878,7 @@ app.patch('/api/processes/:processId', async (request, response, next) => {
     track('parentId', current.parentId, data.parentId);
     track('relatedProcessIds', current.relatedProcessIds, data.relatedProcessIds);
     track('isoLinks', current.isoLinks, data.isoLinks);
+    for (const [field, value] of Object.entries(controlled)) track(field, (current as any)[field], value);
     if (data.bpmnXml !== undefined && data.bpmnXml !== current.bpmnXml) {
       changedFields['bpmnXml'] = { from: '(diagram)', to: '(diagram zmeneny)' };
     }
@@ -2738,7 +2825,9 @@ function mapOrganization(organization: any, ownerUserId: string) {
     ownerUserId,
     createdAt: organization.createdAt.toISOString().slice(0, 10),
     // #37 — verzie procesov sa zverejnuju len schvalenim
-    requireApproval: Boolean(organization.requireApproval)
+    requireApproval: Boolean(organization.requireApproval),
+    // #40 — profil Kvalita a audit (kontrolne otazky, pripravenost evidencie)
+    qualityProfile: Boolean(organization.qualityProfile)
   };
 }
 
@@ -2992,7 +3081,8 @@ app.patch('/api/organizations/:organizationId', async (request, response, next) 
       where: { id: orgScope(request) },
       data: {
         name: request.body.name ?? undefined,
-        requireApproval: typeof request.body.requireApproval === 'boolean' ? request.body.requireApproval : undefined
+        requireApproval: typeof request.body.requireApproval === 'boolean' ? request.body.requireApproval : undefined,
+        qualityProfile: typeof request.body.qualityProfile === 'boolean' ? request.body.qualityProfile : undefined
       }
     });
     const owner = await prisma.organizationUser.findFirst({
@@ -4426,6 +4516,283 @@ app.get('/api/search', async (request, response, next) => {
       }));
 
     response.json({ query: raw, processes, positions, documents });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- #40 QUAL-01 pripravenost evidencie (profil Kvalita a audit) ---
+
+type ReadinessState = 'done' | 'attention' | 'na' | 'unverified';
+type ReadinessEntry = {
+  key: string;
+  label: string;
+  state: ReadinessState;
+  detail: string;
+  /** z coho sa posudzovalo (platna verzia / navrh / zaznamy) */
+  source: string;
+  /** kde sa to napravi */
+  fix: 'publish' | 'relations' | 'steps' | 'control' | 'quality' | 'evidence';
+  exception?: { id: string; reason: string; markedBy: string | null; approvedBy: string | null; pending: boolean };
+};
+
+/** Kvalitu posudzuje, kto upravuje procesy, alebo ISO auditor — bezny zamestnanec kontrolne otazky nevidi. */
+function canAssessQuality(request: express.Request): boolean {
+  return hasPermission(request, 'process:write') || hasPermission(request, 'iso:write');
+}
+
+/**
+ * Pripravenost evidencie ako zoznam stavov: hotove / potrebuje pozornost /
+ * neaplikovatelne s dovodom (a schvalenim) / neoverene. Nikdy percento ani
+ * „zhoda s normou“. Posudzuje sa platna verzia (to, co sa dnes robi), bez nej
+ * navrh; existujuci postup neznamena, ze sa vykonal — to dokladaju zaznamy.
+ */
+async function qualityReadiness(node: any): Promise<{ source: string; items: ReadinessEntry[] }> {
+  const now = today();
+  const versions = await prisma.processVersion.findMany({
+    where: { processNodeId: node.id },
+    select: { id: true, revision: true, effectiveFrom: true, effectiveTo: true, nextReviewAt: true, snapshot: true }
+  });
+  const effective = pickEffective(versions, now);
+  const snapshot = effective?.snapshot as unknown as ProcessSnapshot | undefined;
+  const source = effective ? `platná v${effective.revision}` : 'návrh (zatiaľ nepublikovaný)';
+  const draft = {
+    inputs: node.inputs ?? [],
+    outputs: node.outputs ?? [],
+    outcome: node.outcome ?? '',
+    successMeasure: node.successMeasure ?? '',
+    risks: node.risks ?? '',
+    evidenceRequirements: node.evidenceRequirements ?? [],
+    hasAccountable: (node.activities ?? []).some((activity: any) => (activity.responsibilities ?? []).some((item: any) => item.role === RaciRole.ACCOUNTABLE))
+  };
+  const content = snapshot
+    ? {
+        inputs: snapshot.inputs ?? [],
+        outputs: snapshot.outputs ?? [],
+        outcome: snapshot.outcome ?? '',
+        successMeasure: snapshot.successMeasure ?? '',
+        risks: snapshot.risks ?? '',
+        evidenceRequirements: snapshot.evidenceRequirements ?? [],
+        hasAccountable: (snapshot.activities ?? []).some((activity) => (activity.raci ?? []).some((item) => item.role === 'A'))
+      }
+    : draft;
+
+  const items: ReadinessEntry[] = [];
+  const check = (key: string, label: string, ok: boolean, draftOk: boolean, fix: ReadinessEntry['fix'], okDetail: string, missing: string) => {
+    items.push({
+      key, label, fix, source,
+      state: ok ? 'done' : 'attention',
+      detail: ok ? okDetail : draftOk && snapshot ? 'Doplnené v návrhu — začne platiť po publikovaní.' : missing
+    });
+  };
+
+  check('procedure', 'Platný postup', Boolean(effective), false, 'publish',
+    effective ? `v${effective.revision} platí od ${day(effective.effectiveFrom)}` : '',
+    'Proces nemá platnú verziu — publikujte ho.');
+  const owner = (node.positions ?? []).find((link: any) => link.role === ResponsibilityRole.OWNER);
+  const ownerHeld = Boolean(owner) && (owner.position?.assignments ?? []).length > 0;
+  check('owner', 'Vlastník procesu (obsadené miesto)', ownerHeld, false, 'relations',
+    ownerHeld ? `${owner.position.name} — ${owner.position.assignments.map((a: any) => a.person?.name).join(', ')}` : '',
+    !owner ? 'Proces nemá vlastníka.' : owner.position?.archivedAt ? `Miesto ${owner.position.name} je archivované — určte nové.` : `Miesto ${owner.position?.name ?? ''} nikto nezastáva.`);
+  check('accountable', 'Zodpovedný (A) aspoň pri jednom kroku', content.hasAccountable, draft.hasAccountable, 'steps',
+    'Určené v RACI krokov.', 'Pri krokoch nie je nikto zodpovedný (A).');
+  check('inputs', 'Vstupy procesu', content.inputs.length > 0, draft.inputs.length > 0, 'control',
+    content.inputs.join(', '), 'Doplňte, čo proces potrebuje na začatie (napr. faktúra, objednávka).');
+  check('outputs', 'Výstupy a výsledok', content.outputs.length > 0 || Boolean(content.outcome.trim()), draft.outputs.length > 0 || Boolean(draft.outcome.trim()), 'control',
+    [...content.outputs, content.outcome].filter(Boolean).join(', '), 'Doplňte, čo proces prinesie.');
+  check('measure', 'Meradlo úspechu', Boolean(content.successMeasure.trim()), Boolean(draft.successMeasure.trim()), 'quality',
+    content.successMeasure, 'Doplňte, podľa čoho viete, že proces funguje (napr. faktúry uhradené do splatnosti).');
+  check('risks', 'Riziká a ako im predchádzate', Boolean(content.risks.trim()), Boolean(draft.risks.trim()), 'quality',
+    'Popísané.', 'Doplňte: čo sa môže pokaziť a čo robíte, aby sa to nestalo?');
+
+  // termin revizie je sucast publikovanej verzie
+  const review = effective?.nextReviewAt ?? null;
+  items.push({
+    key: 'review', label: 'Termín revízie', fix: 'publish', source,
+    state: review && review >= now ? 'done' : 'attention',
+    detail: !effective ? 'Určí sa pri publikovaní.' : !review ? 'Platná verzia nemá termín revízie — zadáte ho pri ďalšom publikovaní.'
+      : review < now ? `Revízia po termíne (${day(review)}).` : `Do ${day(review)}.`
+  });
+
+  check('evidenceDefined', 'Čo sa uchováva ako záznam o vykonaní', content.evidenceRequirements.length > 0, draft.evidenceRequirements.length > 0, 'quality',
+    content.evidenceRequirements.join(', '), 'Doplňte, aký záznam dokladá, že sa proces vykonal (napr. podpísaný protokol kontroly).');
+
+  // zaznamy o vykonani: postup existuje ≠ vykonal sa
+  const requirements: string[] = content.evidenceRequirements;
+  const records = requirements.length
+    ? await prisma.evidenceRecord.findMany({
+        where: { processNodeId: node.id, requirement: { in: requirements } },
+        orderBy: { performedOn: 'desc' },
+        select: { requirement: true, performedOn: true, createdBy: { select: { name: true } } }
+      })
+    : [];
+  const yearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+  for (const requirement of requirements) {
+    const latest = records.find((record) => record.requirement === requirement);
+    items.push({
+      key: `evidence:${requirement}`, label: `Záznam: ${requirement}`, fix: 'evidence', source: 'záznamy o vykonaní',
+      state: !latest ? 'attention' : latest.performedOn < yearAgo ? 'unverified' : 'done',
+      detail: !latest
+        ? 'Chýba — postup existuje, no záznam o vykonaní nie.'
+        : latest.performedOn < yearAgo
+          ? `Posledný záznam ${day(latest.performedOn)} je starší ako 12 mesiacov — overte, či sa vykonáva.`
+          : `Posledný záznam ${day(latest.performedOn)}${latest.createdBy?.name ? ` (${latest.createdBy.name})` : ''}.`
+    });
+  }
+
+  // neaplikovatelne: len s dovodom a schvalenim inym clovekom
+  const exceptions = await prisma.readinessException.findMany({
+    where: { processNodeId: node.id },
+    include: { markedBy: { select: { name: true } }, approvedBy: { select: { name: true } } }
+  });
+  for (const item of items) {
+    const exception = exceptions.find((entry) => entry.itemKey === item.key);
+    if (!exception) continue;
+    item.exception = { id: exception.id, reason: exception.reason, markedBy: exception.markedBy?.name ?? null, approvedBy: exception.approvedBy?.name ?? null, pending: !exception.approvedAt };
+    if (exception.approvedAt && item.state !== 'done') {
+      item.state = 'na';
+      item.detail = `Neaplikovateľné: ${exception.reason}`;
+    }
+  }
+  return { source, items };
+}
+
+async function requireQualityProcess(request: express.Request, processId: string) {
+  const node = await prisma.processNode.findFirst({
+    where: { id: processId, organizationId: orgScope(request), type: ProcessNodeType.PROCESS },
+    include: { positions: responsibilityInclude(), activities: activityInclude() }
+  });
+  if (!node) throw new HttpError(404, 'Proces sa nenasiel.');
+  return node;
+}
+
+app.get('/api/processes/:processId/quality', async (request, response, next) => {
+  try {
+    const node = await requireQualityProcess(request, String(request.params.processId));
+    if (!canAssessQuality(request)) throw new HttpError(403, 'Pripravenosť evidencie vidí správca kvality a ISO auditor.');
+    const organization = await prisma.organization.findUnique({ where: { id: node.organizationId }, select: { qualityProfile: true } });
+    // scenar 4 — bez profilu sa kontrolne otazky neukazuju
+    if (!organization?.qualityProfile) {
+      response.json({ enabled: false, items: [] });
+      return;
+    }
+    const readiness = await qualityReadiness(node);
+    response.json({
+      enabled: true,
+      assessedAt: new Date().toISOString(),
+      note: 'Podklad pre posúdenie — nie hodnotenie zhody s normou.',
+      ...readiness
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Zaznam o vykonani smie pridat editor, ISO auditor alebo ten, kto v procese dnes pracuje. */
+async function canRecordEvidence(request: express.Request, node: { id: string; organizationId: string }): Promise<boolean> {
+  if (canAssessQuality(request)) return true;
+  return (await processStakeholders(node.organizationId, node.id)).includes(auth(request).userId);
+}
+
+app.get('/api/processes/:processId/evidence', async (request, response, next) => {
+  try {
+    const node = await requireQualityProcess(request, String(request.params.processId));
+    if (!(await canRecordEvidence(request, node))) throw new HttpError(403, 'Záznamy o vykonaní vidia tí, ktorí v procese pracujú, a správca kvality.');
+    const records = await prisma.evidenceRecord.findMany({
+      where: { processNodeId: node.id },
+      orderBy: [{ performedOn: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+      include: { createdBy: { select: { name: true } } }
+    });
+    response.json(records.map((record) => ({
+      id: record.id,
+      requirement: record.requirement,
+      performedOn: day(record.performedOn),
+      note: record.note,
+      attachmentId: record.attachmentId,
+      createdBy: record.createdBy?.name ?? null,
+      createdAt: record.createdAt.toISOString()
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/processes/:processId/evidence', async (request, response, next) => {
+  try {
+    const node = await requireQualityProcess(request, String(request.params.processId));
+    if (!(await canRecordEvidence(request, node))) throw new HttpError(403, 'Záznam o vykonaní pridá ten, kto v procese pracuje, alebo správca kvality.');
+    const requirement = cleanText(request.body?.requirement, 300);
+    // len k poziadavke, ktoru proces ma (v navrhu alebo platnej verzii)
+    const versions = await prisma.processVersion.findMany({ where: { processNodeId: node.id }, select: { revision: true, effectiveFrom: true, effectiveTo: true, snapshot: true } });
+    const effectiveSnapshot = pickEffective(versions, today())?.snapshot as unknown as ProcessSnapshot | undefined;
+    const known = new Set([...(node.evidenceRequirements ?? []), ...(effectiveSnapshot?.evidenceRequirements ?? [])]);
+    if (!requirement || !known.has(requirement)) throw new HttpError(400, 'Vyberte, ktorý záznam procesu dokladáte.');
+    const performedOn = parseDay(request.body?.performedOn, today(), 'performedOn')!;
+    if (performedOn > today()) throw new HttpError(400, 'Záznam o vykonaní nemôže byť z budúcnosti.');
+    const attachmentId = typeof request.body?.attachmentId === 'string' && request.body.attachmentId ? request.body.attachmentId : null;
+    if (attachmentId && !(await prisma.attachment.findFirst({ where: { id: attachmentId, organizationId: node.organizationId, processNodeId: node.id }, select: { id: true } }))) {
+      throw new HttpError(404, 'Dokument sa nenasiel.');
+    }
+    const record = await prisma.evidenceRecord.create({
+      data: {
+        organizationId: node.organizationId,
+        processNodeId: node.id,
+        requirement,
+        performedOn,
+        note: cleanText(request.body?.note, 1000),
+        attachmentId,
+        createdById: auth(request).userId
+      },
+      include: { createdBy: { select: { name: true } } }
+    });
+    response.status(201).json({ id: record.id, requirement: record.requirement, performedOn: day(record.performedOn), note: record.note, createdBy: record.createdBy?.name ?? null });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/processes/:processId/readiness-exceptions', async (request, response, next) => {
+  try {
+    const node = await requireQualityProcess(request, String(request.params.processId));
+    const itemKey = cleanText(request.body?.itemKey, 320);
+    const reason = cleanText(request.body?.reason, 1000);
+    if (!itemKey) throw new HttpError(400, 'Chýba položka pripravenosti.');
+    if (!reason) throw new HttpError(400, 'Uveďte dôvod, prečo položka pre tento proces neplatí.');
+    // platny postup sa nedá oznacit ako neaplikovatelny — bez neho nie je co posudzovat
+    if (itemKey === 'procedure') throw new HttpError(400, 'Platný postup nemožno označiť ako neaplikovateľný.');
+    const { userId } = auth(request);
+    const exception = await prisma.readinessException.upsert({
+      where: { processNodeId_itemKey: { processNodeId: node.id, itemKey } },
+      create: { organizationId: node.organizationId, processNodeId: node.id, itemKey, reason, markedById: userId },
+      // zmena dovodu = nove posudenie, schvalenie sa rusi
+      update: { reason, markedById: userId, markedAt: new Date(), approvedById: null, approvedAt: null }
+    });
+    response.status(201).json({ id: exception.id, itemKey: exception.itemKey, pending: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/readiness-exceptions/:exceptionId/approve', async (request, response, next) => {
+  try {
+    const exception = await prisma.readinessException.findFirst({ where: { id: String(request.params.exceptionId), organizationId: orgScope(request) } });
+    if (!exception) throw new HttpError(404, 'Výnimka sa nenašla.');
+    const { userId } = auth(request);
+    if (exception.markedById === userId) throw new HttpError(403, 'Vlastný návrh na výnimku schváli niekto iný.');
+    await prisma.readinessException.update({ where: { id: exception.id }, data: { approvedById: userId, approvedAt: new Date() } });
+    response.json({ id: exception.id, pending: false });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/readiness-exceptions/:exceptionId', async (request, response, next) => {
+  try {
+    const exception = await prisma.readinessException.findFirst({ where: { id: String(request.params.exceptionId), organizationId: orgScope(request) } });
+    if (!exception) throw new HttpError(404, 'Výnimka sa nenašla.');
+    await prisma.readinessException.delete({ where: { id: exception.id } });
+    response.status(204).end();
   } catch (error) {
     next(error);
   }

@@ -6,6 +6,7 @@ import { BpmnEditorComponent } from './components/bpmn-editor.component';
 import { BpmnViewerComponent } from './components/bpmn-viewer.component';
 import { FlowchartEditorComponent } from './components/flowchart-editor.component';
 import { RichTextEditorComponent } from './components/rich-text-editor.component';
+import { ProcessQualityComponent } from './components/process-quality.component';
 import { markdownToHtml } from '../../core/utils/markdown';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, formatBytes, isPreviewable } from '../../core/utils/upload-limits';
 import { PdfPreviewComponent } from '../../shared/pdf-preview.component';
@@ -58,6 +59,7 @@ type StepDraft = {
     BpmnViewerComponent,
     FlowchartEditorComponent,
     RichTextEditorComponent,
+    ProcessQualityComponent,
     PdfPreviewComponent
   ],
   templateUrl: './process-workspace.component.html',
@@ -779,6 +781,11 @@ export class ProcessWorkspaceComponent implements OnInit {
   }
 
   /** Firma zverejňuje verzie len schválením — priame publikovanie sa neponúka. */
+  /** #40 — profil „Kvalita a audit“ je zapnutý pre firmu */
+  get qualityProfile(): boolean {
+    return Boolean(this.auth.currentOrganization()?.qualityProfile);
+  }
+
   get requireApproval(): boolean {
     return Boolean(this.auth.currentOrganization()?.requireApproval);
   }
