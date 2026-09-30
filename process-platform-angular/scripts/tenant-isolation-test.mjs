@@ -42,6 +42,7 @@ async function registerOrg(label) {
   const { payload } = await call('/register', {
     method: 'POST',
     body: {
+      acceptTerms: true,
       organizationName: `Izolacia ${label} ${STAMP}`,
       ownerName: `Vlastnik ${label}`,
       email: `izolacia-${label.toLowerCase()}-${STAMP}@example.test`,

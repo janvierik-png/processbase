@@ -36,14 +36,20 @@ async function lastLink(address, template) {
 
 try {
   const short = await call('/register', {
-    method: 'POST', body: { organizationName: `Org Test mail kratke ${STAMP}`, ownerName: 'X', email: `x-${EMAIL}`, password: 'kratke' }
+    method: 'POST', body: { acceptTerms: true, organizationName: `Org Test mail kratke ${STAMP}`, ownerName: 'X', email: `x-${EMAIL}`, password: 'kratke' }
   });
   check('kratke heslo pri registracii -> 400', short.status === 400, `status ${short.status}`);
+  // #21 — registráciou firma uzatvára zmluvu: bez súhlasu s podmienkami sa účet nevytvorí
+  const noTerms = await call('/register', {
+    method: 'POST', body: { organizationName: `Org Test mail bez suhlasu ${STAMP}`, ownerName: 'X', email: `bez-suhlasu-${EMAIL}`, password: 'PovodneHeslo1' }
+  });
+  check('registracia bez suhlasu s podmienkami -> 400', noTerms.status === 400, `status ${noTerms.status}`);
 
   const reg = await call('/register', {
-    method: 'POST', body: { organizationName: `Org Test mail ${STAMP}`, ownerName: 'Mailovy Test', email: EMAIL, password: 'PovodneHeslo1' }
+    method: 'POST', body: { acceptTerms: true, organizationName: `Org Test mail ${STAMP}`, ownerName: 'Mailovy Test', email: EMAIL, password: 'PovodneHeslo1' }
   });
   check('registracia: e-mail neovereny', reg.status === 201 && reg.payload?.user?.emailVerified === false);
+  check('registracia: zapisana verzia podmienok', /^\d{4}-\d{2}-\d{2}$/.test(reg.payload?.user?.termsVersion ?? ''), JSON.stringify(reg.payload?.user?.termsVersion));
   const verifyToken = await lastLink(EMAIL, 'email-verify');
   check('overovaci e-mail vo fronte', Boolean(verifyToken));
 

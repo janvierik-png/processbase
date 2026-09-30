@@ -728,3 +728,27 @@ footer {
 @media (max-width: 480px) {
   .modal-card { padding: var(--space-5); }
 }
+
+// #21 — súhlas s podmienkami pri registrácii
+.terms-check {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 4px 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted, #5b6778);
+  cursor: pointer;
+
+  input { flex: none; width: 16px; height: 16px; margin-top: 2px; }
+  a { color: var(--accent-strong, #0e6a78); }
+}
+
+.terms-note {
+  margin: 4px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted, #5b6778);
+
+  a { color: var(--accent-strong, #0e6a78); }
+}

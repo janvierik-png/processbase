@@ -37,7 +37,9 @@ export class LandingPageComponent implements OnInit {
     organizationName: '',
     ownerName: '',
     email: '',
-    password: ''
+    password: '',
+    // #21 — súhlas s podmienkami a oboznámenie so zásadami ochrany údajov
+    acceptTerms: false
   };
 
   loginModel = {
@@ -147,6 +149,7 @@ export class LandingPageComponent implements OnInit {
 
   registerBlocked(): boolean {
     return this.auth.loading()
+      || !this.registerModel.acceptTerms
       || this.emailState() === 'taken'
       || this.orgNameState() === 'taken'
       || this.emailState() === 'checking'

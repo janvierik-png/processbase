@@ -11,6 +11,22 @@ export const appRoutes: Routes = [
     path: 'bpmn-modeler',
     loadComponent: () => import('./features/free-modeler/free-modeler-page.component').then((m) => m.FreeModelerPageComponent)
   },
+  // #21 — právne texty (bez prihlásenia)
+  {
+    path: 'podmienky',
+    data: { doc: 'terms' },
+    loadComponent: () => import('./features/legal/legal-page.component').then((m) => m.LegalPageComponent)
+  },
+  {
+    path: 'ochrana-osobnych-udajov',
+    data: { doc: 'privacy' },
+    loadComponent: () => import('./features/legal/legal-page.component').then((m) => m.LegalPageComponent)
+  },
+  {
+    path: 'cookies',
+    data: { doc: 'cookies' },
+    loadComponent: () => import('./features/legal/legal-page.component').then((m) => m.LegalPageComponent)
+  },
   // #20 — odkazy z e-mailov (bez prihlásenia)
   {
     path: 'overenie-emailu',

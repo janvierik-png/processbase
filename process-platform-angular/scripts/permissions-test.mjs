@@ -22,7 +22,7 @@ async function call(path, { method = 'GET', body, token } = {}) {
 
 const reg = await call('/register', {
   method: 'POST',
-  body: { organizationName: `Org Test prava ${STAMP}`, ownerName: 'Vlastnik', email: `orgtest-prava-${STAMP}@example.test`, password: 'Heslo123456' }
+  body: { acceptTerms: true, organizationName: `Org Test prava ${STAMP}`, ownerName: 'Vlastnik', email: `orgtest-prava-${STAMP}@example.test`, password: 'Heslo123456' }
 });
 const owner = reg.payload?.token;
 const orgId = reg.payload?.organization?.id;

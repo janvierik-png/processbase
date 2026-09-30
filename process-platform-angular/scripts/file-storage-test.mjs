@@ -88,7 +88,7 @@ async function main() {
   const email = `ulozisko-${STAMP}@example.test`;
   const reg = await call('/register', {
     method: 'POST',
-    body: { organizationName: `Ulozisko Test ${STAMP}`, ownerName: 'Test', email, password: 'Heslo123456' }
+    body: { acceptTerms: true, organizationName: `Ulozisko Test ${STAMP}`, ownerName: 'Test', email, password: 'Heslo123456' }
   });
   const token = reg.payload?.token;
   const orgId = reg.payload?.organization?.id;

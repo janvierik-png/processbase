@@ -146,6 +146,10 @@
       <a href="#funkcie">Funkcie</a>
       <a href="#cennik">Cenník</a>
       <button type="button" class="link-btn" (click)="openModal('login')">Prihlásenie</button>
+      <!-- #21 — právne texty -->
+      <a routerLink="/podmienky">Podmienky</a>
+      <a routerLink="/ochrana-osobnych-udajov">Ochrana údajov</a>
+      <a routerLink="/cookies">Cookies</a>
     </nav>
     <p class="footer-copy">© 2026 Processbase. Všetky práva vyhradené.</p>
   </div>
@@ -272,6 +276,13 @@
           </div>
         </div>
 
+        <!-- #21 — registráciou firma prijíma podmienky; server si zapamätá verziu -->
+        <label class="terms-check">
+          <input type="checkbox" name="acceptTerms" [(ngModel)]="registerModel.acceptTerms" required>
+          <span>Súhlasím s <a routerLink="/podmienky" target="_blank">podmienkami používania</a> (vrátane spracúvania osobných údajov
+            v mene firmy) a beriem na vedomie <a routerLink="/ochrana-osobnych-udajov" target="_blank">zásady ochrany osobných údajov</a>.</span>
+        </label>
+
         @if (auth.error()) {
           <p class="form-error">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
@@ -335,6 +346,8 @@
             </p>
           }
 
+          <p class="terms-note">Prijatím pozvánky budete pracovať v službe firmy, ktorá vás pozvala. Ako spracúvame vaše údaje, opisujú
+            <a routerLink="/ochrana-osobnych-udajov" target="_blank">zásady ochrany osobných údajov</a>.</p>
           <button type="submit" class="btn btn-primary btn-block btn-lg" [disabled]="auth.loading()">Prijať pozvánku</button>
         </form>
       } @else {

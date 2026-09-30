@@ -13,6 +13,9 @@ import {
   signal
 } from '@angular/core';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { ConsentService } from '../../../core/services/consent.service';
+
+const EMBED_ORIGIN = 'https://embed.diagrams.net';
 
 @Component({
   selector: 'pp-flowchart-editor',
@@ -32,13 +35,25 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
           @if (isFullscreen()) { ✕ Zatvoriť } @else { ⛶ Celá obrazovka }
         </button>
       </div>
-      <iframe
-        #frame
-        [src]="safeEmbedUrl"
-        class="flowchart-frame"
-        frameborder="0"
-        allowfullscreen
-      ></iframe>
+      <!-- #21 — externá služba sa načíta až po súhlase (spojenie s diagrams.net) -->
+      @if (consent.state().externalEmbeds || allowedOnce()) {
+        <iframe
+          #frame
+          [src]="safeEmbedUrl"
+          class="flowchart-frame"
+          frameborder="0"
+          allowfullscreen
+        ></iframe>
+      } @else {
+        <div class="consent-gate">
+          <strong>Editor flowchartov je externá služba diagrams.net</strong>
+          <p>Pri jeho otvorení sa váš prehliadač spojí so serverom JGraph Ltd. (Spojené kráľovstvo) — uvidí napr. vašu IP adresu
+            a môže si ukladať vlastné údaje. Diagram sa upravuje v prehliadači a ukladá sa do Process Base.
+            Podrobnosti v <a href="/cookies" target="_blank">zásadách cookies</a>.</p>
+          <label><input type="checkbox" [checked]="remember()" (change)="remember.set($any($event.target).checked)"> Zapamätať si moju voľbu</label>
+          <button type="button" class="fc-btn primary" (click)="allowEmbed()">Načítať editor</button>
+        </div>
+      }
     </div>
   `,
   styles: [`
@@ -88,6 +103,22 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
       border: none;
       min-height: 520px;
     }
+    .consent-gate {
+      display: grid;
+      gap: 10px;
+      align-content: center;
+      justify-items: start;
+      flex: 1;
+      max-width: 620px;
+      margin: 0 auto;
+      padding: 24px;
+      font-size: 13.5px;
+      line-height: 1.5;
+    }
+    .consent-gate p { margin: 0; color: #555; }
+    .consent-gate a { color: #0e6a78; }
+    .consent-gate label { display: flex; gap: 6px; align-items: center; }
+    .fc-btn.primary { background: #0e6a78; border-color: #0e6a78; color: #fff; }
   `]
 })
 export class FlowchartEditorComponent implements OnInit, OnChanges, OnDestroy {
@@ -105,14 +136,23 @@ export class FlowchartEditorComponent implements OnInit, OnChanges, OnDestroy {
   private pendingSave: string | null = null;
   private saveTimer: any = null;
 
-  constructor(sanitizer: DomSanitizer) {
-    this.safeEmbedUrl = sanitizer.bypassSecurityTrustResourceUrl(
-      'https://embed.diagrams.net/?embed=1&proto=json&spin=1&ui=atlas&noSaveBtn=1&saveAndExit=0&noExitBtn=1'
-    );
+  /** #21 — súhlas len pre toto otvorenie (bez zapamätania) */
+  readonly allowedOnce = signal(false);
+  readonly remember = signal(true);
+
+  constructor(sanitizer: DomSanitizer, readonly consent: ConsentService) {
+    this.safeEmbedUrl = sanitizer.bypassSecurityTrustResourceUrl(`${EMBED_ORIGIN}/?embed=1&proto=json&spin=1&ui=atlas&noSaveBtn=1&saveAndExit=0&noExitBtn=1`);
+  }
+
+  allowEmbed(): void {
+    if (this.remember()) this.consent.setExternalEmbeds(true);
+    this.allowedOnce.set(true);
   }
 
   ngOnInit(): void {
     this.listener = (event: MessageEvent) => {
+      // len správy z vloženého editora — inak by iné okno mohlo podstrčiť diagram na uloženie
+      if (event.origin !== EMBED_ORIGIN || event.source !== this.frameRef?.nativeElement?.contentWindow) return;
       if (!event.data || typeof event.data !== 'string') return;
       let msg: any;
       try { msg = JSON.parse(event.data); } catch { return; }
@@ -181,7 +221,8 @@ export class FlowchartEditorComponent implements OnInit, OnChanges, OnDestroy {
     if (!frame?.contentWindow) return;
     frame.contentWindow.postMessage(
       JSON.stringify({ action: 'load', xml: xml || '<mxGraphModel/>', autosave: 1 }),
-      '*'
+      // obsah diagramu len editoru diagrams.net, nie inej stránke, keby rámec niekam presmeroval
+      EMBED_ORIGIN
     );
     this.saveStatus.set('saved');
   }

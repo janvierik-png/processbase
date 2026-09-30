@@ -25,7 +25,7 @@ const dayOffset = (days) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe
 
 const reg = await call('/register', {
   method: 'POST',
-  body: { organizationName: `Org Test praca ${STAMP}`, ownerName: 'Vlastnik', email: `orgtest-praca-${STAMP}@example.test`, password: 'Heslo123456' }
+  body: { acceptTerms: true, organizationName: `Org Test praca ${STAMP}`, ownerName: 'Vlastnik', email: `orgtest-praca-${STAMP}@example.test`, password: 'Heslo123456' }
 });
 const t = reg.payload?.token;
 const orgId = reg.payload?.organization?.id;

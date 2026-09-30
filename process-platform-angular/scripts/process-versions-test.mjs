@@ -28,7 +28,7 @@ const dayOffset = (days) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe
 async function register(label) {
   const reg = await call('/register', {
     method: 'POST',
-    body: { organizationName: `Org Test verzie ${label} ${STAMP}`, ownerName: `Vlastnik ${label}`, email: `orgtest-verzie-${label}-${STAMP}@example.test`, password: 'Heslo123456' }
+    body: { acceptTerms: true, organizationName: `Org Test verzie ${label} ${STAMP}`, ownerName: `Vlastnik ${label}`, email: `orgtest-verzie-${label}-${STAMP}@example.test`, password: 'Heslo123456' }
   });
   return { token: reg.payload?.token, orgId: reg.payload?.organization?.id };
 }

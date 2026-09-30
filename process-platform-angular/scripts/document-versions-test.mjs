@@ -32,7 +32,7 @@ const fileHeaders = (name, extra = {}) => ({ 'Content-Type': 'application/octet-
 async function register(label) {
   const reg = await call('/register', {
     method: 'POST',
-    body: { organizationName: `Org Test dokumenty ${label} ${STAMP}`, ownerName: `Vlastnik ${label}`, email: `orgtest-dok-${label}-${STAMP}@example.test`, password: 'Heslo123456' }
+    body: { acceptTerms: true, organizationName: `Org Test dokumenty ${label} ${STAMP}`, ownerName: `Vlastnik ${label}`, email: `orgtest-dok-${label}-${STAMP}@example.test`, password: 'Heslo123456' }
   });
   return { token: reg.payload?.token, orgId: reg.payload?.organization?.id };
 }

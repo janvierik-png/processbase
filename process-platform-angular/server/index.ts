@@ -28,6 +28,7 @@ import { Citation, ImportCandidates, candidatesFromAi, candidatesFromDocument } 
 import { ProcessDraft, draftSteps, foldName, sanitizeDraft } from '../src/app/shared/process-draft/draft';
 import { parseProcessText } from '../src/app/shared/process-draft/text-parser';
 import { draftToBpmnXml } from '../src/app/shared/process-draft/bpmn-layout';
+import { TERMS_VERSION } from '../src/app/features/legal/legal-info';
 import { prisma } from './prisma';
 import { SECRETS_FILE, secret } from './secrets';
 import { APP_URL, emailDeliveryStats, queueEmail } from './mailer';
@@ -2961,6 +2962,10 @@ app.post('/api/register', async (request, response, next) => {
     if (!organizationName || !ownerName || !email || !password) {
       throw new HttpError(400, 'organizationName, ownerName, email a password su povinne');
     }
+    // #21 — registráciou firma uzatvára zmluvu; súhlas s podmienkami (a ktorou verziou) sa zapíše
+    if (request.body?.acceptTerms !== true) {
+      throw new HttpError(400, 'Na registráciu treba súhlasiť s podmienkami používania a potvrdiť oboznámenie so zásadami ochrany osobných údajov.');
+    }
     assertUserPassword(password);
     const normalizedEmail = String(email).trim().toLowerCase();
     const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
@@ -2974,7 +2979,9 @@ app.post('/api/register', async (request, response, next) => {
         data: {
           email: normalizedEmail,
           name: ownerName,
-          passwordHash: hashPassword(password)
+          passwordHash: hashPassword(password),
+          termsAcceptedAt: new Date(),
+          termsVersion: TERMS_VERSION
         }
       });
       const organization = await tx.organization.create({
@@ -3009,7 +3016,8 @@ app.post('/api/register', async (request, response, next) => {
         roleId: 'owner',
         emailVerified: false,
         active: true,
-        status: 'active'
+        status: 'active',
+        termsVersion: result.user.termsVersion
       },
       organization: mapOrganization(result.organization, result.user.id)
     });

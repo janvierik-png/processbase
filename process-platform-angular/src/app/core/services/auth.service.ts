@@ -13,6 +13,8 @@ interface RegisterPayload {
   ownerName: string;
   email: string;
   password: string;
+  /** #21 — súhlas s podmienkami používania (server ho vyžaduje a zapíše s verziou) */
+  acceptTerms: boolean;
 }
 
 interface AuthResponse {

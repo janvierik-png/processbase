@@ -1,0 +1,293 @@
+<div class="legal-page">
+  <header class="legal-top">
+    <a routerLink="/" class="brand"><span class="logo">P</span> Process Base</a>
+    <nav>
+      <a routerLink="/podmienky" [class.active]="doc() === 'terms'">Podmienky</a>
+      <a routerLink="/ochrana-osobnych-udajov" [class.active]="doc() === 'privacy'">Ochrana údajov</a>
+      <a routerLink="/cookies" [class.active]="doc() === 'cookies'">Cookies</a>
+    </nav>
+  </header>
+
+  <article class="legal-body">
+    <h1>{{ titles[doc()] }}</h1>
+    <p class="meta">Verzia {{ version }} · účinnosť od {{ operator.effectiveFrom }}</p>
+    @if (draft) {
+      <p class="draft-note" role="note">
+        <strong>Návrh na pripomienkovanie.</strong> Text zodpovedá tomu, ako aplikácia dnes funguje, no pred zverejnením ho musí
+        skontrolovať právnik a prevádzkovateľ doplní údaje v hranatých zátvorkách. Nejde o právne poradenstvo.
+      </p>
+    }
+
+    @switch (doc()) {
+      @case ('terms') {
+        <section>
+          <h2>1. Kto poskytuje službu</h2>
+          <p>Službu Process Base (ďalej „služba“) poskytuje {{ operator.name }}, {{ operator.address }}, IČO {{ operator.companyId }},
+            {{ operator.register }} (ďalej „prevádzkovateľ“). Kontakt: {{ operator.email }}.</p>
+          <p>Služba je určená podnikateľom a organizáciám (ďalej „zákazník“) — nie spotrebiteľom. Používateľom je osoba, ktorá má
+            v službe účet v rámci firmy zákazníka alebo používa bezplatný BPMN modeler.</p>
+        </section>
+
+        <section>
+          <h2>2. Čo služba obsahuje</h2>
+          <ul>
+            <li><strong>Procesná knižnica firmy</strong> — procesy s krokmi, zodpovednosťami podľa pracovných miest, verziami, schvaľovaním,
+              dokumentmi, organizačnou štruktúrou a prehľadom toho, čo treba napraviť.</li>
+            <li><strong>Bezplatný BPMN modeler</strong> bez registrácie — diagram sa otvára, upravuje a ukladá len vo vašom prehliadači;
+              jeho obsah sa na server neposiela. Modeler je postavený na knižnici bpmn-js; jej znak bpmn.io zostáva podľa licencie viditeľný.</li>
+            <li><strong>Voliteľné funkcie</strong>, ktoré zapína firma: AI asistent (návrh procesu z textu, rozbor dokumentov) a automatický preklad.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>3. Účet a prístup</h2>
+          <ul>
+            <li>Pri registrácii firmy uvádzate pravdivé údaje. Registrujúci sa stáva vlastníkom firmy v službe a spravuje jej používateľov a roly.</li>
+            <li>Heslo a prístup k účtu chránite pred inými osobami. O zneužití účtu nás bezodkladne informujte.</li>
+            <li>Prístup ďalších ľudí z firmy vzniká pozvánkou; ich oprávnenia určuje rola, ktorú im firma pridelí.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>4. Plány a cena</h2>
+          <p>Rozsah platených plánov, limity (najmä úložisko a počet editorov) a ceny určuje aktuálny cenník [doplní prevádzkovateľ].
+            Spôsob a lehoty fakturácie: [doplniť]. Bezplatný BPMN modeler je bezodplatný.</p>
+        </section>
+
+        <section>
+          <h2>5. Obsah zákazníka</h2>
+          <ul>
+            <li>Procesy, dokumenty, organizačná štruktúra a ďalší obsah, ktorý firma do služby vloží, patrí zákazníkovi. Prevádzkovateľ ho používa
+              len na poskytovanie služby a nepoužíva ho na iné účely.</li>
+            <li>Zákazník zodpovedá za to, že obsah smie do služby vložiť — vrátane osobných údajov zamestnancov a spolupracovníkov v adresári
+              a v obsadení pracovných miest. Pri týchto údajoch je prevádzkovateľ sprostredkovateľom (pozri časť 12).</li>
+            <li>Do služby sa nesmie nahrávať škodlivý kód, obsah porušujúci práva iných ani obsah, ktorého šírenie je nezákonné.</li>
+            <li>Prevádzkovateľ do obsahu firmy nenahliada; prístup je možný len na žiadosť zákazníka (napr. pri riešení problému) alebo keď to vyžaduje zákon.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>6. AI asistent a automatické návrhy</h2>
+          <ul>
+            <li>AI asistenta zapína firma v Nastaveniach → Integrácie. Obsah (text alebo nahratý súbor) sa poskytovateľovi AI odošle len vtedy,
+              keď používateľ AI pri konkrétnej akcii výslovne zvolí.</li>
+            <li>Výsledok AI aj rozboru podľa pravidiel je vždy len <strong>návrh</strong>. Môže byť neúplný alebo nepresný; pred vytvorením
+              a najmä pred publikovaním ho musí skontrolovať človek. Nič sa nepublikuje automaticky.</li>
+            <li>Nahraté súbory na import sa neukladajú — spracujú sa a zahodia.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>7. Kvalita, audit a normy</h2>
+          <p>Funkcie „Kvalita a audit“ a väzby na normy sú podkladom na prípravu firmy. Služba neposudzuje zhodu s normou, proces
+            „necertifikuje“ a neobsahuje licencovaný text noriem ISO.</p>
+        </section>
+
+        <section>
+          <h2>8. Dostupnosť a zmeny služby</h2>
+          <p>Prevádzkovateľ sa snaží o nepretržitú dostupnosť; plánovanú údržbu oznamuje vopred, ak je to možné. Garantovaná dostupnosť (SLA)
+            platí len vtedy, ak je výslovne dohodnutá [doplniť]. Služba sa môže vyvíjať; podstatné obmedzenie platenej funkcie
+            prevádzkovateľ oznámi vopred.</p>
+        </section>
+
+        <section>
+          <h2>9. Zodpovednosť</h2>
+          <p>Za rozhodnutia prijaté na základe obsahu v službe zodpovedá zákazník. Prevádzkovateľ zodpovedá za škodu spôsobenú porušením svojich
+            povinností v rozsahu, ktorý nemožno zákonom vylúčiť; inak [návrh: najviac do výšky odplaty zaplatenej za posledných 12 mesiacov].</p>
+        </section>
+
+        <section>
+          <h2>10. Ukončenie a vaše údaje</h2>
+          <ul>
+            <li>Zákazník môže používanie služby kedykoľvek ukončiť. Prevádzkovateľ môže účet zrušiť pri závažnom porušení podmienok, spravidla po predchádzajúcej výzve.</li>
+            <li>Pred ukončením si môžete stiahnuť diagramy (.bpmn, SVG) a dokumenty; úplný export obsahu firmy [pripravuje sa].</li>
+            <li>Po ukončení sa obsah firmy vymaže do [30] dní a zo záloh do [30] ďalších dní, ak zákon nevyžaduje dlhšie uchovanie.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>11. Zmeny podmienok a rozhodné právo</h2>
+          <p>Podstatnú zmenu podmienok prevádzkovateľ oznámi aspoň [30] dní vopred; služba si pamätá, ktorú verziu podmienok kto prijal.
+            Vzťahy sa spravujú právom Slovenskej republiky; spory rozhodujú príslušné súdy Slovenskej republiky.</p>
+        </section>
+
+        <section>
+          <h2>12. Spracúvanie osobných údajov v mene zákazníka (čl. 28 GDPR)</h2>
+          <p>Pri obsahu firmy je zákazník prevádzkovateľom osobných údajov a Process Base ich spracúva ako sprostredkovateľ:</p>
+          <ul>
+            <li><strong>Predmet a trvanie:</strong> poskytovanie služby počas trvania zmluvy a do vymazania podľa časti 10.</li>
+            <li><strong>Údaje a osoby:</strong> mená, pracovné e-maily a telefóny, pracovné miesta a obdobia ich obsadenia, zodpovednosti v procesoch,
+              autorstvo zmien a schválení; zamestnanci a spolupracovníci zákazníka.</li>
+            <li><strong>Povinnosti sprostredkovateľa:</strong> spracúva len na pokyn zákazníka (nastavenia a používanie služby), zaväzuje mlčanlivosťou
+              osoby s prístupom, prijíma bezpečnostné opatrenia (časť 9 zásad ochrany údajov), pomáha s právami dotknutých osôb, bez zbytočného odkladu
+              oznámi porušenie ochrany údajov, po skončení údaje vymaže a umožní primeranú kontrolu.</li>
+            <li><strong>Ďalší sprostredkovatelia:</strong> zoznam je v <a routerLink="/ochrana-osobnych-udajov">zásadách ochrany osobných údajov</a>;
+              o zmene prevádzkovateľ vopred informuje a zákazník môže namietať.</li>
+          </ul>
+        </section>
+      }
+
+      @case ('privacy') {
+        <section>
+          <h2>1. Kto vaše údaje spracúva</h2>
+          <p>{{ operator.name }}, {{ operator.address }}, IČO {{ operator.companyId }}. Kontakt pre ochranu osobných údajov: {{ operator.privacyEmail }}.</p>
+          <p>Process Base má dve úlohy:</p>
+          <ul>
+            <li><strong>prevádzkovateľ</strong> — pri údajoch o používateľských účtoch a pri prevádzke a bezpečnosti služby;</li>
+            <li><strong>sprostredkovateľ</strong> — pri obsahu, ktorý do služby vloží firma (napr. adresár osôb, obsadenie pracovných miest,
+              zodpovednosti v procesoch). Prevádzkovateľom týchto údajov je vaša firma; práva uplatníte u nej, pomôžeme jej s tým.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>2. Aké údaje, prečo a na akom základe</h2>
+          <table>
+            <thead><tr><th>Údaje</th><th>Účel</th><th>Právny základ</th></tr></thead>
+            <tbody>
+              <tr><td>Meno, e-mail, firma, rola; heslo len ako jednosmerný odtlačok (scrypt)</td><td>vytvorenie a používanie účtu</td><td>plnenie zmluvy — čl. 6 ods. 1 písm. b) GDPR</td></tr>
+              <tr><td>Relácia prihlásenia (odtlačok tokenu, platnosť 12 hodín)</td><td>prihlásenie, odhlásenie</td><td>plnenie zmluvy</td></tr>
+              <tr><td>IP adresa pri prihlasovaní (len v pamäti servera, nezapisuje sa do databázy)</td><td>ochrana pred hádaním hesla (limit pokusov)</td><td>oprávnený záujem — bezpečnosť, čl. 6 ods. 1 písm. f)</td></tr>
+              <tr><td>Technické záznamy o chybách (druh chyby, miesto v kóde, ID požiadavky — bez obsahu)</td><td>prevádzka a opravy chýb</td><td>oprávnený záujem</td></tr>
+              <tr><td>Súhlas s podmienkami (verzia a čas)</td><td>preukázanie prijatia podmienok</td><td>plnenie zmluvy, oprávnený záujem</td></tr>
+              <tr><td>E-maily na overenie adresy a obnovu hesla</td><td>bezpečnosť účtu</td><td>plnenie zmluvy</td></tr>
+              <tr><td>Fakturačné údaje [ak sa uplatní]</td><td>účtovníctvo</td><td>zákonná povinnosť — čl. 6 ods. 1 písm. c)</td></tr>
+            </tbody>
+          </table>
+          <p>Bezplatný BPMN modeler obsah diagramu na server neposiela; server spracúva len bežné technické údaje o požiadavke na stránku
+            (napr. IP adresu v zázname webového servera [overiť nastavenie a dobu uchovania]).</p>
+        </section>
+
+        <section>
+          <h2>3. AI asistent</h2>
+          <p>AI asistenta zapína firma a používateľ ho volí pri konkrétnej akcii. Vtedy sa poskytovateľovi AI odošle len vložený text alebo nahratý
+            súbor a zoznam názvov pracovných miest firmy (aby návrh použil existujúce miesta). Súbory sa u nás neukladajú. Poskytovateľ spracúva
+            údaje podľa svojich zmluvných podmienok pre firemné API [overiť: dobu uchovania a vylúčenie tréningu na údajoch zákazníka].
+            Nevkladajte do textu osobné údaje, ktoré návrh procesu nepotrebuje.</p>
+        </section>
+
+        <section>
+          <h2>4. Komu údaje odovzdávame</h2>
+          <table>
+            <thead><tr><th>Sprostredkovateľ</th><th>Na čo</th><th>Kde</th><th>Kedy</th></tr></thead>
+            <tbody>
+              @for (item of subprocessors; track item.name) {
+                <tr><td>{{ item.name }}</td><td>{{ item.purpose }}</td><td>{{ item.location }}</td><td>{{ item.when }}</td></tr>
+              }
+            </tbody>
+          </table>
+          <p>Údaje nepredávame a nepoužívame na reklamu. Orgánom verejnej moci ich poskytneme len vtedy, keď to ukladá zákon.</p>
+        </section>
+
+        <section>
+          <h2>5. Prenos mimo EÚ</h2>
+          <p>Mimo Európskeho hospodárskeho priestoru sa údaje dostanú len pri voliteľných funkciách uvedených vyššie (AI asistent — USA;
+            diagrams.net — Spojené kráľovstvo). Prenos sa opiera o [rozhodnutie o primeranosti / rámec ochrany údajov EÚ – USA /
+            štandardné zmluvné doložky — overiť pri každom poskytovateľovi].</p>
+        </section>
+
+        <section>
+          <h2>6. Ako dlho údaje uchovávame</h2>
+          <ul>
+            <li>Účet — počas používania služby; po zrušení do [30] dní, zo záloh do [30] ďalších dní.</li>
+            <li>Relácie — 12 hodín od prihlásenia (potom neplatia) [doplniť automatické mazanie starých záznamov].</li>
+            <li>Technické záznamy o chybách — najviac [30] dní.</li>
+            <li>Obsah firmy vrátane histórie zmien a schválení — počas trvania zmluvy podľa pokynov firmy (história je súčasťou riadenej dokumentácie).</li>
+            <li>Účtovné doklady — podľa zákona o účtovníctve.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>7. Vaše práva</h2>
+          <p>Máte právo na prístup k údajom, ich opravu, vymazanie, obmedzenie spracúvania, prenosnosť a právo namietať proti spracúvaniu
+            na základe oprávneného záujmu. Súhlas (napr. s externou službou) môžete kedykoľvek odvolať na stránke
+            <a routerLink="/cookies">Cookies</a>. Žiadosť pošlite na {{ operator.privacyEmail }}; odpovieme do jedného mesiaca.</p>
+          <p>Ak si myslíte, že spracúvanie porušuje predpisy, môžete podať sťažnosť Úradu na ochranu osobných údajov Slovenskej republiky
+            (Hraničná 12, 820 07 Bratislava 27, dataprotection.gov.sk).</p>
+        </section>
+
+        <section>
+          <h2>8. Automatizované rozhodovanie</h2>
+          <p>Služba nerobí rozhodnutia s právnymi účinkami výlučne automatizovane. Návrhy AI a rozboru podľa pravidiel sú podkladom, o ktorom rozhoduje človek.</p>
+        </section>
+
+        <section>
+          <h2>9. Bezpečnosť</h2>
+          <ul>
+            <li>Šifrované spojenie (HTTPS), heslá len ako odtlačok (scrypt s náhodnou soľou), kľúče integrácií šifrované (AES-256-GCM).</li>
+            <li>Oddelenie firiem — žiadna firma nevidí údaje inej; oprávnenia podľa rolí; správca prevádzky (backoffice) nevidí obsah firiem.</li>
+            <li>Súkromné prílohy s overením prístupu pri každom stiahnutí, zálohy databázy a súborov.</li>
+            <li>Záznamy o chybách bez obsahu procesov a dokumentov.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>10. Cookies a zmeny zásad</h2>
+          <p>Ako používame úložisko v prehliadači, opisuje stránka <a routerLink="/cookies">Cookies</a>. Zásady môžeme aktualizovať;
+            podstatné zmeny oznámime v aplikácii vopred.</p>
+        </section>
+      }
+
+      @case ('cookies') {
+        <section>
+          <h2>Stručne</h2>
+          <ul>
+            <li>Process Base <strong>nepoužíva reklamné ani analytické cookies</strong> a nesleduje vás naprieč webmi.</li>
+            <li>Server nenastavuje žiadne cookies; prihlásenie funguje cez token v úložisku prehliadača (localStorage).</li>
+            <li>V prehliadači ukladáme len to, bez čoho aplikácia nefunguje, alebo čo ste si výslovne zvolili.</li>
+            <li>Písma sú súčasťou aplikácie — nenačítavajú sa od tretích strán.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Čo ukladáme vo vašom prehliadači</h2>
+          <table>
+            <thead><tr><th>Položka</th><th>Na čo</th><th>Druh</th><th>Ako dlho</th></tr></thead>
+            <tbody>
+              @for (item of storage; track item.key) {
+                <tr><td><code>{{ item.key }}</code></td><td>{{ item.purpose }}</td><td>{{ item.kind }}</td><td>{{ item.duration }}</td></tr>
+              }
+            </tbody>
+          </table>
+          <p>Nevyhnutné úložisko nepotrebuje súhlas; bez neho by nefungovalo prihlásenie ani rozpracovaný diagram. Pri odhlásení sa údaje
+            o relácii a stromu procesov vymažú. Všetko môžete kedykoľvek vymazať v nastaveniach prehliadača (údaje stránky).</p>
+        </section>
+
+        <section>
+          <h2>Externé služby — len s vaším súhlasom</h2>
+          <p>Editor <strong>flowchartov</strong> pri procese je služba diagrams.net (JGraph Ltd., Spojené kráľovstvo) vložená do stránky.
+            Pri jej načítaní sa váš prehliadač spojí s jej serverom (uvidí napr. vašu IP adresu) a služba si môže ukladať vlastné údaje.
+            Preto sa nenačíta, kým to nepotvrdíte. BPMN editor ani bezplatný modeler externé služby nepoužívajú.</p>
+
+          <div class="consent-box">
+            <p><strong>Vaše nastavenie:</strong>
+              {{ consent.state().externalEmbeds ? 'externý editor flowchartov je povolený' : 'externý editor flowchartov sa načíta až po potvrdení' }}
+              @if (consent.state().decidedAt) { <small>(rozhodnuté {{ consent.state().decidedAt?.slice(0, 10) }})</small> }
+            </p>
+            <div class="consent-actions">
+              @if (consent.state().externalEmbeds) {
+                <button type="button" (click)="setEmbeds(false)">Odvolať súhlas s diagrams.net</button>
+              } @else {
+                <button type="button" class="primary" (click)="setEmbeds(true)">Povoliť diagrams.net</button>
+              }
+              <button type="button" class="ghost" (click)="resetConsent()">Zabudnúť moje rozhodnutia</button>
+            </div>
+            @if (saved()) { <p class="saved">{{ saved() }}</p> }
+          </div>
+        </section>
+
+        <section>
+          <h2>Voliteľné funkcie firmy</h2>
+          <p>AI asistent a automatický preklad nepoužívajú cookies, ale odovzdávajú obsah poskytovateľovi — zapína ich firma a opisujú ich
+            <a routerLink="/ochrana-osobnych-udajov">zásady ochrany osobných údajov</a>.</p>
+        </section>
+      }
+    }
+  </article>
+
+  <footer class="legal-footer">
+    <a routerLink="/podmienky">Podmienky používania</a>
+    <a routerLink="/ochrana-osobnych-udajov">Ochrana osobných údajov</a>
+    <a routerLink="/cookies">Cookies</a>
+    <a routerLink="/">Späť na úvod</a>
+  </footer>
+</div>

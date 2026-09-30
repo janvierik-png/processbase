@@ -53,6 +53,14 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="collapsed() ? 'M9 6l6 6-6 6' : 'M15 6l-6 6 6 6'"/></svg>
       <span>Zbalit menu</span>
     </button>
+    <!-- #21 — právne texty -->
+    @if (!collapsed()) {
+      <nav class="legal-links" aria-label="Právne informácie">
+        <a routerLink="/podmienky">Podmienky</a>
+        <a routerLink="/ochrana-osobnych-udajov">Ochrana údajov</a>
+        <a routerLink="/cookies">Cookies</a>
+      </nav>
+    }
   </aside>
 
   <div class="main-column">

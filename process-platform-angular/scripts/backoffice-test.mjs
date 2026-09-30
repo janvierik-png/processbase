@@ -42,7 +42,7 @@ try {
   // zakaznik s citlivym obsahom, ktory operator nesmie vidiet
   const reg = await call('/register', {
     method: 'POST',
-    body: { organizationName: `Org Test backoffice ${STAMP}`, ownerName: 'Tajny Majitel', email: `orgtest-bo-${STAMP}@example.test`, password: 'Heslo123456' }
+    body: { acceptTerms: true, organizationName: `Org Test backoffice ${STAMP}`, ownerName: 'Tajny Majitel', email: `orgtest-bo-${STAMP}@example.test`, password: 'Heslo123456' }
   });
   orgId = reg.payload.organization.id;
   const t = reg.payload.token;

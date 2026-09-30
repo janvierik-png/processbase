@@ -37,7 +37,7 @@ async function main() {
   const ownerEmail = `orgtest-${STAMP}@example.test`;
   const reg = await call('/register', {
     method: 'POST',
-    body: { organizationName: `Org Test ${STAMP}`, ownerName: 'Majitel Firmy', email: ownerEmail, password: 'Heslo123456' }
+    body: { acceptTerms: true, organizationName: `Org Test ${STAMP}`, ownerName: 'Majitel Firmy', email: ownerEmail, password: 'Heslo123456' }
   });
   token = reg.payload?.token;
   const orgId = reg.payload?.organization?.id;
@@ -166,7 +166,7 @@ async function main() {
   const victimEmail = `orgtest-obet-${STAMP}@example.test`;
   await call('/register', {
     method: 'POST', auth: null,
-    body: { organizationName: `Org Test obet ${STAMP}`, ownerName: 'Obet', email: victimEmail, password: 'TajneHeslo123' }
+    body: { acceptTerms: true, organizationName: `Org Test obet ${STAMP}`, ownerName: 'Obet', email: victimEmail, password: 'TajneHeslo123' }
   });
   const invitation2 = (await call(org('/invitations'), { method: 'POST', body: { email: victimEmail, roleId: 'approver' } })).payload;
   const hijack = await call(`/invitations/${invitation2?.token}/accept`, {

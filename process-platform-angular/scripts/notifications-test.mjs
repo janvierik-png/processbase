@@ -39,7 +39,7 @@ const has = (box, type, text) => (box?.items ?? []).some((item) => item.type ===
 async function register(label) {
   const reg = await call('/register', {
     method: 'POST',
-    body: { organizationName: `Org Test upozornenia ${label} ${STAMP}`, ownerName: `Vlastnik ${label}`, email: `orgtest-upoz-${label}-${STAMP}@example.test`, password: 'Heslo123456' }
+    body: { acceptTerms: true, organizationName: `Org Test upozornenia ${label} ${STAMP}`, ownerName: `Vlastnik ${label}`, email: `orgtest-upoz-${label}-${STAMP}@example.test`, password: 'Heslo123456' }
   });
   return { token: reg.payload?.token, orgId: reg.payload?.organization?.id };
 }
