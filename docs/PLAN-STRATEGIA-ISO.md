@@ -244,14 +244,16 @@ GOV-01 #37 · GOV-02 #38 · LINK-01 #39 · QUAL-01 #40 · IMP-01 #41 · AI-01 #4
 | **FREE-02** #25 (tlač) | `7209e30` | scenár 12 v prehliadači: diagram s 30 krokmi (~5000 px) — A4 na šírku automaticky 5 strán v mierke 100 % s prekryvom 24 px (výrezy na seba nadväzujú), A3 4 strany, „celý na jednu stranu" 21 % s varovaním o nečitateľnosti; náhľad v skutočnom pomere; dokument na tlač bez skriptov v sandboxovanom rámci, strany ako SVG obrázky s hlavičkou „strana x z n (riadok, stĺpec)". SVG export bol hotový už vo FREE-01. Modeler pri plátne bez rozmeru diagram načíta (predtým hlásil chybný súbor) |
 | **QUAL-01** #40 | `08c5d9f` | `quality-readiness-test` 34/34 — scenár 4: bez profilu „Kvalita a audit" kontrolné otázky vypnuté, bežný zamestnanec pripravenosť nevidí (403); po zapnutí správca kvality / ISO auditor vidí konkrétne chýbajúce meradlo, vstupy, riziká a termín revízie; žiadne percento ani „certifikovaný". Scenár 5: platný postup „hotové", chýbajúci záznam o kontrole „chýba"; záznam o vykonaní zapíše aj vykonávateľ (bez práva upravovať), starší ako 12 mesiacov = „neoverené"; „neaplikovateľné" len s dôvodom a schválením iným človekom; doplnenie v návrhu platí až po publikovaní; vstupy/výstupy, predchádzajúce/nasledujúce procesy (len vlastná firma) sú súčasť verzie. V prehliadači: karty „Riadenie procesu" a „Kvalita a audit", pripravenosť so stavmi, záznamy, úprava meradla |
 
+| **GRAPH-01** #43 (IT systémy) | `05c42ac` | `it-systems-test` 39/39 — register systémov (skratka, dodávateľ, odkaz len http/https, zodpovedné miesto), systém pri procese aj pri kroku; väzby vo verzii (odtlačok verzií bez systémov sa nemení); dopad pred vyradením (procesy, kroky, platné verzie); vyradenie len po potvrdení a so správou firmy; vyradený systém nedostane nové väzby, existujúce ostávajú; použitý sa nemaže (409); Prehľad „Vyradený systém" aj pre platnú verziu; upozornenie editorom; hľadanie; iná firma systém nevidí ani nepripojí. V prehliadači: stránka IT systémy s dopadom, systémy v karte procesu a v editore krokov |
+
 **Známe obmedzenia QUAL-01:** ukazovatele (KPI s jednotkou, cieľom, frekvenciou) sú zatiaľ jeden text „meradlo úspechu";
 auditný export s manifestom a checksumami patrí do ISO-01 (#44); mapovanie na články normy až po licencii textu.
 
 **Známe obmedzenia FREE-02:** anonymné meranie použitia (spustenia, exporty) zatiaľ nie — čaká na právne texty
 a rozhodnutie vlastníka (#21); tlač je len v bezplatnom modeleri, nie pri procese vo workspace.
 
-**Známe obmedzenia GRAPH-01:** dopad zmeny „systému" (IT systém) nie je — systémy zatiaľ nie sú v modeli;
-dopad dokumentu ukazuje zoznam verzií (použitie vo verziách procesov).
+**Známe obmedzenia GRAPH-01:** systémy doplnené v `05c42ac`; dopad dokumentu ukazuje zoznam verzií
+(použitie vo verziách procesov); systém nemá vlastné verzie ani väzby medzi systémami (integrácie).
 
 **Známe obmedzenia DOC-02:** dokument patrí jednému procesu (zdieľanie medzi procesmi a samostatný register
 dokumentov sú na neskôr); stránka Dokumenty zatiaľ nenahráva novú verziu (len karta procesu).
