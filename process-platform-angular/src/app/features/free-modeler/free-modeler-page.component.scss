@@ -275,3 +275,65 @@
   display: flex;
   gap: 6px;
 }
+
+// #25 FREE-02 — tlač s delením na strany
+.print-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px 16px;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--line);
+}
+
+.print-options {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  font-size: 13px;
+
+  label {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  select { min-height: 32px; font-size: 13.5px; }
+}
+
+.print-summary { color: var(--ink); font-weight: 600; }
+.print-warn { color: var(--warn); }
+.print-actions { display: flex; gap: 6px; }
+
+.print-preview {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.print-page {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  aspect-ratio: 277 / 182;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  &:not(.landscape) { aspect-ratio: 190 / 269; }
+
+  img { height: auto; max-height: 100%; object-fit: contain; object-position: left top; min-height: 0; align-self: start; }
+  figcaption { font-size: 11px; color: var(--muted); text-align: right; }
+}
+
+@media (max-width: 760px) {
+  .print-panel { grid-template-columns: minmax(0, 1fr); }
+}

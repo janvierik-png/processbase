@@ -9,6 +9,7 @@ import BpmnModeler from 'bpmn-js/lib/Modeler';
 import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js-properties-panel';
 import camundaModdleDescriptors from 'camunda-bpmn-moddle/resources/camunda.json';
 import { AuthService } from '../../core/services/auth.service';
+import { Orientation, PaperSize, PrintMode, PrintPlan, planPrint, printDocument, printPages, svgBox, svgDataUrl } from '../../core/utils/diagram-print';
 
 /** Najväčší súbor, ktorý modeler otvorí — väčšie diagramy prehliadač nezvládne plynulo. */
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -285,6 +286,58 @@ export class FreeModelerPageComponent implements AfterViewInit, OnDestroy {
     saveFile(new Blob([svg], { type: 'image/svg+xml' }), this.fileName().replace(/\.(bpmn|xml)$/i, '') + '.svg');
   }
 
+  // --- #25 FREE-02 tlač s voľbou orientácie a delením na strany ---
+
+  readonly printOpen = signal(false);
+  readonly printPlan = signal<PrintPlan | null>(null);
+  /** strany ako obrázky (data URL) — náhľad aj tlač */
+  readonly printPreview = signal<Array<{ url: string; widthPct: number }>>([]);
+  printOptions: { paper: PaperSize; orientation: Orientation; mode: PrintMode } = { paper: 'A4', orientation: 'landscape', mode: 'auto' };
+  private printSvg = '';
+  private printPageSvgs: string[] = [];
+
+  async openPrint(): Promise<void> {
+    this.printSvg = (await this.modeler!.saveSVG()).svg;
+    this.printOpen.set(true);
+    this.updatePrint();
+  }
+
+  updatePrint(): void {
+    if (!this.printSvg) return;
+    const box = svgBox(this.printSvg);
+    const plan = planPrint(box, this.printOptions.paper, this.printOptions.orientation, this.printOptions.mode);
+    this.printPageSvgs = printPages(this.printSvg, plan, box);
+    this.printPlan.set(plan);
+    // náhľad v skutočnom pomere k strane — malý diagram sa nesmie tváriť, že vyplní celý papier
+    const pageWidth = Math.round(box.width * plan.scale);
+    this.printPreview.set(this.printPageSvgs.map((svg) => ({
+      url: svgDataUrl(svg),
+      widthPct: plan.columns * plan.rows > 1 ? 100 : Math.min(100, (pageWidth / plan.pageWidth) * 100)
+    })));
+  }
+
+  pagesLabel(plan: PrintPlan): string {
+    const count = plan.columns * plan.rows;
+    if (count === 1) return '1 strana';
+    return `${count} ${count <= 4 ? 'strany' : 'strán'} (${plan.rows} × ${plan.columns})`;
+  }
+
+  /** Tlač cez skrytý rámec bez skriptov — dialóg tlače prehliadača. */
+  print(): void {
+    const plan = this.printPlan();
+    if (!plan) return;
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-same-origin allow-modals');
+    frame.style.cssText = 'position:fixed;width:0;height:0;border:0;right:0;bottom:0;';
+    frame.srcdoc = printDocument(this.printPageSvgs, plan, this.fileName().replace(/\.(bpmn|xml)$/i, ''), this.printOptions.paper, this.printOptions.orientation);
+    frame.onload = () => {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+      setTimeout(() => frame.remove(), 60_000);
+    };
+    document.body.appendChild(frame);
+  }
+
   renameFile(value: string): void {
     this.fileName.set(normalizeFileName(value));
   }
@@ -296,7 +349,12 @@ export class FreeModelerPageComponent implements AfterViewInit, OnDestroy {
   }
 
   fitViewport(): void {
-    (this.modeler?.get('canvas') as { zoom: (level: string) => void } | undefined)?.zoom('fit-viewport');
+    try {
+      (this.modeler?.get('canvas') as { zoom: (level: string) => void } | undefined)?.zoom('fit-viewport');
+    } catch {
+      // plátno ešte nemá rozmer (okno na pozadí, skrytá karta) — diagram je načítaný,
+      // len sa neprispôsobil; nesmie to vyzerať ako chybný súbor
+    }
   }
 
   discardRestored(): void {

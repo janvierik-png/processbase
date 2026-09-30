@@ -24,6 +24,7 @@
         }
       </button>
       <button type="button" (click)="downloadSvg()" title="Vektorový obrázok diagramu">Export SVG</button>
+      <button type="button" [class.active]="printOpen()" (click)="openPrint()" title="Tlač s voľbou papiera, orientácie a delením veľkého diagramu na strany">Tlač…</button>
       <button type="button" class="to-workspace" (click)="openImport()"
         title="Z diagramu vznikne návrh procesu vo vašej firme — s vlastníkom, verziami a prístupom pre kolegov">
         Uložiť do Process Base
@@ -78,6 +79,57 @@
         <button type="button" (click)="importOpen.set(false)">Zrušiť</button>
       </div>
     </form>
+  }
+
+  @if (printOpen()) {
+    <!-- #25 — veľký diagram sa neoreže ani nezmenší na nečitateľnosť: rozdelí sa na strany -->
+    <section class="print-panel" aria-label="Tlač diagramu">
+      <div class="print-options">
+        <strong>Tlač diagramu</strong>
+        <label>Papier
+          <select name="paper" [(ngModel)]="printOptions.paper" (ngModelChange)="updatePrint()">
+            <option value="A4">A4</option>
+            <option value="A3">A3</option>
+          </select>
+        </label>
+        <label>Orientácia
+          <select name="orientation" [(ngModel)]="printOptions.orientation" (ngModelChange)="updatePrint()">
+            <option value="landscape">Na šírku</option>
+            <option value="portrait">Na výšku</option>
+          </select>
+        </label>
+        <label>Rozloženie
+          <select name="mode" [(ngModel)]="printOptions.mode" (ngModelChange)="updatePrint()">
+            <option value="auto">Automaticky (čitateľne)</option>
+            <option value="fit">Celý na jednu stranu</option>
+            <option value="tile">Rozdeliť na strany (100 %)</option>
+          </select>
+        </label>
+        @if (printPlan(); as plan) {
+          <span class="print-summary">
+            {{ pagesLabel(plan) }}
+            · mierka {{ (plan.scale * 100).toFixed(0) }} %
+          </span>
+          @if (!plan.readable) {
+            <span class="print-warn">Na jednej strane bude text príliš malý — zvoľte rozdelenie na strany alebo väčší papier.</span>
+          }
+        }
+        <div class="print-actions">
+          <button type="button" class="primary" (click)="print()">Tlačiť…</button>
+          <button type="button" (click)="printOpen.set(false)">Zavrieť</button>
+        </div>
+      </div>
+      @if (printPlan(); as plan) {
+        <div class="print-preview" [style.grid-template-columns]="'repeat(' + plan.columns + ', minmax(0, 1fr))'">
+          @for (page of printPreview(); track $index) {
+            <figure class="print-page" [class.landscape]="printOptions.orientation === 'landscape'">
+              <img [src]="page.url" [style.width.%]="page.widthPct" [alt]="'Strana ' + ($index + 1)">
+              <figcaption>{{ $index + 1 }}</figcaption>
+            </figure>
+          }
+        </div>
+      }
+    </section>
   }
 
   <main class="workspace" [class.with-properties]="propertiesOpen()">
