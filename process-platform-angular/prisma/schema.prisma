@@ -96,6 +96,10 @@ model Organization {
   requireApproval    Boolean              @default(false)
   /// #40 — profil „Kvalita a audit“: kontrolne otazky a pripravenost evidencie
   qualityProfile     Boolean              @default(false)
+  /// #42 — firma povolila AI asistenta (obsah sa posiela poskytovateľovi AI len na výslovnú akciu)
+  aiEnabled          Boolean              @default(false)
+  /// vlastný kľúč AI poskytovateľa (šifrovaný); bez neho sa použije kľúč prevádzkovateľa
+  aiApiKeyEnc        String?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 

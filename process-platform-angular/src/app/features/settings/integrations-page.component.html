@@ -1,7 +1,7 @@
 <header class="page-header">
   <div>
     <p class="eyebrow"><a routerLink="/app/settings">Nastavenia</a> / Integracie</p>
-    <h2>Automaticky preklad procesov</h2>
+    <h2>Integrácie — AI asistent a preklad</h2>
   </div>
 </header>
 
@@ -15,6 +15,52 @@
 @if (!auth.can('organization:write')) {
   <p class="muted">Nastavenia integrácií môže meniť len vlastník alebo administrátor firmy.</p>
 }
+
+<!-- #42 — AI asistent: návrh procesu z textu a import dokumentov -->
+<section class="integrations-grid ai-grid">
+  <form class="panel" (ngSubmit)="saveAi({ enabled: true })">
+    <fieldset [disabled]="!auth.can('organization:write')">
+      <h3>AI asistent</h3>
+      @if (ai(); as settings) {
+        <p class="ai-state" [class.on]="settings.available">
+          {{ settings.available ? 'Zapnutý' : settings.enabled ? 'Zapnutý, chýba kľúč' : 'Vypnutý' }} · {{ settings.provider }} · model {{ settings.model }}
+        </p>
+        @if (!settings.enabled) {
+          <label class="check-row">
+            <input type="checkbox" name="aiConsent" [(ngModel)]="aiConsent">
+            Súhlasím, že text a dokumenty, ktoré pri návrhu procesu alebo importe výslovne pošleme AI, spracuje poskytovateľ {{ settings.provider }}.
+          </label>
+        }
+        <label>Vlastný kľúč Anthropic (voliteľné)
+          <input name="aiKey" type="password" [(ngModel)]="aiKey" autocomplete="off"
+            [placeholder]="settings.hasOrgKey ? 'Kľúč je uložený — vyplňte len pri zmene' : (settings.platformKey ? 'Použije sa kľúč prevádzkovateľa' : 'sk-ant-…')">
+        </label>
+        <div class="form-actions">
+          @if (!settings.enabled) {
+            <button class="primary" type="submit">Zapnúť AI</button>
+          } @else {
+            <button class="primary" type="submit">Uložiť</button>
+            <button type="button" (click)="saveAi({ enabled: false })">Vypnúť AI</button>
+          }
+          @if (settings.hasOrgKey) {
+            <button type="button" class="ghost" (click)="saveAi({ removeKey: true })">Odstrániť kľúč</button>
+          }
+        </div>
+      } @else {
+        <p class="muted">Nastavenie AI sa nenačítalo.</p>
+      }
+      @if (aiMessage()) { <p class="muted">{{ aiMessage() }}</p> }
+    </fieldset>
+  </form>
+
+  <section class="panel">
+    <h3>Ako AI pracuje s údajmi</h3>
+    <p class="muted">AI sa použije len vtedy, keď ju pri návrhu procesu alebo importe výslovne zvolíte. Poskytovateľovi sa odošle len vložený text
+      alebo nahratý súbor; súbory sa u nás neukladajú. Výsledok je vždy len návrh na kontrolu — nič sa nepublikuje samo.</p>
+    <p class="muted">Bez AI funguje návrh podľa pravidiel: kroky, roly, rozhodnutia a organizačná schéma (SmartArt, tabuľky) sa rozpoznajú priamo v aplikácii.
+      Podrobnosti v <a routerLink="/ochrana-osobnych-udajov">zásadách ochrany osobných údajov</a>.</p>
+  </section>
+</section>
 
 <section class="integrations-grid">
   <form class="panel" (ngSubmit)="save()">

@@ -1,0 +1,222 @@
+<header class="page-header">
+  <div>
+    <h2>Import a návrh procesu</h2>
+    <p class="lead">Z textu alebo z dokumentov firmy (smernice, tabuľky, organizačná schéma – „pavúk“) vznikne návrh.
+      Skontrolujete ho a až potom sa vytvorí — procesy vždy ako nepublikované návrhy.</p>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button type="button" role="tab" [class.active]="tab() === 'text'" [attr.aria-selected]="tab() === 'text'" (click)="tab.set('text')">Proces z textu</button>
+  <button type="button" role="tab" [class.active]="tab() === 'files'" [attr.aria-selected]="tab() === 'files'" (click)="tab.set('files')">Import zo súborov</button>
+</nav>
+
+@if (error()) { <p class="message error">{{ error() }}</p> }
+
+@if (!canProcess && !canOrg) {
+  <p class="message notice">Návrhy procesov a import môže robiť editor procesov alebo správa firmy.</p>
+}
+
+<!-- ===== z textu ===== -->
+@if (tab() === 'text') {
+  <div class="text-grid">
+    <form class="panel" (ngSubmit)="makeDraft()">
+      <h3>Opíšte postup</h3>
+      <label>Postup vlastnými slovami — vety alebo očíslované kroky
+        <textarea name="processText" [(ngModel)]="text" rows="14" maxlength="20000"
+          placeholder="napr. Účtovník skontroluje faktúru. Ak je v poriadku, vedúci ju schváli, inak ju vráti dodávateľovi…"></textarea>
+      </label>
+      <p class="hint">Pomôže: kto krok robí (napr. „Účtovník: …“), rozhodnutia „Ak …, … inak …“, riadky „Účel:“, „Spúšťač:“, „Výsledok:“.
+        <button type="button" class="link-btn" (click)="useSample()">Vložiť ukážku</button></p>
+      @if (ai()?.available) {
+        <label class="check-row"><input type="checkbox" name="useAi" [(ngModel)]="useAi"> Použiť AI ({{ ai()?.provider }})</label>
+        @if (useAi) { <p class="hint">Text sa odošle poskytovateľovi AI na spracovanie. Nevkladajte osobné údaje, ktoré návrh nepotrebuje.</p> }
+      } @else {
+        <p class="hint">Návrh vznikne podľa pravidiel priamo v aplikácii. AI asistenta môže zapnúť správa firmy v <a routerLink="/app/settings/integrations">Integráciách</a>.</p>
+      }
+      <div class="form-actions">
+        <button class="primary" type="submit" [disabled]="busy() || text.trim().length < 10 || !canProcess">{{ busy() ? 'Pripravujem…' : 'Vytvoriť návrh' }}</button>
+      </div>
+    </form>
+
+    @if (draft(); as d) {
+      <section class="panel draft-panel">
+        <div class="draft-head">
+          <h3>Návrh na kontrolu</h3>
+          <span class="chip" [class.ai]="method() === 'ai'">{{ method() === 'ai' ? 'AI' : 'podľa pravidiel' }}</span>
+        </div>
+        @for (warning of d.warnings; track $index) { <p class="warn-line">⚠ {{ warning }}</p> }
+        <div class="two">
+          <label>Názov <input name="draftName" [(ngModel)]="d.name" (change)="refreshPreview()" maxlength="200"></label>
+          <label>Vlastník (pracovné miesto)
+            <select name="ownerRole" [(ngModel)]="ownerRole">
+              <option value="">— určím neskôr —</option>
+              @for (role of roleOptions(d); track role) { <option [value]="role">{{ role }}</option> }
+            </select>
+          </label>
+        </div>
+        <label>Účel <input name="draftPurpose" [(ngModel)]="d.purpose" maxlength="1000"></label>
+        <div class="two">
+          <label>Spúšťač <input name="draftTrigger" [(ngModel)]="d.trigger" maxlength="1000"></label>
+          <label>Výsledok <input name="draftOutcome" [(ngModel)]="d.outcome" maxlength="1000"></label>
+        </div>
+
+        <h4>Kroky a kto ich robí</h4>
+        <ol class="draft-steps">
+          @for (node of tasks(d); track node.id) {
+            <li [class.decision]="node.type === 'gateway'">
+              <input [name]="'node-' + node.id" [(ngModel)]="node.name" (change)="refreshPreview()" [attr.aria-label]="'Krok ' + node.name" maxlength="300">
+              @if (node.type === 'task') {
+                <input class="role" [name]="'role-' + node.id" [(ngModel)]="node.role" (change)="refreshPreview()" list="role-options" placeholder="kto" aria-label="Kto krok robí">
+                @if (node.role && !isPosition(node.role)) { <small class="new-role" title="Takéto pracovné miesto firma zatiaľ nemá">nové miesto</small> }
+              } @else {
+                <small class="muted">rozhodnutie</small>
+              }
+            </li>
+          }
+        </ol>
+        <datalist id="role-options">
+          @for (position of positions(); track position.id) { <option [value]="position.name"></option> }
+        </datalist>
+
+        @if (unmatchedRoles(d).length > 0) {
+          @if (canOrg) {
+            <label class="check-row"><input type="checkbox" name="createMissing" [(ngModel)]="createMissingRoles">
+              Založiť chýbajúce pracovné miesta: {{ unmatchedRoles(d).join(', ') }}</label>
+          } @else {
+            <p class="hint">Kroky s rolou, ktorú firma nemá ako pracovné miesto ({{ unmatchedRoles(d).join(', ') }}), budú bez zodpovednosti — miesta môže založiť správa firmy.</p>
+          }
+        }
+
+        <div class="preview">
+          @if (previewXml()) { <pp-bpmn-viewer [xml]="previewXml()" /> }
+        </div>
+        <p class="hint">Diagram je vygenerovaný — po vytvorení ho upravíte v BPMN editore. Nič sa nepublikuje.</p>
+        <div class="form-actions">
+          <button type="button" class="primary" (click)="createFromDraft()" [disabled]="busy() || !canProcess">Vytvoriť návrh procesu</button>
+          <button type="button" (click)="draft.set(null)">Zahodiť</button>
+        </div>
+      </section>
+    }
+  </div>
+}
+
+<!-- ===== zo súborov ===== -->
+@if (tab() === 'files') {
+  <section class="panel">
+    <h3>Dokumenty firmy</h3>
+    <label class="dropzone" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
+      <input type="file" multiple [accept]="accept" (change)="addFiles($any($event.target).files); $any($event.target).value = ''">
+      <strong>Pretiahnite súbory sem alebo kliknite na výber</strong>
+      <small>Word, Excel, PowerPoint, CSV, text, PDF, obrázok schémy · najviac 10 súborov po 20 MB</small>
+    </label>
+    <p class="hint">Súbory sa neukladajú — spracujú sa a zahodia. Organizačnú schému („pavúka“) v Worde alebo PowerPointe (SmartArt)
+      a tabuľky s útvarmi a miestami rozpoznáme aj bez AI; obrázok alebo naskenované PDF len s AI.</p>
+    @if (ai()?.available) {
+      <label class="check-row"><input type="checkbox" name="useAiFiles" [(ngModel)]="useAiFiles"> Použiť AI ({{ ai()?.provider }}) — obsah súborov sa odošle poskytovateľovi AI</label>
+    }
+
+    @if (jobs().length > 0) {
+      <ul class="file-list">
+        @for (job of jobs(); track job.id) {
+          <li [class.error]="job.status === 'error'">
+            <span class="file-name">{{ job.file.name }}</span>
+            <small>{{ statusLabel(job) }}</small>
+            @if (job.status !== 'analyzing') { <button type="button" class="ghost small" (click)="removeJob(job)" [attr.aria-label]="'Odobrať ' + job.file.name">×</button> }
+          </li>
+        }
+      </ul>
+      <div class="form-actions">
+        <button type="button" class="primary" (click)="analyzeAll()" [disabled]="busy()">{{ busy() ? 'Rozoberám…' : 'Rozobrať súbory' }}</button>
+        <button type="button" (click)="resetFiles()" [disabled]="busy()">Začať znova</button>
+      </div>
+    }
+  </section>
+
+  @for (warning of warnings(); track $index) { <p class="warn-line">⚠ {{ warning }}</p> }
+
+  @if (applied(); as done) {
+    <section class="panel done">
+      <h3>Hotovo — nič sa nepublikovalo</h3>
+      <p>Útvary: {{ done.units.created }} nových, {{ done.units.merged }} zlúčených s existujúcimi ·
+        pracovné miesta: {{ done.positions.created }} nových, {{ done.positions.merged }} zlúčených · osoby: {{ done.people }}</p>
+      @if (done.processes.length > 0) {
+        <p>Návrhy procesov na kontrolu:</p>
+        <ul>
+          @for (item of done.processes; track item.id) { <li><a [routerLink]="['/app/processes', item.id]">{{ item.name }}</a></li> }
+        </ul>
+      }
+      <p><a routerLink="/app/settings/positions">Organizácia →</a></p>
+    </section>
+  } @else if (hasCandidates()) {
+    <section class="panel candidates">
+      <h3>Čo sa našlo — vyberte, čo vytvoriť</h3>
+
+      @if (units().length > 0) {
+        <h4>Útvary <small class="muted">({{ newCount(units(), selectedUnits()) }} nových)</small></h4>
+        @for (unit of units(); track unit.key) {
+          <label class="candidate">
+            <input type="checkbox" [checked]="selectedUnits().has(unit.key)" (change)="toggle('units', unit.key)">
+            <span class="main"><strong>{{ unit.name }}</strong>@if (unit.parentKey) {<small> · pod {{ unitName(unit.parentKey) }}</small>}
+              @if (unit.existing) {<span class="chip existing">už existuje — zlúči sa</span>}</span>
+            <small class="source">{{ unit.sources[0].file }} · {{ unit.sources[0].location }}{{ unit.sources.length > 1 ? ' (+' + (unit.sources.length - 1) + ')' : '' }}</small>
+          </label>
+        }
+      }
+
+      @if (candidatePositions().length > 0) {
+        <h4>Pracovné miesta <small class="muted">({{ newCount(candidatePositions(), selectedPositions()) }} nových)</small></h4>
+        @for (position of candidatePositions(); track position.key) {
+          <label class="candidate">
+            <input type="checkbox" [checked]="selectedPositions().has(position.key)" (change)="toggle('positions', position.key)">
+            <span class="main">
+              <strong>{{ position.name }}</strong>
+              @if (position.unitKey) {<small> · {{ unitName(position.unitKey) }}</small>}
+              @if (position.reportsToKey) {<small> · podlieha: {{ positionName(position.reportsToKey) }}</small>}
+              @if (position.holder) {<small class="holder"> · {{ position.holder }}</small>}
+              @if (position.existing) {<span class="chip existing">už existuje — zlúči sa</span>}
+            </span>
+            <small class="source" [title]="position.sources[0].quote">„{{ position.sources[0].quote }}“ — {{ position.sources[0].file }}, {{ position.sources[0].location }}</small>
+          </label>
+        }
+      }
+
+      @if (processes().length > 0) {
+        <h4>Procesy <small class="muted">(vzniknú ako návrhy)</small></h4>
+        @for (item of processes(); track processKey(item)) {
+          <div class="candidate process">
+            <label class="process-head">
+              <input type="checkbox" [checked]="selectedProcesses().has(processKey(item))" (change)="toggle('processes', processKey(item))">
+              <span class="main"><strong>{{ item.draft.name }}</strong><small> · krokov {{ item.steps.length }}</small>
+                @if (item.existing) {<span class="chip warn">proces s týmto názvom už existuje</span>}</span>
+            </label>
+            <small class="source">„{{ item.source.quote }}“ — {{ item.source.file }}, {{ item.source.location }}</small>
+            <button type="button" class="link-btn" (click)="openProcess.set(openProcess() === processKey(item) ? null : processKey(item))">
+              {{ openProcess() === processKey(item) ? 'Skryť kroky a diagram' : 'Ukázať kroky a diagram' }}</button>
+            @if (openProcess() === processKey(item)) {
+              <ol class="draft-steps readonly">
+                @for (step of item.steps; track step.nodeId) { <li>{{ step.title }}@if (step.role) {<small> — {{ step.role }}</small>}</li> }
+              </ol>
+              @for (warning of item.draft.warnings; track $index) { <p class="warn-line">⚠ {{ warning }}</p> }
+              <div class="preview"><pp-bpmn-viewer [xml]="previewFor(item)" /></div>
+            }
+          </div>
+        }
+      }
+
+      <div class="options">
+        @if (canOrg) {
+          <label class="check-row"><input type="checkbox" name="createPeople" [(ngModel)]="createPeople">
+            Založiť aj osoby zo schémy a obsadiť nimi miesta (osobné údaje — len ak je to žiaduce)</label>
+          <label class="check-row"><input type="checkbox" name="createMissingFiles" [(ngModel)]="createMissingRolesFiles">
+            Roly z krokov, ktoré firma nemá, založiť ako pracovné miesta</label>
+        } @else if (needsOrg()) {
+          <p class="hint">Nové útvary a pracovné miesta môže vytvoriť len vlastník alebo administrátor firmy — zrušte ich výber alebo požiadajte správu firmy.</p>
+        }
+      </div>
+      <div class="form-actions">
+        <button type="button" class="primary" (click)="applySelected()" [disabled]="busy() || (needsOrg() && !canOrg)">Vytvoriť vybrané</button>
+      </div>
+    </section>
+  }
+}

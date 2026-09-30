@@ -68,3 +68,15 @@ fieldset {
   margin: 0;
   padding: 0;
 }
+
+// #42 — AI asistent
+.ai-grid { margin-bottom: 16px; }
+.ai-state { color: var(--muted); font-weight: 550; }
+.ai-state.on { color: var(--green); }
+.check-row input { flex: none; align-self: flex-start; margin-top: 3px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.panel a { color: var(--accent-strong); }
+
+@media (max-width: 900px) {
+  .integrations-grid { grid-template-columns: minmax(0, 1fr); }
+}

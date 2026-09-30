@@ -55,6 +55,11 @@ export const appRoutes: Routes = [
         path: 'processes/:id',
         loadComponent: () => import('./features/processes/process-workspace.component').then((m) => m.ProcessWorkspaceComponent)
       },
+      // #42/#41 — návrh procesu z textu a import dokumentov
+      {
+        path: 'import',
+        loadComponent: () => import('./features/import/import-page.component').then((m) => m.ImportPageComponent)
+      },
       {
         path: 'documents',
         loadComponent: () => import('./features/documents/documents-page.component').then((m) => m.DocumentsPageComponent)

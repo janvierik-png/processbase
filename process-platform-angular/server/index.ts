@@ -21,6 +21,13 @@ import {
   ResponsibilityRole
 } from '../generated/prisma/client';
 import { acceptRequestId, logError } from './log';
+import { AI_MODEL, AI_PROVIDER_LABEL, AiContent, AiError, IMPORT_TOOL, PLATFORM_AI_KEY, PROCESS_DRAFT_TOOL, callAiTool, importPrompt, processDraftPrompt } from './ai';
+import { ExtractError, ExtractedDocument, blocksToText, extractDocument } from './doc-extract';
+import { ZipError } from './zip';
+import { Citation, ImportCandidates, candidatesFromAi, candidatesFromDocument } from './import-candidates';
+import { ProcessDraft, draftSteps, foldName, sanitizeDraft } from '../src/app/shared/process-draft/draft';
+import { parseProcessText } from '../src/app/shared/process-draft/text-parser';
+import { draftToBpmnXml } from '../src/app/shared/process-draft/bpmn-layout';
 import { prisma } from './prisma';
 import { SECRETS_FILE, secret } from './secrets';
 import { APP_URL, emailDeliveryStats, queueEmail } from './mailer';
@@ -269,6 +276,11 @@ const PERMISSION_RULES: PermissionRule[] = [
   { methods: ['PATCH'], pattern: /^\/api\/organizations\/[^/]+$/, anyOf: ['organization:write'] },
   { methods: ['GET', 'POST'], pattern: /^\/api\/organizations\/[^/]+\/invitations$/, anyOf: ['user:invite'] },
   { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/settings\/translation$/, anyOf: ['organization:write'] },
+
+  // #42/#41 — navrh z textu a import: rozbor smie editor aj sprava firmy; co z toho vytvori, overi handler
+  { methods: ['POST'], pattern: /^\/api\/process-drafts\/from-text$/, anyOf: ['process:write'] },
+  { methods: ['POST'], pattern: /^\/api\/import\/(analyze|apply)$/, anyOf: ['process:write', 'organization:write'] },
+  { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/settings\/ai$/, anyOf: ['organization:write'] },
 
   // #45 — vlastne polia procesu definuje sprava firmy; hodnoty pri procese zapisuje editor (PATCH procesu)
   { methods: ['POST'], pattern: /^\/api\/organizations\/[^/]+\/process-fields$/, anyOf: ['organization:write'] },
@@ -4005,6 +4017,380 @@ app.delete('/api/process-fields/:fieldId', async (request, response, next) => {
     }
     await prisma.processFieldDefinition.delete({ where: { id: field.id } });
     response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- #42 AI-01 / #41 IMP-01 — AI asistent, navrh procesu z textu, import dokumentov ---
+
+const AI_HOURLY_LIMIT = Number(process.env['AI_HOURLY_LIMIT'] ?? 30);
+const aiUsage = new Map<string, { count: number; resetAt: number }>();
+const MAX_IMPORT_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_AI_IMAGE_BYTES = 5 * 1024 * 1024;
+
+function aiKeyFor(organization: { aiApiKeyEnc: string | null }): string {
+  return (organization.aiApiKeyEnc ? decryptSecret(organization.aiApiKeyEnc) : null) ?? PLATFORM_AI_KEY;
+}
+
+function aiSettings(organization: { aiEnabled: boolean; aiApiKeyEnc: string | null }) {
+  const key = aiKeyFor(organization);
+  return {
+    enabled: organization.aiEnabled,
+    hasOrgKey: Boolean(organization.aiApiKeyEnc),
+    platformKey: Boolean(PLATFORM_AI_KEY),
+    /** AI sa dá použiť: firma ju zapla a je kľúč (vlastný alebo prevádzkovateľa) */
+    available: organization.aiEnabled && Boolean(key),
+    provider: AI_PROVIDER_LABEL,
+    model: AI_MODEL
+  };
+}
+
+/** Kľúč AI pre požiadavku — len ak ju firma zapla; limit volaní za hodinu. */
+async function aiKeyForRequest(request: express.Request): Promise<string> {
+  const organization = await prisma.organization.findUniqueOrThrow({ where: { id: orgScope(request) }, select: { aiEnabled: true, aiApiKeyEnc: true } });
+  if (!organization.aiEnabled) throw new HttpError(403, 'AI asistent nie je vo firme zapnutý (Nastavenia → Integrácie).');
+  const key = aiKeyFor(organization);
+  if (!key) throw new HttpError(503, 'AI nie je nakonfigurovaná — chýba kľúč poskytovateľa.');
+  const now = Date.now();
+  const usage = aiUsage.get(orgScope(request));
+  if (usage && usage.resetAt > now) {
+    if (usage.count >= AI_HOURLY_LIMIT) throw new HttpError(429, 'Limit AI požiadaviek na hodinu je vyčerpaný — skúste neskôr alebo pokračujte bez AI.');
+    usage.count++;
+  } else aiUsage.set(orgScope(request), { count: 1, resetAt: now + 60 * 60 * 1000 });
+  return key;
+}
+
+function aiFailure(error: unknown): never {
+  if (error instanceof AiError) throw new HttpError(error.status, error.message);
+  throw error;
+}
+
+app.get('/api/organizations/:organizationId/settings/ai', async (request, response, next) => {
+  try {
+    const organization = await prisma.organization.findUniqueOrThrow({ where: { id: orgScope(request) }, select: { aiEnabled: true, aiApiKeyEnc: true } });
+    response.json(aiSettings(organization));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/organizations/:organizationId/settings/ai', async (request, response, next) => {
+  try {
+    const body = request.body ?? {};
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+    if (apiKey && !/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(apiKey)) throw new HttpError(400, 'Kľúč nevyzerá ako kľúč Anthropic (sk-ant-…).');
+    const organization = await prisma.organization.update({
+      where: { id: orgScope(request) },
+      data: {
+        aiEnabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        aiApiKeyEnc: body.removeKey === true ? null : apiKey ? encryptSecret(apiKey) : undefined
+      },
+      select: { aiEnabled: true, aiApiKeyEnc: true }
+    });
+    response.json(aiSettings(organization));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Pre všetkých členov firmy — či ponúknuť voľbu „s AI“. */
+app.get('/api/ai/status', async (request, response, next) => {
+  try {
+    const organization = await prisma.organization.findUniqueOrThrow({ where: { id: orgScope(request) }, select: { aiEnabled: true, aiApiKeyEnc: true } });
+    const settings = aiSettings(organization);
+    response.json({ available: settings.available, enabled: settings.enabled, provider: settings.provider, model: settings.model });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Pracovné miesta a útvary firmy podľa názvu bez diakritiky — zlúčenie s kandidátmi. */
+async function orgIndex(organizationId: string) {
+  const [positions, units, processes] = await Promise.all([
+    prisma.orgPosition.findMany({ where: { organizationId }, select: { id: true, name: true, archivedAt: true } }),
+    prisma.orgUnit.findMany({ where: { organizationId }, select: { id: true, name: true } }),
+    prisma.processNode.findMany({ where: { organizationId, type: ProcessNodeType.PROCESS }, select: { id: true, name: true } })
+  ]);
+  return {
+    positions: new Map(positions.map((item) => [foldName(item.name), item])),
+    units: new Map(units.map((item) => [foldName(item.name), item])),
+    processes: new Map(processes.map((item) => [foldName(item.name), item])),
+    positionNames: positions.filter((item) => !item.archivedAt).map((item) => item.name)
+  };
+}
+
+function roleMatches(draft: ProcessDraft, positions: Map<string, { id: string; name: string; archivedAt: Date | null }>) {
+  return draft.roles.map((role) => {
+    const match = positions.get(foldName(role));
+    return { role, positionId: match && !match.archivedAt ? match.id : null, positionName: match?.name ?? null };
+  });
+}
+
+/** Návrh procesu z textu — AI (ak ju firma zapla a človek ju zvolil) alebo podľa pravidiel. Nič sa neukladá. */
+app.post('/api/process-drafts/from-text', async (request, response, next) => {
+  try {
+    const text = typeof request.body?.text === 'string' ? request.body.text.trim() : '';
+    if (text.length < 10) throw new HttpError(400, 'Opíšte postup aspoň jednou vetou.');
+    if (text.length > 20000) throw new HttpError(400, 'Text je príliš dlhý (najviac 20 000 znakov) — rozdeľte ho na viac procesov.');
+    const index = await orgIndex(orgScope(request));
+    let draft: ProcessDraft;
+    let method: 'ai' | 'rules' = 'rules';
+    if (request.body?.useAi === true) {
+      const apiKey = await aiKeyForRequest(request);
+      const raw = await callAiTool({ apiKey, system: processDraftPrompt(index.positionNames), content: [{ type: 'text', text }], tool: PROCESS_DRAFT_TOOL }).catch(aiFailure);
+      draft = sanitizeDraft(raw);
+      method = 'ai';
+    } else {
+      draft = parseProcessText(text, { knownRoles: index.positionNames });
+    }
+    response.json({ method, draft, steps: draftSteps(draft), roleMatches: roleMatches(draft, index.positions) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+async function readRawBody(request: express.Request, limit: number): Promise<Buffer> {
+  const declared = Number(request.headers['content-length'] ?? 0);
+  if (declared > limit) throw new HttpError(413, `Súbor je väčší ako ${Math.round(limit / 1024 / 1024)} MB.`);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new HttpError(413, `Súbor je väčší ako ${Math.round(limit / 1024 / 1024)} MB.`);
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+function aiContentFor(doc: ExtractedDocument, buffer: Buffer): AiContent[] {
+  const intro: AiContent = { type: 'text', text: `Dokument: ${doc.fileName}` };
+  if (doc.format === 'pdf') return [intro, { type: 'document', mediaType: 'application/pdf', data: buffer.toString('base64') }];
+  if (doc.format === 'image') {
+    if (buffer.length > MAX_AI_IMAGE_BYTES) throw new HttpError(413, 'Obrázok je pre AI príliš veľký (najviac 5 MB).');
+    return [intro, { type: 'image', mediaType: doc.mimeType, data: buffer.toString('base64') }];
+  }
+  return [intro, { type: 'text', text: blocksToText(doc.blocks) }];
+}
+
+/**
+ * Rozbor jedného súboru (scenár 6): kandidáti s citáciou zdroja a zhoda
+ * s tým, čo firma už má. Súbor sa neukladá ani nelogujú jeho údaje.
+ */
+app.post('/api/import/analyze', async (request, response, next) => {
+  try {
+    const fileName = cleanFileName(decodeHeader(request.header('x-file-name')));
+    const buffer = await readRawBody(request, MAX_IMPORT_FILE_BYTES);
+    if (buffer.length === 0) throw new HttpError(400, 'Súbor je prázdny.');
+    let doc: ExtractedDocument;
+    try {
+      doc = await extractDocument(fileName, buffer);
+    } catch (error) {
+      if (error instanceof ExtractError || error instanceof ZipError) throw new HttpError(400, error.message);
+      throw error;
+    }
+    const index = await orgIndex(orgScope(request));
+    const useAi = request.query['ai'] === '1';
+    let candidates: ImportCandidates;
+    let method: 'ai' | 'rules' = 'rules';
+    if (useAi) {
+      const apiKey = await aiKeyForRequest(request);
+      const raw = await callAiTool({ apiKey, system: importPrompt(index.positionNames), content: aiContentFor(doc, buffer), tool: IMPORT_TOOL, maxTokens: 16000 }).catch(aiFailure);
+      candidates = candidatesFromAi(raw, doc.fileName);
+      method = 'ai';
+    } else {
+      candidates = candidatesFromDocument(doc, index.positionNames);
+    }
+    const existing = (map: Map<string, { id: string; name: string }>, key: string) => {
+      const match = map.get(key);
+      return match ? { id: match.id, name: match.name } : null;
+    };
+    response.json({
+      file: doc.fileName,
+      format: doc.format,
+      method,
+      units: candidates.units.map((item) => ({ ...item, existing: existing(index.units, item.key) })),
+      positions: candidates.positions.map((item) => ({ ...item, existing: existing(index.positions, item.key) })),
+      processes: candidates.processes.map((item) => ({
+        ...item,
+        steps: draftSteps(item.draft),
+        existing: existing(index.processes, foldName(item.draft.name)),
+        roleMatches: roleMatches(item.draft, index.positions)
+      })),
+      warnings: [...(method === 'rules' ? doc.warnings : []), ...candidates.warnings.filter((warning) => method === 'ai' || !doc.warnings.includes(warning))]
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+type ApplyInput = {
+  units: Array<{ key: string; name: string; parentKey: string | null }>;
+  positions: Array<{ key: string; name: string; unitKey: string | null; reportsToKey: string | null; holder: string | null }>;
+  processes: Array<{ draft: ProcessDraft; ownerRole: string | null; source: Citation | null }>;
+};
+
+function parseApplyInput(body: any): ApplyInput {
+  const text = (value: unknown, max = 200) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+  const key = (value: unknown) => (text(value) ? foldName(text(value)) : null);
+  const list = (value: unknown, max: number, label: string) => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new HttpError(400, `${label} musí byť zoznam.`);
+    if (value.length > max) throw new HttpError(400, `Naraz najviac ${max} (${label}).`);
+    return value;
+  };
+  // rovnaký názov (bez diakritiky) = to isté — duplicity z viacerých súborov sa zlúčia
+  const dedupe = <T extends { key: string }>(items: T[]) => [...new Map(items.map((item) => [item.key, item])).values()];
+  return {
+    units: dedupe(list(body?.units, 200, 'útvary').filter((item: any) => text(item?.name)).map((item: any) => ({
+      key: foldName(text(item.name)), name: text(item.name), parentKey: key(item.parentKey ?? item.parent)
+    }))),
+    positions: dedupe(list(body?.positions, 500, 'pracovné miesta').filter((item: any) => text(item?.name)).map((item: any) => ({
+      key: foldName(text(item.name)), name: text(item.name), unitKey: key(item.unitKey ?? item.unit), reportsToKey: key(item.reportsToKey ?? item.reportsTo), holder: text(item.holder, 120) || null
+    }))),
+    processes: list(body?.processes, 50, 'procesy').map((item: any) => ({
+      draft: sanitizeDraft(item?.draft),
+      ownerRole: text(item?.ownerRole, 120) || null,
+      source: item?.source ? { file: text(item.source.file, 200), location: text(item.source.location, 120), quote: text(item.source.quote, 200) } : null
+    }))
+  };
+}
+
+/**
+ * Potvrdenie importu alebo návrhu z textu: vytvorí útvary, miesta (existujúce sa
+ * zlúčia podľa názvu), voliteľne osoby s obsadením a procesy ako NÁVRHY —
+ * nič sa nepublikuje. Organizačnú štruktúru mení len správa firmy.
+ */
+app.post('/api/import/apply', async (request, response, next) => {
+  try {
+    const organizationId = orgScope(request);
+    const { userId } = auth(request);
+    const input = parseApplyInput(request.body ?? {});
+    const createPeople = request.body?.createPeople === true;
+    const createMissingRoles = request.body?.createMissingRoles === true;
+    const canOrg = hasPermission(request, 'organization:write');
+    const canProcess = hasPermission(request, 'process:write');
+    if (input.processes.length > 0 && !canProcess) throw new HttpError(403, 'Procesy môže vytvárať len editor procesov.');
+    if (input.processes.length === 0 && input.units.length === 0 && input.positions.length === 0) throw new HttpError(400, 'Nie je vybraté nič na vytvorenie.');
+
+    const index = await orgIndex(organizationId);
+    const newUnits = input.units.filter((unit) => !index.units.has(unit.key));
+    const newPositions = input.positions.filter((position) => !index.positions.has(position.key));
+    if ((newUnits.length > 0 || newPositions.length > 0 || createPeople || createMissingRoles) && !canOrg) {
+      throw new HttpError(403, 'Útvary, pracovné miesta a osoby môže vytvárať len vlastník alebo administrátor firmy.');
+    }
+    const day0 = today();
+    const summary = { units: { created: 0, merged: input.units.length - newUnits.length }, positions: { created: 0, merged: input.positions.length - newPositions.length }, people: 0, processes: [] as Array<{ id: string; name: string }> };
+
+    await prisma.$transaction(async (tx) => {
+      // --- útvary: rodič skôr ako dieťa, cyklus sa preruší ---
+      const unitId = new Map<string, string>([...index.units].map(([key, unit]) => [key, unit.id]));
+      const pendingUnits = [...newUnits];
+      for (let guard = 0; pendingUnits.length > 0 && guard < 500; guard++) {
+        const ready = pendingUnits.findIndex((unit) => !unit.parentKey || unit.parentKey === unit.key || unitId.has(unit.parentKey) || !pendingUnits.some((other) => other.key === unit.parentKey));
+        const unit = pendingUnits.splice(ready >= 0 ? ready : 0, 1)[0];
+        const created = await tx.orgUnit.create({
+          data: { organizationId, name: unit.name, parentId: unit.parentKey && unit.parentKey !== unit.key ? unitId.get(unit.parentKey) ?? null : null }
+        });
+        unitId.set(unit.key, created.id);
+        summary.units.created++;
+      }
+
+      // --- pracovné miesta (existujúce sa nemenia) ---
+      const positionId = new Map<string, string>([...index.positions].filter(([, position]) => !position.archivedAt).map(([key, position]) => [key, position.id]));
+      for (const position of newPositions) {
+        const created = await tx.orgPosition.create({
+          data: { organizationId, name: position.name, unitId: position.unitKey ? unitId.get(position.unitKey) ?? null : null }
+        });
+        positionId.set(position.key, created.id);
+        summary.positions.created++;
+      }
+      const reportsTo = new Map<string, string>();
+      for (const position of newPositions) {
+        const target = position.reportsToKey ? positionId.get(position.reportsToKey) : undefined;
+        const own = positionId.get(position.key)!;
+        if (!target || target === own) continue;
+        // bez cyklu: nadriadený nesmie byť (nepriamo) podriadený tomuto miestu
+        let cursor: string | undefined = target;
+        let cycle = false;
+        for (let steps = 0; cursor && steps < 600; steps++) {
+          if (cursor === own) { cycle = true; break; }
+          cursor = reportsTo.get(cursor);
+        }
+        if (cycle) continue;
+        reportsTo.set(own, target);
+        await tx.orgPosition.update({ where: { id: own }, data: { reportsToId: target } });
+      }
+
+      // --- osoby a obsadenie (len na výslovnú voľbu) ---
+      if (createPeople) {
+        const people = await tx.person.findMany({ where: { organizationId, active: true }, select: { id: true, name: true } });
+        const personByName = new Map(people.map((person) => [foldName(person.name), person.id]));
+        for (const position of input.positions) {
+          const holder = position.holder;
+          const target = positionId.get(position.key);
+          if (!holder || !target) continue;
+          let personId = personByName.get(foldName(holder));
+          if (!personId) {
+            personId = (await tx.person.create({ data: { organizationId, name: holder } })).id;
+            personByName.set(foldName(holder), personId);
+            summary.people++;
+          }
+          const held = await tx.positionAssignment.findFirst({ where: { positionId: target, personId, ...activeOn(day0) } });
+          if (!held) await tx.positionAssignment.create({ data: { organizationId, positionId: target, personId, validFrom: day0 } });
+        }
+      }
+
+      // --- procesy ako návrhy ---
+      const last = await tx.processNode.findFirst({ where: { organizationId, parentId: null }, orderBy: { sortOrder: 'desc' }, select: { sortOrder: true } });
+      let sortOrder = (last?.sortOrder ?? 0) + 10;
+      for (const item of input.processes) {
+        const draft = item.draft;
+        const resolveRole = async (role: string | null | undefined): Promise<string | null> => {
+          if (!role) return null;
+          const found = positionId.get(foldName(role));
+          if (found) return found;
+          if (!createMissingRoles) return null;
+          const created = await tx.orgPosition.create({ data: { organizationId, name: role.slice(0, 200) } });
+          positionId.set(foldName(role), created.id);
+          summary.positions.created++;
+          return created.id;
+        };
+        const node = await tx.processNode.create({
+          data: {
+            organizationId,
+            type: ProcessNodeType.PROCESS,
+            name: draft.name,
+            description: draft.purpose || null,
+            trigger: draft.trigger || null,
+            outcome: draft.outcome || null,
+            bpmnXml: draftToBpmnXml(draft),
+            diagramType: 'BPMN',
+            sortOrder
+          }
+        });
+        sortOrder += 10;
+        for (const [order, step] of draftSteps(draft).slice(0, MAX_ACTIVITIES).entries()) {
+          const role = await resolveRole(step.role);
+          const activity = await tx.processActivity.create({
+            data: { organizationId, processNodeId: node.id, sortOrder: order, title: step.title.slice(0, 300), description: step.description ? step.description.slice(0, 5000) : null }
+          });
+          if (role) await tx.activityResponsibility.create({ data: { organizationId, activityId: activity.id, role: RaciRole.RESPONSIBLE, positionId: role } });
+        }
+        const owner = await resolveRole(item.ownerRole);
+        if (owner) await tx.processPosition.create({ data: { processNodeId: node.id, positionId: owner, role: ResponsibilityRole.OWNER } });
+        await tx.processChangeLog.create({
+          data: {
+            processNodeId: node.id,
+            userId,
+            changedFields: { povod: { from: null, to: item.source ? `${item.source.file} — ${item.source.location}` : 'návrh z textu' } },
+            description: item.source ? 'Návrh z importu dokumentu — skontrolujte pred publikovaním' : 'Návrh z textu — skontrolujte pred publikovaním'
+          }
+        });
+        summary.processes.push({ id: node.id, name: node.name });
+      }
+    }, { timeout: 60_000 });
+    response.status(201).json(summary);
   } catch (error) {
     next(error);
   }

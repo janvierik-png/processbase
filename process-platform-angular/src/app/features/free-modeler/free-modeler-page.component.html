@@ -12,6 +12,7 @@
     <div class="toolbar" role="toolbar" aria-label="Práca s diagramom">
       <button type="button" (click)="newDiagram()" title="Nový prázdny diagram">Nový</button>
       <button type="button" (click)="chooseFile()" title="Otvoriť .bpmn alebo .xml z počítača">Otvoriť…</button>
+      <button type="button" [class.active]="textOpen()" (click)="textOpen.set(!textOpen())" title="Diagram z popisu postupu — spracuje sa v prehliadači, nič sa neposiela na server">Z textu…</button>
       <input #fileInput type="file" accept=".bpmn,.xml,application/xml,text/xml" hidden (change)="onFileSelected($event)">
       <label class="file-name" title="Názov súboru pri stiahnutí">
         <span class="sr-only">Názov súboru</span>
@@ -46,6 +47,30 @@
       Pokračujete v rozpracovanom diagrame z tohto prehliadača.
       <button type="button" class="link" (click)="discardRestored()">Začať nový</button>
     </p>
+  }
+
+  @if (textOpen()) {
+    <!-- #42 — BPMN z textu podľa pravidiel, celé v prehliadači (bez AI a bez servera) -->
+    <form class="import-panel text-panel" (ngSubmit)="diagramFromText()">
+      <div class="import-intro">
+        <strong>Diagram z textu</strong>
+        <span>Opíšte postup vetami alebo očíslovanými krokmi — kto krok robí („Účtovník: …“) a rozhodnutia „Ak …, … inak …“.
+          Každá rola dostane vlastnú dráhu. Text sa spracuje len v tomto prehliadači.</span>
+      </div>
+      <label class="wide">Postup
+        <textarea name="processText" [(ngModel)]="processText" rows="6" maxlength="20000"
+          placeholder="Spracovanie objednávky&#10;1. Obchodník prijme objednávku.&#10;2. Ak je tovar skladom, skladník ho pripraví, inak obchodník ponúkne náhradný termín.&#10;3. Skladník odošle tovar."></textarea>
+      </label>
+      @if (textWarnings().length > 0) {
+        <ul class="wide text-warnings">
+          @for (warning of textWarnings(); track $index) { <li>{{ warning }}</li> }
+        </ul>
+      }
+      <div class="import-actions">
+        <button class="primary" type="submit" [disabled]="processText.trim().length < 10">Vytvoriť diagram</button>
+        <button type="button" (click)="textOpen.set(false)">Zavrieť</button>
+      </div>
+    </form>
   }
 
   @if (importOpen()) {

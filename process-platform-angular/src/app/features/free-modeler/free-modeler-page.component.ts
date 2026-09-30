@@ -10,6 +10,8 @@ import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js
 import camundaModdleDescriptors from 'camunda-bpmn-moddle/resources/camunda.json';
 import { AuthService } from '../../core/services/auth.service';
 import { Orientation, PaperSize, PrintMode, PrintPlan, planPrint, printDocument, printPages, svgBox, svgDataUrl } from '../../core/utils/diagram-print';
+import { parseProcessText } from '../../shared/process-draft/text-parser';
+import { draftToBpmnXml } from '../../shared/process-draft/bpmn-layout';
 
 /** Najväčší súbor, ktorý modeler otvorí — väčšie diagramy prehliadač nezvládne plynulo. */
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -108,6 +110,35 @@ export class FreeModelerPageComponent implements AfterViewInit, OnDestroy {
   @HostListener('window:beforeunload', ['$event'])
   onBeforeUnload(event: BeforeUnloadEvent): void {
     if (this.dirty()) event.preventDefault();
+  }
+
+  // --- #42 diagram z textu (podľa pravidiel, v prehliadači) ---
+
+  readonly textOpen = signal(false);
+  readonly textWarnings = signal<string[]>([]);
+  processText = '';
+
+  async diagramFromText(): Promise<void> {
+    const draft = parseProcessText(this.processText);
+    if (!draft.nodes.some((node) => node.type === 'task')) {
+      this.textWarnings.set(draft.warnings);
+      return;
+    }
+    if (!this.confirmDiscard()) return;
+    const fileName = `${draft.name.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'diagram'}.bpmn`;
+    const warnings = draft.warnings.filter((warning) => !warning.startsWith('Chýba účel'));
+    // panel sa zavrie pred načítaním — plátno má potom konečnú veľkosť a diagram sa zmestí celý
+    this.textOpen.set(warnings.length > 0);
+    this.textWarnings.set(warnings);
+    await new Promise((resolve) => setTimeout(resolve));
+    if (await this.load(draftToBpmnXml(draft), fileName)) {
+      this.originalXml = null;
+      // nový obsah — pri odchode sa treba spýtať, kým sa nestiahne
+      this.dirty.set(true);
+      this.restoredAt.set(null);
+      this.message.set({ kind: 'info', text: 'Diagram je vygenerovaný z textu — skontrolujte ho a upravte. Nič sa neposlalo na server.' });
+      setTimeout(() => this.fitViewport());
+    }
   }
 
   // --- nový, otvoriť ---

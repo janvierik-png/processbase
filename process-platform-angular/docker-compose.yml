@@ -28,6 +28,9 @@ services:
       CAMUNDA7_BASE_URL: http://host.docker.internal:8080/engine-rest
       CAMUNDA7_USERNAME: ""
       CAMUNDA7_PASSWORD: ""
+      # #42 — AI asistent: kľúč prevádzkovateľa z prostredia hostiteľa (prázdne = len vlastné kľúče firiem)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-claude-opus-5-5}
       # bind-mount na Windows neposiela inotify eventy — tsx watch potrebuje polling
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "1000"
